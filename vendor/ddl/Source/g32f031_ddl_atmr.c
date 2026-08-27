@@ -190,6 +190,7 @@ void DDL_ATMR_StructInit(DDL_ATMR_InitTypeDef *TMR_InitStruct)
   TMR_InitStruct->Autoreload        = 0xFFFFFFFFU;
   TMR_InitStruct->ClockDivision     = DDL_ATMR_CLOCKDIVISION_DIV1;
   TMR_InitStruct->RepetitionCounter = 0x00000000U;
+  TMR_InitStruct->Reserved          = (uint16_t)0x0000;
 }
 
 /**
@@ -357,7 +358,7 @@ ErrorStatus DDL_ATMR_BDT_Init(ATMR_TypeDef *TMRx, DDL_ATMR_BDT_InitTypeDef *TMR_
 
   /* Set the BDT bits */
   MODIFY_REG(tmpbdtr, ATMR_BDT_DTS0, TMR_BDTInitStruct->DeadTime0);
-  MODIFY_REG(tmpbdtr, ATMR_BDT_DTS1, TMR_BDTInitStruct->DeadTime1 << 16);
+  MODIFY_REG(tmpbdtr, ATMR_BDT_DTS1, ((uint32_t)TMR_BDTInitStruct->DeadTime1 << 16U));
   MODIFY_REG(tmpbdtr, ATMR_BDT_LOCKCFG, TMR_BDTInitStruct->LockLevel);
   MODIFY_REG(tmpbdtr, ATMR_BDT_IMOS, TMR_BDTInitStruct->OSSIState);
   MODIFY_REG(tmpbdtr, ATMR_BDT_RMOS, TMR_BDTInitStruct->OSSRState);
@@ -701,4 +702,3 @@ static ErrorStatus OC3Config(ATMR_TypeDef *TMRx, DDL_ATMR_OC_InitTypeDef *TMR_OC
   */
 
 #endif /* USE_FULL_DDL_DRIVER */
-

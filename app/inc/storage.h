@@ -41,8 +41,9 @@ typedef struct
 {
     aurora_persistent_settings_t settings;           /* 当前已应用的持久化设置。 */
     uint32_t sequence;                               /* 最近有效页的单调递增序号。 */
-    bool dirty;                                      /* true表示RAM设置尚未写入Flash。 */
     uint32_t dirty_since_ms;                         /* 首次变脏时间，用于合并多次写。 */
+    bool dirty;                                      /* true表示RAM设置尚未写入Flash。 */
+    uint8_t dirty_reserved[3];                       /* 显式补齐脏标志后的字节，避免隐式填充。 */
 } aurora_storage_ctx_t;
 
 void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx);

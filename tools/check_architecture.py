@@ -7,6 +7,13 @@ import sys
 root = Path(__file__).resolve().parents[1]
 errors: list[str] = []
 
+
+def is_project_content(path: Path) -> bool:
+    """排除Git内部元数据和CMake生成目录，不改变生产目录的检查范围。"""
+    return (".git" not in path.parts and
+            not any(part.startswith("build-") for part in path.parts))
+
+
 required_dirs = {
     "app", "service", "driver", "board", "vendor", "project", "docs", "tests", "tools"
 }
@@ -23,7 +30,8 @@ for forbidden in [
     "firmware", "tasks", "legacy_reference", "legacy_parity", "legacy_protocol_import",
     ".bootstrap"
 ]:
-    if any(path.name == forbidden for path in root.rglob("*")):
+    if any(path.name == forbidden and is_project_content(path)
+           for path in root.rglob("*")):
         errors.append(f"禁止目录仍存在: {forbidden}")
 
 # tests/tools/docs只能位于仓库根目录，不能在固件目录中复制第二套。
@@ -31,7 +39,7 @@ for name in ["tests", "tools", "docs"]:
     nested = [
         path for path in root.rglob(name)
         if path.is_dir() and path.parent != root and
-        not any(part.startswith("build-") for part in path.parts)
+        is_project_content(path)
     ]
     if nested:
         errors.append(f"重复的{name}目录: {[str(path.relative_to(root)) for path in nested]}")
@@ -49,7 +57,7 @@ for flat_dir in [root / "service", root / "board"]:
 
 # 生成JSON和构建输出不得提交。
 for path in root.rglob("*.json"):
-    if not any(part.startswith("build-") for part in path.parts):
+    if is_project_content(path):
         errors.append(f"仓库不应提交生成JSON: {path.relative_to(root)}")
 
 app_files = [*(root / "app/inc").glob("*.h"), *(root / "app/src").glob("*.c")]
@@ -173,6 +181,8 @@ if "app/src/app.c" not in cmake or "app/inc" not in cmake:
 keil = (root / "project/keil/AuroraControl.uvprojx").read_text(encoding="utf-8", errors="ignore")
 if "app\\src\\app.c" not in keil or "app\\inc" not in keil:
     errors.append("Keil工程未切换到app/src和app/inc")
+if re.search(r"<FileName>\.\.\\\.\.\\", keil):
+    errors.append("Keil外部源码的FileName不得带父目录，避免中间文件落入源码路径")
 
 if errors:
     print("ARCHITECTURE CHECK: FAIL")

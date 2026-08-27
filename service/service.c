@@ -270,8 +270,8 @@ static void load_storage(aurora_service_t *service)
 {
     uint8_t page_a[AURORA_STORAGE_PAGE_SIZE];
     uint8_t page_b[AURORA_STORAGE_PAGE_SIZE];
-    aurora_persistent_settings_t settings_a;
-    aurora_persistent_settings_t settings_b;
+    aurora_persistent_settings_t settings_a = {0};
+    aurora_persistent_settings_t settings_b = {0};
     uint32_t seq_a = 0U;
     uint32_t seq_b = 0U;
     bool valid_a;

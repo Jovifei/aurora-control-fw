@@ -368,7 +368,6 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         break;
 
     case AURORA_POWER_OFF:
-    default:
         ctx->duty_q15 = 0U;
         ctx->relay_closed = false;
         break;

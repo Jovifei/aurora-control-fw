@@ -202,12 +202,6 @@ static const uint8_t DDL_ATMR_SHIFT_TAB_OISx[] =
   */
 typedef struct
 {
-  uint16_t Prescaler;         /*!< Specifies the prescaler value used to divide the ATMR clock.
-                                   This parameter can be a number between Min_Data=0x0000 and Max_Data=0xFFFF.
-
-                                   This feature can be modified afterwards using unitary function
-                                   @ref DDL_ATMR_SetPrescaler().*/
-
   uint32_t CounterMode;       /*!< Specifies the counter mode.
                                    This parameter can be a value of @ref ATMR_DDL_EC_COUNTERMODE.
 
@@ -240,8 +234,16 @@ typedef struct
                                    Advanced timers: this parameter must be a number between Min_Data = 0x0000 and
                                    Max_Data = 0xFFFF.
 
+                                    This feature can be modified afterwards using unitary function
+                                    @ref DDL_ATMR_SetRepetitionCounter().*/
+
+  uint16_t Prescaler;         /*!< Specifies the prescaler value used to divide the ATMR clock.
+                                   This parameter can be a number between Min_Data=0x0000 and Max_Data=0xFFFF.
+
                                    This feature can be modified afterwards using unitary function
-                                   @ref DDL_ATMR_SetRepetitionCounter().*/
+                                   @ref DDL_ATMR_SetPrescaler().*/
+
+  uint16_t Reserved;          /*!< Explicit alignment storage; ignored by the DDL implementation. */
 } DDL_ATMR_InitTypeDef;
 
 /**

@@ -10,14 +10,15 @@ extern "C" {
 /* 电池充电状态机上下文。 */
 typedef struct
 {
-    aurora_charge_state_t state;                     /* 当前TC/CC/CV/Float阶段。 */
+    int64_t cv_integral_mw;                          /* CV电压环积分项，mW。 */
     aurora_charge_profile_t profile;                 /* 当前化学体系与电压档案。 */
     uint32_t state_since_ms;                         /* 当前阶段进入时间。 */
     uint32_t charge_start_ms;                        /* 本轮充电开始时间。 */
     uint32_t tail_since_ms;                          /* 尾流持续满足条件的起点。 */
     uint32_t float_start_ms;                         /* 铅酸浮充开始时间。 */
-    int64_t cv_integral_mw;                          /* CV电压环积分项，mW。 */
+    aurora_charge_state_t state;                     /* 当前TC/CC/CV/Float阶段。 */
     bool initialized;                                /* 档案有效且状态机已初始化。 */
+    uint16_t state_reserved;                         /* 显式补齐状态字节，避免64位对象尾部隐式填充。 */
 } aurora_charger_ctx_t;
 
 bool aurora_charge_profile_get(aurora_battery_chem_t chemistry,

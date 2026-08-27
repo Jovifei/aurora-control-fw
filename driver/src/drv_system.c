@@ -87,7 +87,7 @@ void drv_irq_configure_priorities(void)
  * Output      : 无
  * Description : 请求Cortex-M系统复位。
  *---------------------------------------------------------------------------*/
-void drv_system_reset(void)
+DRV_SYSTEM_NORETURN void drv_system_reset(void)
 {
     NVIC_SystemReset();
 }

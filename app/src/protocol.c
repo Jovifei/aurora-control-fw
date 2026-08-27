@@ -173,6 +173,13 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
     }
     ctx->last_byte_ms = now_ms;
 
+    /* step存储为字节；异常值仍按原default路径复位，不能进入状态机分支。 */
+    if (ctx->step > (uint8_t)PROTOCOL_STEP_CHECKSUM)
+    {
+        parser_reset(ctx);
+        return;
+    }
+
     switch ((protocol_step_t)ctx->step)
     {
     case PROTOCOL_STEP_SYNC_0:
@@ -308,9 +315,6 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
         parser_reset(ctx);
         break;
 
-    default:
-        parser_reset(ctx);
-        break;
     }
 }
 

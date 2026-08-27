@@ -23,12 +23,12 @@ typedef struct
     uint32_t last_telemetry_ms;                      /* 上次主动遥测时间。 */
     volatile uint32_t adc_overrun_count;             /* ADC半缓冲覆盖计数。 */
     volatile uint32_t uart_rx_overrun_count;         /* RX环形缓冲溢出计数。 */
+    volatile uint16_t uart_head;                     /* RX写索引。 */
+    volatile uint16_t uart_tail;                     /* RX读索引。 */
     volatile uint8_t adc_completed_mask;             /* ISR已发布的DMA半块。 */
     volatile uint8_t adc_processing_mask;            /* 主循环正在读取的DMA半块。 */
     uint8_t pwm_arm_state;                           /* PWM零CCR/放行握手状态。 */
     uint8_t uart_rx[BOARD_UART_RX_BUFFER_SIZE];      /* ISR写、主循环读的RX环形缓冲。 */
-    volatile uint16_t uart_head;                     /* RX写索引。 */
-    volatile uint16_t uart_tail;                     /* RX读索引。 */
     bool initialized;                                /* 全部关键模块初始化完成。 */
 } aurora_service_t;
 

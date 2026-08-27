@@ -32,6 +32,14 @@ extern "C" {
 /* 保存PRIMASK的类型。 */
 typedef uint32_t aurora_irq_state_t;
 
+#if defined(G32F031xx)
+/* 目标复位调用不会返回，供ArmClang进行控制流分析。 */
+#define DRV_SYSTEM_NORETURN __attribute__((noreturn))
+#else
+/* Host mock需要继续执行测试，不能继承目标的noreturn属性。 */
+#define DRV_SYSTEM_NORETURN
+#endif
+
 /* 系统时间、临界区、优先级和复位。 */
 void drv_system_init(void);
 uint32_t drv_time_now_ms(void);
@@ -39,7 +47,7 @@ void drv_time_tick_isr(void);
 aurora_irq_state_t drv_irq_save(void);
 void drv_irq_restore(aurora_irq_state_t state);
 void drv_irq_configure_priorities(void);
-void drv_system_reset(void);
+DRV_SYSTEM_NORETURN void drv_system_reset(void);
 
 /* ADC定时触发、DMA双半缓冲与中断应答。 */
 bool drv_adc_init(void);

@@ -22,6 +22,7 @@ typedef struct
     uint16_t amb_temp_count;                         /* 环境温度异常连续样本计数。 */
     uint32_t startup_ms;                             /* 保护模块初始化时间。 */
     bool measurement_seen;                          /* 至少收到过一个有效测量块。 */
+    uint8_t measurement_seen_reserved[3];            /* 显式补齐有效位后的字节，避免隐式填充。 */
 } aurora_protection_ctx_t;
 
 void aurora_protection_init(aurora_protection_ctx_t *ctx, uint32_t now_ms);

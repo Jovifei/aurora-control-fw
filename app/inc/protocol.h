@@ -48,23 +48,24 @@ extern "C" {
 
 typedef struct
 {
-    uint8_t action;                               /* 动作码。 */
-    uint16_t resource;                            /* 资源号。 */
     uint32_t message_id;                          /* 请求/应答关联ID。 */
+    uint16_t resource;                            /* 资源号。 */
     uint16_t data_length;                         /* data有效字节数。 */
+    uint8_t action;                               /* 动作码。 */
     uint8_t data[AURORA_PROTOCOL_MAX_DATA];       /* 协议载荷。 */
 } aurora_protocol_frame_t;
 
 typedef struct
 {
-    uint8_t step;                                 /* 当前解析状态。 */
-    uint16_t item;                                /* 当前字段内字节索引。 */
-    uint16_t length;                              /* 线格式length字段。 */
-    uint8_t checksum;                             /* 累加校验和。 */
     aurora_protocol_frame_t frame;                /* 正在接收的帧。 */
-    bool frame_ready;                             /* 完整帧等待领取。 */
     uint32_t last_byte_ms;                        /* 上一字节时间戳。 */
     uint32_t error_count;                         /* 超时/长度/校验错误累计。 */
+    uint16_t item;                                /* 当前字段内字节索引。 */
+    uint16_t length;                              /* 线格式length字段。 */
+    uint8_t step;                                 /* 当前解析状态。 */
+    uint8_t checksum;                             /* 累加校验和。 */
+    bool frame_ready;                             /* 完整帧等待领取。 */
+    uint8_t frame_ready_reserved;                 /* 显式补齐解析状态，避免隐式填充。 */
 } aurora_protocol_ctx_t;
 
 void aurora_protocol_init(aurora_protocol_ctx_t *ctx);

@@ -308,7 +308,7 @@ aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
                                       bool external_limited,
                                       uint32_t now_ms)
 {
-    aurora_mppt_output_t output = {0U, 0U, false};
+    aurora_mppt_output_t output = {0};
     const uint32_t required_measurements = AURORA_MEAS_VALID_PV_V |
                                            AURORA_MEAS_VALID_PV_I |
                                            AURORA_MEAS_VALID_PV_POWER;

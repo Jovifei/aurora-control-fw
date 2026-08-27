@@ -128,9 +128,10 @@ typedef struct
     int32_t battery_voltage_mv;                      /* 外部电池端电压，mV。 */
     int32_t bus_voltage_mv;                          /* 继电器前Boost母线电压，mV。 */
     int32_t battery_current_est_ma;                  /* 电池电流估算值，mA。 */
+    aurora_measurement_quality_t battery_current_quality; /* 电池电流来源质量。 */
+    uint8_t battery_current_quality_reserved[3];     /* 显式补齐质量枚举后的字节，避免隐式ABI填充。 */
     int16_t mos_temp_dC;                             /* MOS温度，0.1°C。 */
     int16_t ambient_temp_dC;                         /* 环境温度，0.1°C。 */
-    aurora_measurement_quality_t battery_current_quality; /* 电池电流来源质量。 */
 } aurora_measurement_t;
 
 /* 单个ADC逻辑通道的线性标定参数。 */
@@ -177,8 +178,6 @@ typedef enum
 /* 由化学体系和电压平台选择的完整充电档案。 */
 typedef struct
 {
-    aurora_battery_chem_t chemistry;                 /* 化学体系。 */
-    aurora_battery_pack_t pack;                      /* 标称电压平台。 */
     uint32_t battery_uv_mv;                          /* 电池欠压保护，mV。 */
     uint32_t trickle_exit_mv;                        /* 涓流转恒流阈值，mV。 */
     uint32_t cv_target_mv;                           /* 恒压目标，mV。 */
@@ -189,17 +188,20 @@ typedef struct
     uint32_t cc_current_ma;                          /* 恒流阶段电流上限，mA。 */
     uint32_t tail_current_ma;                        /* CV判满尾流阈值，mA。 */
     uint32_t float_current_ma;                       /* 浮充阶段电流上限，mA。 */
+    aurora_battery_chem_t chemistry;                 /* 化学体系。 */
+    aurora_battery_pack_t pack;                      /* 标称电压平台。 */
+    uint16_t layout_reserved;                        /* 显式补齐枚举字段，保持无隐式填充布局。 */
 } aurora_charge_profile_t;
 
 /* 充电状态机对下游功率链给出的限制。 */
 typedef struct
 {
-    bool allow_charge;                               /* true表示当前阶段允许能量传输。 */
-    bool weak_light;                                 /* true表示PV功率不足，进入弱光策略。 */
-    bool power_limited;                              /* true表示电池/温度限制低于MPPT请求。 */
     uint32_t power_limit_mw;                         /* 允许的最大充电输入功率，mW。 */
     uint32_t voltage_target_mv;                      /* 当前电池电压目标，mV。 */
     aurora_charge_state_t state;                     /* 当前充电阶段。 */
+    bool allow_charge;                               /* true表示当前阶段允许能量传输。 */
+    bool weak_light;                                 /* true表示PV功率不足，进入弱光策略。 */
+    bool power_limited;                              /* true表示电池/温度限制低于MPPT请求。 */
 } aurora_charge_output_t;
 
 /* MPPT外环和PV电压PI输出。 */
@@ -208,15 +210,17 @@ typedef struct
     uint32_t target_voltage_mv;                      /* PV参考电压，mV。 */
     uint32_t theoretical_power_mw;                   /* 未经电池/硬件裁决的功率请求，mW。 */
     bool valid;                                      /* true表示当前样本足以形成控制请求。 */
+    uint8_t valid_reserved[3];                       /* 显式补齐有效位后的字节，避免隐式填充。 */
 } aurora_mppt_output_t;
 
 /* 应用层提交给Service的硬件无关功率命令。 */
 typedef struct
 {
-    bool pwm_enable;                                 /* true表示请求发波。 */
-    bool relay_enable;                               /* true表示请求闭合继电器。 */
     uint16_t duty_q15;                               /* Q6物理占空比，Q15。 */
     aurora_power_state_t state;                      /* 命令对应的功率级状态。 */
+    bool pwm_enable;                                 /* true表示请求发波。 */
+    bool relay_enable;                               /* true表示请求闭合继电器。 */
+    uint8_t state_reserved[3];                       /* 显式补齐功率状态枚举后的字节，避免隐式填充。 */
 } aurora_power_command_t;
 
 /* LED逻辑输出。 */
@@ -229,11 +233,12 @@ typedef struct
 /* 需要持久化的用户设置和累计数据。 */
 typedef struct
 {
-    aurora_battery_chem_t chemistry;                 /* 用户选择的电池化学体系。 */
-    aurora_battery_pack_t pack;                      /* 用户选择的电压平台。 */
     uint32_t lifetime_energy_wh;                     /* 生命周期累计充电能量，Wh。 */
     uint32_t daily_energy_wh;                        /* 本统计日累计充电能量，Wh。 */
     uint32_t settings_revision;                      /* 每次有效设置变更递增。 */
+    aurora_battery_chem_t chemistry;                 /* 用户选择的电池化学体系。 */
+    aurora_battery_pack_t pack;                      /* 用户选择的电压平台。 */
+    uint16_t layout_reserved;                        /* 显式补齐枚举字段，保持存储对象无隐式填充。 */
 } aurora_persistent_settings_t;
 
 #ifdef __cplusplus

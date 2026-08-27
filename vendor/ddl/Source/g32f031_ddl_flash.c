@@ -109,6 +109,7 @@ ErrorStatus DDL_FLASH_DeInit(void)
 ErrorStatus DDL_FLASH_Write(uint32_t addr, uint32_t size, uint8_t *buf)
 {
   ErrorStatus status = SUCCESS;
+  uint32_t word;
 
   while(DDL_FLASH_IsActiveFlag_BUSY()){}
 
@@ -117,11 +118,15 @@ ErrorStatus DDL_FLASH_Write(uint32_t addr, uint32_t size, uint8_t *buf)
   DDL_FLASH_SetOperationMode(DDL_FLASH_OPERATE_WRITE);
 
   /* word alignment */
-  size &= ~3;
+  size &= ~3U;
 
   while (size)
   {
-    (*(uint32_t*)(addr)) = *(uint32_t*)buf;
+    word = ((uint32_t)buf[0]) |
+           ((uint32_t)buf[1] << 8U) |
+           ((uint32_t)buf[2] << 16U) |
+           ((uint32_t)buf[3] << 24U);
+    *((volatile uint32_t *)(uintptr_t)addr) = word;
 
     while (DDL_FLASH_IsActiveFlag_BUSY()){}
 
@@ -136,9 +141,9 @@ ErrorStatus DDL_FLASH_Write(uint32_t addr, uint32_t size, uint8_t *buf)
 
     DDL_FLASH_ClearFlag_OPEND();
 
-    addr += 4;
-    buf += 4;
-    size -= 4;
+    addr += 4U;
+    buf += 4U;
+    size -= 4U;
   }
 
   return (status);
@@ -161,7 +166,7 @@ ErrorStatus DDL_FLASH_EraseChip(void)
 
   DDL_FLASH_SetOperationMode(DDL_FLASH_OPERATE_CHIPERASE);
 
-  *(uint32_t *)(0x00000000) = 0xA5A5;
+  *((volatile uint32_t *)(uintptr_t)0x00000000UL) = 0x0000A5A5UL;
 
   while (DDL_FLASH_IsActiveFlag_BUSY()) {}
   while (!DDL_FLASH_IsActiveFlag_OPEND()) {}

@@ -13,7 +13,7 @@ void COMP0_IRQHandler(void);
 void COMP1_2_3_IRQHandler(void);
 void ATMR_BRK_UP_TRG_COM_IRQHandler(void);
 void USART_IRQHandler(void);
-void HardFault_Handler(void);
+__attribute__((noreturn)) void HardFault_Handler(void);
 
 /*---------------------------------------------------------------------------*
  * Name        : static void handle_fast_comparator_fault(void)
@@ -151,13 +151,10 @@ void USART_IRQHandler(void)
  * Output      : 无
  * Description : HardFault安全收尾：立即关PWM、屏蔽Break风暴、断开继电器并请求系统复位。
  *---------------------------------------------------------------------------*/
-void HardFault_Handler(void)
+__attribute__((noreturn)) void HardFault_Handler(void)
 {
     drv_pwm_force_off_isr();
     drv_pwm_quiesce_break_irq_isr();
     drv_io_set_relay(false);
     drv_system_reset();
-    for (;;)
-    {
-    }
 }

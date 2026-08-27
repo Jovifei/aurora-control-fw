@@ -19,15 +19,16 @@ typedef enum
 /* 参考电压型MPPT上下文。 */
 typedef struct
 {
-    aurora_mppt_state_t state;                       /* 当前搜索状态。 */
+    int64_t integral_mw;                             /* PV电压PI积分项，mW。 */
     uint32_t target_voltage_mv;                      /* 当前PV参考电压，mV。 */
     uint32_t open_circuit_voltage_mv;                /* 最近一次运行时Voc估计，mV。 */
     int32_t previous_voltage_mv;                     /* 上次P-V搜索使用的平均电压。 */
     int32_t previous_power_mw;                       /* 上次P-V搜索使用的平均功率。 */
-    int64_t integral_mw;                             /* PV电压PI积分项，mW。 */
     uint32_t last_search_ms;                         /* 上次外层P-V搜索时间。 */
     uint32_t last_pi_ms;                             /* 上次参考电压PI时间。 */
+    aurora_mppt_state_t state;                       /* 当前搜索状态。 */
     bool previous_valid;                             /* 是否已有可比较的上一窗口。 */
+    uint8_t state_reserved[6];                       /* 显式补齐状态字节，避免64位对象尾部隐式填充。 */
 } aurora_mppt_ctx_t;
 
 void aurora_mppt_init(aurora_mppt_ctx_t *ctx);

@@ -466,7 +466,6 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         break;
 
     case AURORA_CHARGE_FAULT:
-    default:
         /* FAULT不在本模块内自动恢复，由保护清除和上层重新初始化决定。 */
         break;
     }
@@ -506,7 +505,9 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
                                    ctx->profile.float_current_ma);
         break;
 
-    default:
+    case AURORA_CHARGE_OFF:
+    case AURORA_CHARGE_COMPLETE:
+    case AURORA_CHARGE_FAULT:
         output.allow_charge = false;
         output.power_limit_mw = 0U;
         break;
