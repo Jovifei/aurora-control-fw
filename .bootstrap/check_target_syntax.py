@@ -45,7 +45,12 @@ common = [
 
 for source in sources:
     rel = source.relative_to(root)
+    flags = list(common)
+    # Cortex-M 向量函数由启动汇编按固定符号名引用，不属于普通跨模块C接口。
+    # 只对该向量入口文件关闭 missing-prototypes，其余严格告警保持不变。
+    if rel.as_posix() == "project/keil/interrupts.c":
+        flags.append("-Wno-missing-prototypes")
     print(f"+ target syntax {rel}")
-    subprocess.run(common + [str(rel)], cwd=root, check=True)
+    subprocess.run(flags + [str(rel)], cwd=root, check=True)
 
 print(f"TARGET SYNTAX CHECK: PASS ({len(sources)} files)")
