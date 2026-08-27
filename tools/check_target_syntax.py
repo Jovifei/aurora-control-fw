@@ -11,7 +11,7 @@ if clang is None:
     print("TARGET SYNTAX CHECK: SKIP (clang not found)")
     sys.exit(0)
 
-sources = sorted((root / "driver").glob("*.c")) + [
+sources = sorted((root / "driver/src").glob("*.c")) + [
     root / "project/keil/main.c",
     root / "project/keil/interrupts.c",
 ]
@@ -25,9 +25,9 @@ common = [
     "-fsyntax-only",
     "-DUSE_FULL_DDL_DRIVER",
     "-DG32F031xx",
-    "-Iapp",
+    "-Iapp/inc",
     "-Iservice",
-    "-Idriver",
+    "-Idriver/inc",
     "-Iboard",
     "-Ivendor/cmsis/Include",
     "-Ivendor/device/Include",

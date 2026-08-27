@@ -6,6 +6,13 @@ extern aurora_service_t g_aurora_service;
 
 aurora_service_t g_aurora_service;
 
+/*---------------------------------------------------------------------------*
+ * Name        : int main(void)
+ * Input       : 无
+ * Output      : 无（正常不返回）
+ * Description : 系统入口：由Service依次建立时钟、GPIO安全态、IWDT、PWM关断、COMP/ADC/UART、应用和Flash；
+ *               初始化失败时保持安全等待，成功后循环领取事件并用WFI等待下一次中断。
+ *---------------------------------------------------------------------------*/
 int main(void)
 {
     if (!aurora_service_init(&g_aurora_service))

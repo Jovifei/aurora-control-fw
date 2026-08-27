@@ -1,52 +1,77 @@
 # Aurora Control Firmware
 
-单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前代码基线采用清理后的量产工程布局：默认高功率 BOM，可编译切换低功率 BOM，支持 48/60/72 V 与四类电池档案。
+> 工程整理发布：**v0.7.1**。本版本用于替换远端仍残留的旧 `app/*.c/.h` 扁平目录。
+
+单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
 
 ## 目录
 
 ```text
-app/       纯业务模块，按功能合并为 9 组 .c/.h
-service/   中断邮箱、主循环服务和 APP↔Driver 唯一桥接
-board/     引脚、极性、ADC比例、Flash地址和硬件门禁
-driver/    目标芯片驱动，全部扁平放置
-vendor/    仅实际构建所需的 CMSIS / Device / DDL
-project/   Keil ARM Compiler 6 工程、入口和中断文件
-docs/      00～16 编号文档与最终原理图
-tests/     Host 回归与故障注入，不进入目标镜像
-tools/     架构、GCC/Clang、目标端语法门禁，不进入目标镜像
+app/
+├─ inc/      应用层公共.h、类型和集中参数
+└─ src/      9个纯业务.c实现
+service/     ISR事件邮箱、主循环调度和APP↔Driver唯一桥接
+board/       PinMap、ADC标定、Flash地址和人工功率门禁
+driver/      G32F031目标外设驱动，保持扁平
+vendor/      目标构建实际需要的CMSIS / Device / DDL
+project/     Keil ARM Compiler 6工程、入口、中断和scatter
+docs/        文档入口、00～19编号文档和最终原理图
+tests/       Host回归与故障注入，不进入目标镜像
+tools/       架构、代码规范、GCC/Clang、Sanitizer和目标语法门禁
 ```
 
-`app/` 只有以下功能模块：
+`app/src/`中的9个业务模块：
 
 ```text
-app          应用编排与协议命令落地
+app          应用编排、参数切换和协议命令落地
 measurement  ADC完整块滤波、标定、物理量快照和电池电流估算
-mppt         自研P-V斜率搜索、PV参考电压与PI功率请求
-charger      电池档案及TC/CC/CV/Float状态机
+mppt         P-V斜率搜索、PV参考电压和PI功率请求
+charger      电池档案与TC/CC/CV/Float状态机
 protection   软件保护、去抖、锁存与恢复许可
 power_stage  预充、继电器、功率命令和物理Duty执行器
 ui           RUN/FAULT指示逻辑
 protocol     旧产品UART帧兼容层
-storage      片内Flash双页记录格式、CRC和提交标记
+storage      片内Flash双页Journal、CRC和Commit Marker
 ```
 
-仓库不包含旧 MCU 工程、旧闭源 MPPT 库、`legacy_*`、`tasks/`、应用目录内厂商例程、重复的 `firmware/tests/tools` 或生成 JSON。
+仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。
+
+## 阅读入口
+
+- [文档入口](docs/README.md)
+- [工程接手指南](docs/GUIDE.md)
+- [参数标定与Codex交接清单](docs/17-参数标定与Codex交接清单.md)
+- [v0.6.0遗留问题复核](docs/18-v0.6.0遗留问题在v0.7.0中的复核.md)
+- [v0.7.0整改与验证报告](docs/19-v0.7.0代码规范整改与验证报告.md)
 
 ## 本地验证
 
 ```bash
-python tools/check_architecture.py
 python tools/run_checks.py
 ```
 
-`tests/` 和 `tools/` 是必要的开发质量门禁，但 Keil 工程不会编译它们。它们用于阻止 APP 越层访问寄存器、PWM 被多处控制、ADC 缓冲覆盖、看门狗盲喂、旧源码回流等问题。
+该命令依次执行：
+
+```text
+Architecture gate
+Code style/comment/layout gate
+GCC strict build + CTest
+Clang strict build + CTest
+Clang AddressSanitizer + UBSan
+Cortex-M0+ target syntax check
+```
+
+当前Host回归为74个断言，GCC/Clang/CTest/Sanitizer和10个目标端首方文件语法检查均通过。Host通过不等于Keil AC6链接或功率板验收通过。
 
 ## 当前安全状态
 
-所有功率放行门默认关闭：
+所有功率放行门保持关闭：
 
 ```c
 BOARD_POWER_OUTPUT_ALLOWED == 0
 ```
 
-Host 测试和目标端语法检查通过，不等于已经完成 Keil AC6 链接和功率板验收。真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 中的检查。
+真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流和低压到额定功率验收。
+
+
+- [v0.7.1替换发布说明](docs/20-v0.7.1替换发布说明.md)

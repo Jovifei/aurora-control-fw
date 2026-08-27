@@ -337,7 +337,7 @@
               <MiscControls>-std=c11 -Wall -Wextra -Werror</MiscControls>
               <Define>USE_FULL_DDL_DRIVER,G32F031xx</Define>
               <Undefine />
-              <IncludePath>..\..\app;..\..\service;..\..\driver;..\..\board;..\..\vendor\cmsis\Include;..\..\vendor\device\Include;..\..\vendor\ddl\Include</IncludePath>
+              <IncludePath>..\..\app\inc;..\..\service;..\..\driver\inc;..\..\board;..\..\vendor\cmsis\Include;..\..\vendor\device\Include;..\..\vendor\ddl\Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -383,49 +383,49 @@
           <GroupOption />
           <Files>
             <File>
-              <FileName>..\..\app\app.c</FileName>
+              <FileName>..\..\app\src\app.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\app.c</FilePath>
+              <FilePath>..\..\app\src\app.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\charger.c</FileName>
+              <FileName>..\..\app\src\charger.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\charger.c</FilePath>
+              <FilePath>..\..\app\src\charger.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\measurement.c</FileName>
+              <FileName>..\..\app\src\measurement.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\measurement.c</FilePath>
+              <FilePath>..\..\app\src\measurement.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\mppt.c</FileName>
+              <FileName>..\..\app\src\mppt.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\mppt.c</FilePath>
+              <FilePath>..\..\app\src\mppt.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\power_stage.c</FileName>
+              <FileName>..\..\app\src\power_stage.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\power_stage.c</FilePath>
+              <FilePath>..\..\app\src\power_stage.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\protection.c</FileName>
+              <FileName>..\..\app\src\protection.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\protection.c</FilePath>
+              <FilePath>..\..\app\src\protection.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\protocol.c</FileName>
+              <FileName>..\..\app\src\protocol.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\protocol.c</FilePath>
+              <FilePath>..\..\app\src\protocol.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\storage.c</FileName>
+              <FileName>..\..\app\src\storage.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\storage.c</FilePath>
+              <FilePath>..\..\app\src\storage.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\app\ui.c</FileName>
+              <FileName>..\..\app\src\ui.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\ui.c</FilePath>
+              <FilePath>..\..\app\src\ui.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -445,44 +445,44 @@
           <GroupOption />
           <Files>
             <File>
-              <FileName>..\..\driver\drv_adc.c</FileName>
+              <FileName>..\..\driver\src\drv_adc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_adc.c</FilePath>
+              <FilePath>..\..\driver\src\drv_adc.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_comp.c</FileName>
+              <FileName>..\..\driver\src\drv_comp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_comp.c</FilePath>
+              <FilePath>..\..\driver\src\drv_comp.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_flash.c</FileName>
+              <FileName>..\..\driver\src\drv_flash.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_flash.c</FilePath>
+              <FilePath>..\..\driver\src\drv_flash.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_io.c</FileName>
+              <FileName>..\..\driver\src\drv_io.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_io.c</FilePath>
+              <FilePath>..\..\driver\src\drv_io.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_pwm.c</FileName>
+              <FileName>..\..\driver\src\drv_pwm.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_pwm.c</FilePath>
+              <FilePath>..\..\driver\src\drv_pwm.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_system.c</FileName>
+              <FileName>..\..\driver\src\drv_system.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_system.c</FilePath>
+              <FilePath>..\..\driver\src\drv_system.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_uart.c</FileName>
+              <FileName>..\..\driver\src\drv_uart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_uart.c</FilePath>
+              <FilePath>..\..\driver\src\drv_uart.c</FilePath>
             </File>
             <File>
-              <FileName>..\..\driver\drv_watchdog.c</FileName>
+              <FileName>..\..\driver\src\drv_watchdog.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\drv_watchdog.c</FilePath>
+              <FilePath>..\..\driver\src\drv_watchdog.c</FilePath>
             </File>
           </Files>
         </Group>

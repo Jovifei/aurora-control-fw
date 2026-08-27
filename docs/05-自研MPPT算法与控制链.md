@@ -1,6 +1,6 @@
 # 05 · 自研MPPT算法与控制链
 
-工程不包含旧MCU闭源MPPT库。算法源码位于 `app/mppt.c`，采用“PV参考电压型”多时间尺度架构：
+工程不包含旧MCU闭源MPPT库。算法源码位于 `app/src/mppt.c`，采用“PV参考电压型”多时间尺度架构：
 
 ```text
 定时器触发ADC / DMA完整块

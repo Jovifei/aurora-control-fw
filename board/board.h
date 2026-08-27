@@ -9,14 +9,15 @@
 extern "C" {
 #endif
 
+/* board层向Service提供的硬件无关ADC标定描述。 */
 typedef struct
 {
-    int32_t gain_num;
-    int32_t gain_den;
-    int32_t offset;
-    int16_t zero_code;
-    int8_t polarity;
-    bool valid;
+    int32_t gain_num;                                /* 物理量/码的比例分子。 */
+    int32_t gain_den;                                /* 比例分母，不得为0。 */
+    int32_t offset;                                  /* 换算后固定偏移。 */
+    int16_t zero_code;                               /* 双向电流通道零点码。 */
+    int8_t polarity;                                 /* +1同向，-1反向。 */
+    bool valid;                                      /* true表示已完成标定。 */
 } aurora_board_adc_calibration_t;
 
 bool aurora_board_get_adc_calibration(size_t channel,

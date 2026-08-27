@@ -8,15 +8,15 @@ set(CMAKE_C_EXTENSIONS OFF)
 enable_testing()
 
 set(APP_SOURCES
-    app/app.c
-    app/measurement.c
-    app/mppt.c
-    app/charger.c
-    app/protection.c
-    app/power_stage.c
-    app/ui.c
-    app/protocol.c
-    app/storage.c
+    app/src/app.c
+    app/src/measurement.c
+    app/src/mppt.c
+    app/src/charger.c
+    app/src/protection.c
+    app/src/power_stage.c
+    app/src/ui.c
+    app/src/protocol.c
+    app/src/storage.c
 )
 
 add_executable(aurora_host_tests
@@ -28,7 +28,7 @@ add_executable(aurora_host_tests
 )
 
 target_include_directories(aurora_host_tests PRIVATE
-    app service driver board tests
+    app/inc service driver/inc board tests
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

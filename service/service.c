@@ -6,19 +6,35 @@
 
 #include <string.h>
 
-#define EVENT_TICK        (1UL << 0)
-#define EVENT_ADC         (1UL << 1)
-#define EVENT_FAST_FAULT  (1UL << 2)
-#define EVENT_UART_RX     (1UL << 3)
+/* ISR事件位：1ms节拍。 */
+#define SERVICE_EVENT_TICK                          (1UL << 0)
+/* ISR事件位：至少一个ADC DMA半块完成。 */
+#define SERVICE_EVENT_ADC                           (1UL << 1)
+/* ISR事件位：快速故障等待主循环锁存。 */
+#define SERVICE_EVENT_FAST_FAULT                    (1UL << 2)
+/* ISR事件位：UART RX环形缓冲中有待处理数据。 */
+#define SERVICE_EVENT_UART_RX                       (1UL << 3)
 
-#define WDG_TICKET_MAIN        (1UL << 0)
-#define WDG_TICKET_ADC         (1UL << 1)
-#define WDG_TICKET_CONTROL     (1UL << 2)
+/* 看门狗健康票据：主循环正常推进。 */
+#define SERVICE_WDG_TICKET_MAIN                     (1UL << 0)
+/* 看门狗健康票据：功率运行状态下ADC仍持续发布。 */
+#define SERVICE_WDG_TICKET_ADC                      (1UL << 1)
+/* 看门狗健康票据：1ms应用控制链正常执行。 */
+#define SERVICE_WDG_TICKET_CONTROL                  (1UL << 2)
 
-#define PWM_ARM_OFF          (0U)
-#define PWM_ARM_WAIT_ZERO    (1U)
-#define PWM_ARM_ACTIVE       (2U)
+/* PWM授权状态：完全关闭。 */
+#define SERVICE_PWM_ARM_OFF                         (0U)
+/* PWM授权状态：等待零CCR在自然UPDATE边界装载。 */
+#define SERVICE_PWM_ARM_WAIT_ZERO                   (1U)
+/* PWM授权状态：硬件已通过复核并放行。 */
+#define SERVICE_PWM_ARM_ACTIVE                      (2U)
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void atomic_or_u32(volatile uint32_t *target, uint32_t value)
+ * Input       : target - 目标值；value - 输入数值
+ * Output      : 无
+ * Description : 在短临界区内原子地把事件位合并到共享位图。
+ *---------------------------------------------------------------------------*/
 static void atomic_or_u32(volatile uint32_t *target, uint32_t value)
 {
     aurora_irq_state_t irq = drv_irq_save();
@@ -26,6 +42,12 @@ static void atomic_or_u32(volatile uint32_t *target, uint32_t value)
     drv_irq_restore(irq);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static uint32_t atomic_exchange_u32(volatile uint32_t *target, uint32_t value)
+ * Input       : target - 目标值；value - 输入数值
+ * Output      : 被替换前的原始32位值
+ * Description : 在短临界区内原子读取并替换共享32位值。
+ *---------------------------------------------------------------------------*/
 static uint32_t atomic_exchange_u32(volatile uint32_t *target, uint32_t value)
 {
     uint32_t previous;
@@ -36,13 +58,25 @@ static uint32_t atomic_exchange_u32(volatile uint32_t *target, uint32_t value)
     return previous;
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void force_safe_off(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : 统一关闭PWM、暂存零占空比并复位Service发波授权状态。
+ *---------------------------------------------------------------------------*/
 static void force_safe_off(aurora_service_t *service)
 {
     drv_pwm_disarm();
     (void)drv_pwm_stage_duty(0U, NULL);
-    service->pwm_arm_state = PWM_ARM_OFF;
+    service->pwm_arm_state = SERVICE_PWM_ARM_OFF;
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static bool safety_still_clear(const aurora_service_t *service, uint32_t token)
+ * Input       : service - Service上下文；token - 安全epoch快照
+ * Output      : true表示epoch、软件保护、Break源/锁存和人工总门均保持安全
+ * Description : 复核安全epoch、待处理故障、软件保护、硬件Break和人工功率门禁，防止旧授权跨故障继续使用。
+ *---------------------------------------------------------------------------*/
 static bool safety_still_clear(const aurora_service_t *service, uint32_t token)
 {
     return (service->safety_epoch == token) &&
@@ -53,6 +87,12 @@ static bool safety_still_clear(const aurora_service_t *service, uint32_t token)
            aurora_board_power_gate_open();
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void apply_power_command(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : 把应用层功率命令落实到继电器和PWM；首次发波先等待零CCR自然UEV，运行中只写shadow，任一复核失败立即关波。
+ *---------------------------------------------------------------------------*/
 static void apply_power_command(aurora_service_t *service)
 {
     const aurora_power_command_t *command = &service->app.power_command;
@@ -67,18 +107,18 @@ static void apply_power_command(aurora_service_t *service)
         return;
     }
 
-    if (service->pwm_arm_state == PWM_ARM_OFF)
+    if (service->pwm_arm_state == SERVICE_PWM_ARM_OFF)
     {
         /* 首次放行前先写0到CCR预装载，并等待至少一个自然UEV。 */
         drv_pwm_disarm();
         if (drv_pwm_prepare_arm_zero(&service->pwm_zero_sequence))
         {
-            service->pwm_arm_state = PWM_ARM_WAIT_ZERO;
+            service->pwm_arm_state = SERVICE_PWM_ARM_WAIT_ZERO;
         }
         return;
     }
 
-    if (service->pwm_arm_state == PWM_ARM_WAIT_ZERO)
+    if (service->pwm_arm_state == SERVICE_PWM_ARM_WAIT_ZERO)
     {
         if (drv_pwm_applied_sequence() < service->pwm_zero_sequence)
         {
@@ -101,7 +141,7 @@ static void apply_power_command(aurora_service_t *service)
             force_safe_off(service);
             return;
         }
-        service->pwm_arm_state = PWM_ARM_ACTIVE;
+        service->pwm_arm_state = SERVICE_PWM_ARM_ACTIVE;
         return;
     }
 
@@ -119,6 +159,12 @@ static void apply_power_command(aurora_service_t *service)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void process_adc(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : 原子领取DMA完成块并标记处理中，逐块完成物理量处理；同半块被DMA追上时由ISR锁存overrun。
+ *---------------------------------------------------------------------------*/
 static void process_adc(aurora_service_t *service)
 {
     uint8_t mask;
@@ -147,7 +193,7 @@ static void process_adc(aurora_service_t *service)
                                         block,
                                         drv_adc_block_words(),
                                         service->adc_timestamp_ms[index]);
-                service->watchdog_seen |= WDG_TICKET_ADC;
+                service->watchdog_seen |= SERVICE_WDG_TICKET_ADC;
             }
 
             irq = drv_irq_save();
@@ -157,14 +203,20 @@ static void process_adc(aurora_service_t *service)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void process_uart(aurora_service_t *service, uint32_t now_ms)
+ * Input       : service - Service上下文；now_ms - 当前毫秒时间戳
+ * Output      : 无
+ * Description : 按主循环预算消费RX环形缓冲、推进协议解析并发送应答；余量未处理完时重新投递事件。
+ *---------------------------------------------------------------------------*/
 static void process_uart(aurora_service_t *service, uint32_t now_ms)
 {
     aurora_protocol_frame_t request;
     aurora_protocol_frame_t response;
     bool has_response;
-    uint8_t wire[160];
+    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
     size_t wire_length;
-    uint32_t budget = AURORA_UART_SERVICE_RX_BUDGET;
+    uint32_t budget = BOARD_UART_SERVICE_RX_BUDGET;
 
     while (budget > 0U)
     {
@@ -204,10 +256,16 @@ static void process_uart(aurora_service_t *service, uint32_t now_ms)
     /* 尚有字节时重新投递事件，避免一次主循环被通信长帧长期占用。 */
     if (service->uart_tail != service->uart_head)
     {
-        atomic_or_u32(&service->event_flags, EVENT_UART_RX);
+        atomic_or_u32(&service->event_flags, SERVICE_EVENT_UART_RX);
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void load_storage(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : 读取并校验Flash A/B页，按回绕安全序号选择较新记录并应用到应用层。
+ *---------------------------------------------------------------------------*/
 static void load_storage(aurora_service_t *service)
 {
     uint8_t page_a[AURORA_STORAGE_PAGE_SIZE];
@@ -240,6 +298,12 @@ static void load_storage(aurora_service_t *service)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void service_storage(aurora_service_t *service, uint32_t now_ms)
+ * Input       : service - Service上下文；now_ms - 当前毫秒时间戳
+ * Output      : 无
+ * Description : 在脏数据稳定、PWM关闭且继电器断开时执行双页Journal保存，并把Commit Marker作为最后一步写入。
+ *---------------------------------------------------------------------------*/
 static void service_storage(aurora_service_t *service, uint32_t now_ms)
 {
     uint8_t page[AURORA_STORAGE_PAGE_SIZE];
@@ -247,7 +311,7 @@ static void service_storage(aurora_service_t *service, uint32_t now_ms)
     size_t used;
 
     if (!service->app.storage.dirty ||
-        ((now_ms - service->app.storage.dirty_since_ms) < 1000U) ||
+        ((now_ms - service->app.storage.dirty_since_ms) < AURORA_STORAGE_DIRTY_HOLD_MS) ||
         drv_pwm_output_active() || service->app.power_stage.relay_closed)
     {
         return;
@@ -282,15 +346,21 @@ static void service_storage(aurora_service_t *service, uint32_t now_ms)
     service->app.storage.dirty = false;
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void service_watchdog(aurora_service_t *service, uint32_t now_ms)
+ * Input       : service - Service上下文；now_ms - 当前毫秒时间戳
+ * Output      : 无
+ * Description : 按时间窗核对主循环、控制和功率状态下的ADC心跳；只有全部票据齐全时才喂IWDT。
+ *---------------------------------------------------------------------------*/
 static void service_watchdog(aurora_service_t *service, uint32_t now_ms)
 {
-    uint32_t required = WDG_TICKET_MAIN | WDG_TICKET_CONTROL;
+    uint32_t required = SERVICE_WDG_TICKET_MAIN | SERVICE_WDG_TICKET_CONTROL;
 
     if ((service->app.power_stage.state == AURORA_POWER_PRECHARGE) ||
         (service->app.power_stage.state == AURORA_POWER_RELAY_SETTLE) ||
         (service->app.power_stage.state == AURORA_POWER_RUN))
     {
-        required |= WDG_TICKET_ADC | WDG_TICKET_CONTROL;
+        required |= SERVICE_WDG_TICKET_ADC | SERVICE_WDG_TICKET_CONTROL;
     }
 
     if ((now_ms - service->watchdog_started_ms) < AURORA_WATCHDOG_STARTUP_GRACE_MS)
@@ -312,6 +382,12 @@ static void service_watchdog(aurora_service_t *service, uint32_t now_ms)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : bool aurora_service_init(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : true表示全部关键模块初始化并启动成功，false表示保持安全失败态
+ * Description : 按安全顺序初始化系统、GPIO、IWDT、PWM、比较器、ADC、UART、标定、应用和存储，最后启动ADC并发布Service就绪。
+ *---------------------------------------------------------------------------*/
 bool aurora_service_init(aurora_service_t *service)
 {
     aurora_measurement_calibration_t calibration;
@@ -371,7 +447,6 @@ bool aurora_service_init(aurora_service_t *service)
     load_storage(service);
     service->safety_epoch = 1U;
     service->last_telemetry_ms = now_ms;
-    service->last_tick_poll_ms = now_ms;
 
     if (!drv_adc_start())
     {
@@ -381,6 +456,12 @@ bool aurora_service_init(aurora_service_t *service)
     return true;
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_poll(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : 主循环调度入口：原子领取事件，优先处理快速故障，再处理ADC/通信/1 ms控制，随后落实功率命令、遥测、存储和看门狗。
+ *---------------------------------------------------------------------------*/
 void aurora_service_poll(aurora_service_t *service)
 {
     uint32_t events;
@@ -393,46 +474,37 @@ void aurora_service_poll(aurora_service_t *service)
 
     now_ms = drv_time_now_ms();
     events = atomic_exchange_u32(&service->event_flags, 0U);
-    service->watchdog_seen |= WDG_TICKET_MAIN;
+    service->watchdog_seen |= SERVICE_WDG_TICKET_MAIN;
 
-    if ((events & EVENT_FAST_FAULT) != 0U)
+    if ((events & SERVICE_EVENT_FAST_FAULT) != 0U)
     {
         const uint32_t faults = atomic_exchange_u32(&service->pending_fault_mask, 0U);
         aurora_app_on_fast_fault(&service->app, faults, now_ms);
         force_safe_off(service);
     }
-    if ((events & EVENT_ADC) != 0U)
+    if ((events & SERVICE_EVENT_ADC) != 0U)
     {
         process_adc(service);
     }
-    if ((events & EVENT_UART_RX) != 0U)
+    if ((events & SERVICE_EVENT_UART_RX) != 0U)
     {
         process_uart(service, now_ms);
     }
-    if ((events & EVENT_TICK) != 0U)
+    if ((events & SERVICE_EVENT_TICK) != 0U)
     {
-        uint32_t elapsed_tick_ms = now_ms - service->last_tick_poll_ms;
-        if (elapsed_tick_ms == 0U)
-        {
-            elapsed_tick_ms = 1U;
-        }
-        if (elapsed_tick_ms > 1000U)
-        {
-            elapsed_tick_ms = 1000U;
-        }
-        service->last_tick_poll_ms = now_ms;
+        /* 应用层依据now_ms自行合并迟到的节拍并限制能量补计。 */
         aurora_app_step_1ms(&service->app, now_ms);
         drv_io_set_leds(service->app.ui_output.led_run_on,
                         service->app.ui_output.led_fault_on);
-        service->watchdog_seen |= WDG_TICKET_CONTROL;
+        service->watchdog_seen |= SERVICE_WDG_TICKET_CONTROL;
     }
 
     apply_power_command(service);
 
-    if ((now_ms - service->last_telemetry_ms) >= 1000U)
+    if ((now_ms - service->last_telemetry_ms) >= AURORA_TELEMETRY_PERIOD_MS)
     {
         aurora_protocol_frame_t telemetry;
-        uint8_t wire[160];
+        uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
         size_t wire_length;
         aurora_protocol_fill_telemetry(&telemetry,
                                        service->app.telemetry_message_id++,
@@ -452,15 +524,27 @@ void aurora_service_poll(aurora_service_t *service)
     service_watchdog(service, now_ms);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_isr_tick(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : SysTick桥接：递增系统时间并投递1 ms事件，不在ISR内运行控制算法。
+ *---------------------------------------------------------------------------*/
 void aurora_service_isr_tick(aurora_service_t *service)
 {
     if (service != NULL)
     {
         drv_time_tick_isr();
-        atomic_or_u32(&service->event_flags, EVENT_TICK);
+        atomic_or_u32(&service->event_flags, SERVICE_EVENT_TICK);
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_isr_adc_block(aurora_service_t *service, uint8_t block_index)
+ * Input       : service - Service上下文；block_index - DMA半缓冲索引
+ * Output      : 无
+ * Description : DMA桥接：发布完成半块和时间戳；检测同半块覆盖时锁存ADC overrun快速故障。
+ *---------------------------------------------------------------------------*/
 void aurora_service_isr_adc_block(aurora_service_t *service, uint8_t block_index)
 {
     if ((service != NULL) && (block_index < 2U))
@@ -485,11 +569,17 @@ void aurora_service_isr_adc_block(aurora_service_t *service, uint8_t block_index
         }
         else
         {
-            atomic_or_u32(&service->event_flags, EVENT_ADC);
+            atomic_or_u32(&service->event_flags, SERVICE_EVENT_ADC);
         }
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_isr_fast_fault(aurora_service_t *service, uint32_t fault_mask)
+ * Input       : service - Service上下文；fault_mask - 故障位图
+ * Output      : 无
+ * Description : 快速故障统一入口：第一动作强制关PWM，随后递增安全epoch并投递故障位图。
+ *---------------------------------------------------------------------------*/
 void aurora_service_isr_fast_fault(aurora_service_t *service, uint32_t fault_mask)
 {
     if (service != NULL)
@@ -498,10 +588,16 @@ void aurora_service_isr_fast_fault(aurora_service_t *service, uint32_t fault_mas
         drv_pwm_force_off_isr();
         service->safety_epoch++;
         atomic_or_u32(&service->pending_fault_mask, fault_mask);
-        atomic_or_u32(&service->event_flags, EVENT_FAST_FAULT);
+        atomic_or_u32(&service->event_flags, SERVICE_EVENT_FAST_FAULT);
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_isr_pwm_update(aurora_service_t *service)
+ * Input       : service - Service上下文
+ * Output      : 无
+ * Description : ATMR UPDATE桥接：确认首次零CCR已由自然UEV装载。
+ *---------------------------------------------------------------------------*/
 void aurora_service_isr_pwm_update(aurora_service_t *service)
 {
     if (service != NULL)
@@ -510,6 +606,12 @@ void aurora_service_isr_pwm_update(aurora_service_t *service)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_service_isr_uart_rx(aurora_service_t *service, uint8_t byte)
+ * Input       : service - Service上下文；byte - 接收字节
+ * Output      : 无
+ * Description : USART桥接：把单字节放入Service RX环形缓冲；满时累计溢出计数。
+ *---------------------------------------------------------------------------*/
 void aurora_service_isr_uart_rx(aurora_service_t *service, uint8_t byte)
 {
     uint16_t next;
@@ -523,7 +625,7 @@ void aurora_service_isr_uart_rx(aurora_service_t *service, uint8_t byte)
     {
         service->uart_rx[service->uart_head] = byte;
         service->uart_head = next;
-        atomic_or_u32(&service->event_flags, EVENT_UART_RX);
+        atomic_or_u32(&service->event_flags, SERVICE_EVENT_UART_RX);
     }
     else
     {

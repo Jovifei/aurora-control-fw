@@ -1,15 +1,17 @@
 # Codex / Agent 工作约束
 
-1. 先读 `docs/00-文档索引.md`、`02-软件分层与依赖规则.md`、`07-保护PWM与看门狗安全设计.md` 和 `15-重构清理与验证报告.md`。
-2. 不得重新引入旧 MCU 源码、闭源 MPPT 库、完整 SDK 示例、`legacy_*`、`tasks/`、重复目录或生成 JSON。
-3. `app/`、`service/`、`driver/`、`board/` 均保持扁平；APP `.c` 总数不得无理由超过 10 个。
-4. APP不得包含芯片、Driver、Board或Service头文件；Driver不得包含业务头文件。
-5. ADC必须保持：ATMR定时触发 → 一次六通道扫描 → DMA双块 → ISR只发布块 → 主循环换算和发布快照。
-6. MPPT只输出PV参考电压和理论功率请求，不得操作CCR、GPIO或MOE。
-7. 正常PWM只有Service一个出口；故障ISR只允许关波、锁存和投递事件，不能恢复。
-8. CCR必须使用preload，在自然UEV生效；运行期禁止软件UG。UPDATE中断只允许在首次0占空比装载时临时开启一次。
-9. COMP0_O通过PB10/AF7接门极驱动EN，按低有效故障处理；在台架确认前保持对应门禁关闭。
-10. 只有Service健康监督可以喂IWDT；主循环或ISR不得直接喂狗。
-11. 功率运行或继电器闭合时禁止片内Flash擦写。
-12. 始终保持 `BOARD_POWER_OUTPUT_ALLOWED=0`，除非已有Keil map、低压台架、比较器强制触发和示波器证据，并经人工审查。
-13. 每次修改后运行 `python tools/run_checks.py`；不得通过降低警告、删除测试或放宽架构规则使结果变绿。
+1. 先读 `docs/README.md`、`docs/GUIDE.md`、`docs/17-参数标定与Codex交接清单.md`、`docs/07-保护PWM与看门狗安全设计.md` 和 `docs/19-v0.7.0代码规范整改与验证报告.md`、`docs/20-v0.7.1替换发布说明.md`。
+2. 不得重新引入旧MCU源码、闭源MPPT库、完整SDK示例、`legacy_*`、`tasks/`、`.bootstrap`、重复目录或生成JSON。
+3. APP必须采用 `app/inc/*.h` 与 `app/src/*.c`；`app/`根目录不得放C/H文件，APP `.c` 总数不得无理由超过10个。
+4. `service/`、`driver/`、`board/`保持扁平；APP不得包含Chip/Driver/Board/Service头文件，Driver不得包含业务头文件。
+5. 所有函数定义必须使用统一 `Name/Input/Output/Description` 头注释；复杂判断和执行分支应写明原因、安全动作和状态变化。
+6. 统一4空格缩进，禁止Tab和行尾空白；所有文件级 `static` 定义集中在首个公开函数之前；宏必须先定义再使用并注明单位/用途。
+7. ADC必须保持：ATMR定时触发 → 六通道扫描 → DMA双半块 → ISR只发布 → 主循环换算并整体发布快照。
+8. MPPT只输出PV参考电压和理论功率请求，不得操作CCR、GPIO、MOE或Break。
+9. 正常PWM只有Service一个出口；故障ISR只允许立即关波、锁存和投递事件，不能恢复输出。
+10. CCR使用preload并在自然UPDATE边界生效；运行期禁止软件UPDATE。UPDATE中断只允许首次零CCR握手临时开启一次。
+11. COMP0_O通过PB10/AF7接门极驱动EN，按低有效故障处理；台架确认前相应门禁保持0。
+12. 只有Service健康监督可喂IWDT；功率运行或继电器闭合时禁止Flash擦写。
+13. 修改参数前查 `docs/17`，记录旧值、新值、单位、依据、测试和回退值；不得在函数体内新增魔法控制数。
+14. 始终保持 `BOARD_POWER_OUTPUT_ALLOWED=0`，除非Keil MAP、模拟标定、比较器强制触发、低压台架和示波器证据均已人工审查。
+15. 每次修改后运行 `python tools/run_checks.py`；不得通过降低警告、删除测试、关闭Sanitizer或放宽规则使结果变绿。

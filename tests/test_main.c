@@ -14,6 +14,12 @@ static unsigned g_assertions;
     fprintf(stderr, "CHECK failed: %s:%d: %s\n", __FILE__, __LINE__, #x); exit(1); } } while (0)
 
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void run_service_ticks(aurora_service_t *service, uint32_t count)
+ * Input       : service - Service上下文；count - 推进节拍数量
+ * Output      : 无
+ * Description : 推进指定数量的模拟1 ms节拍并调用Service主循环，用于Host回归。
+ *---------------------------------------------------------------------------*/
 static void run_service_ticks(aurora_service_t *service, uint32_t count)
 {
     uint32_t i;
@@ -24,6 +30,12 @@ static void run_service_ticks(aurora_service_t *service, uint32_t count)
     }
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static aurora_measurement_calibration_t unit_calibration(void)
+ * Input       : 无
+ * Output      : 六通道单位增益标定结构
+ * Description : 构造单位增益的六通道测试标定参数。
+ *---------------------------------------------------------------------------*/
 static aurora_measurement_calibration_t unit_calibration(void)
 {
     aurora_measurement_calibration_t c;
@@ -39,6 +51,12 @@ static aurora_measurement_calibration_t unit_calibration(void)
     return c;
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_measurement_block(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证ADC完整块去极值平均、单位换算和PV功率有效位发布。
+ *---------------------------------------------------------------------------*/
 static void test_measurement_block(void)
 {
     aurora_measurement_ctx_t ctx;
@@ -65,20 +83,26 @@ static void test_measurement_block(void)
     CHECK((out.valid_mask & AURORA_MEAS_VALID_PV_POWER) != 0U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_protocol_roundtrip(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证设置帧编码后逐字节解析可无损还原动作、资源、消息ID和载荷。
+ *---------------------------------------------------------------------------*/
 static void test_protocol_roundtrip(void)
 {
     aurora_protocol_frame_t tx;
     aurora_protocol_frame_t rx;
     aurora_protocol_ctx_t parser;
-    uint8_t wire[160];
+    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
     size_t length;
     size_t i;
 
     memset(&tx, 0, sizeof(tx));
-    tx.action = 0x02U;
+    tx.action = AURORA_PROTOCOL_ACTION_WRITE;
     tx.resource = AURORA_PROTOCOL_RESOURCE_SETTING;
     tx.message_id = 0x12345678UL;
-    tx.data_length = 2U;
+    tx.data_length = AURORA_PROTOCOL_SETTING_DATA_LENGTH;
     tx.data[0] = AURORA_CHEM_LFP;
     tx.data[1] = AURORA_PACK_60V;
     length = aurora_protocol_encode(&tx, wire, sizeof(wire));
@@ -92,12 +116,18 @@ static void test_protocol_roundtrip(void)
     CHECK(rx.action == tx.action);
     CHECK(rx.resource == tx.resource);
     CHECK(rx.message_id == tx.message_id);
-    CHECK(rx.data_length == 2U);
+    CHECK(rx.data_length == AURORA_PROTOCOL_SETTING_DATA_LENGTH);
     CHECK(rx.data[0] == tx.data[0]);
     CHECK(rx.data[1] == tx.data[1]);
 }
 
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_protocol_back_to_back_frames(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证连续两帧在及时领取后均可解析，后一帧不会覆盖前一帧。
+ *---------------------------------------------------------------------------*/
 static void test_protocol_back_to_back_frames(void)
 {
     aurora_protocol_frame_t first;
@@ -112,13 +142,13 @@ static void test_protocol_back_to_back_frames(void)
 
     memset(&first, 0, sizeof(first));
     memset(&second, 0, sizeof(second));
-    first.action = 0x02U;
+    first.action = AURORA_PROTOCOL_ACTION_WRITE;
     first.resource = AURORA_PROTOCOL_RESOURCE_RESET;
     first.message_id = 1U;
-    second.action = 0x02U;
+    second.action = AURORA_PROTOCOL_ACTION_WRITE;
     second.resource = AURORA_PROTOCOL_RESOURCE_SETTING;
     second.message_id = 2U;
-    second.data_length = 2U;
+    second.data_length = AURORA_PROTOCOL_SETTING_DATA_LENGTH;
     second.data[0] = AURORA_CHEM_LEAD;
     second.data[1] = AURORA_PACK_72V;
     len1 = aurora_protocol_encode(&first, wire1, sizeof(wire1));
@@ -139,6 +169,12 @@ static void test_protocol_back_to_back_frames(void)
     CHECK(out.message_id == 2U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_telemetry_legacy_identity(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证旧产品遥测帧的固定长度、版本字段和型号字符保持兼容。
+ *---------------------------------------------------------------------------*/
 static void test_telemetry_legacy_identity(void)
 {
     aurora_protocol_frame_t frame;
@@ -153,12 +189,18 @@ static void test_telemetry_legacy_identity(void)
     sample.battery_current_est_ma = 2000;
     aurora_protocol_fill_telemetry(&frame, 7U, &sample, AURORA_CHARGE_CC,
                                    AURORA_FAULT_FAST_PV_OCP, &settings);
-    CHECK(frame.data_length == 30U);
+    CHECK(frame.data_length == AURORA_PROTOCOL_TELEMETRY_DATA_LENGTH);
     CHECK(frame.data[22] == 2U);
     CHECK(frame.data[23] == AURORA_FW_VERSION_MAJOR);
     CHECK(frame.data[26] == (uint8_t)AURORA_PRODUCT_MODEL[0]);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_watchdog_window_and_adc_overrun(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证看门狗仅在健康票据齐全时喂狗，并验证DMA同半块覆盖会锁存故障。
+ *---------------------------------------------------------------------------*/
 static void test_watchdog_window_and_adc_overrun(void)
 {
     aurora_service_t service;
@@ -192,12 +234,18 @@ static void test_watchdog_window_and_adc_overrun(void)
     CHECK(service.adc_overrun_count == 1U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_storage_atomic_format(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证未提交页不可恢复、完整页可恢复，且载荷位翻转会被CRC拒绝。
+ *---------------------------------------------------------------------------*/
 static void test_storage_atomic_format(void)
 {
     aurora_storage_ctx_t ctx;
     aurora_persistent_settings_t restored;
     uint32_t sequence;
-    uint8_t page[512];
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
 
     aurora_storage_init_defaults(&ctx);
     ctx.sequence = 42U;
@@ -212,6 +260,12 @@ static void test_storage_atomic_format(void)
     CHECK(!aurora_storage_decode_page(page, sizeof(page), &restored, &sequence));
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_mppt_reference_search(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证参考电压型MPPT从Voc附近启动并按P-V趋势调整目标且服从功率上限。
+ *---------------------------------------------------------------------------*/
 static void test_mppt_reference_search(void)
 {
     aurora_mppt_ctx_t ctx;
@@ -235,6 +289,12 @@ static void test_mppt_reference_search(void)
     CHECK(out.theoretical_power_mw <= 200000U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_charger_profiles(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证铅酸72V档案关键阈值以及有效电池电压下的CC阶段输出。
+ *---------------------------------------------------------------------------*/
 static void test_charger_profiles(void)
 {
     aurora_charge_profile_t p;
@@ -254,6 +314,12 @@ static void test_charger_profiles(void)
     CHECK(o.allow_charge);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_fault_startup_and_no_battery(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证上电测量宽限期结束后锁存ADC超时，同时无电池不会误报欠压。
+ *---------------------------------------------------------------------------*/
 static void test_fault_startup_and_no_battery(void)
 {
     aurora_protection_ctx_t p;
@@ -279,6 +345,12 @@ static void test_fault_startup_and_no_battery(void)
     CHECK(p.latched_mask == 0U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_precharge_bootstrap_duty(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证预充初期母线低于PV时仍从零占空比按单步限制启动。
+ *---------------------------------------------------------------------------*/
 static void test_precharge_bootstrap_duty(void)
 {
     aurora_power_stage_ctx_t ctx;
@@ -314,6 +386,12 @@ static void test_precharge_bootstrap_duty(void)
     CHECK(!command.relay_enable);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_temperature_faults_are_independent(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证环境过温和MOS过温拥有独立计数器与故障位，互不串扰。
+ *---------------------------------------------------------------------------*/
 static void test_temperature_faults_are_independent(void)
 {
     aurora_protection_ctx_t protection;
@@ -345,6 +423,67 @@ static void test_temperature_faults_are_independent(void)
     CHECK(protection.mos_temp_count == 0U);
 }
 
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_fault_rearm_resets_duty_origin(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证故障和重新授权会清零Duty/积分，重新预充的首个命令只能从零按单步斜率起步。
+ *---------------------------------------------------------------------------*/
+static void test_fault_rearm_resets_duty_origin(void)
+{
+    aurora_power_stage_ctx_t ctx;
+    aurora_measurement_t sample;
+    aurora_mppt_output_t mppt;
+    aurora_charge_output_t charger;
+    aurora_power_command_t command;
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&sample, 0, sizeof(sample));
+    memset(&mppt, 0, sizeof(mppt));
+    memset(&charger, 0, sizeof(charger));
+
+    sample.valid_mask = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_POWER |
+                        AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V;
+    sample.pv_voltage_mv = 30000;
+    sample.pv_power_mw = 50000;
+    sample.battery_voltage_mv = 72000;
+    sample.bus_voltage_mv = 70000;
+    mppt.valid = true;
+    mppt.theoretical_power_mw = 100000U;
+    charger.allow_charge = true;
+    charger.power_limit_mw = AURORA_RATED_POWER_MW;
+
+    /* 模拟故障前已处于RUN且控制器保存了非零Duty和积分。 */
+    ctx.state = AURORA_POWER_RUN;
+    ctx.relay_closed = true;
+    ctx.duty_q15 = 12000U;
+    ctx.power_integral = 2048LL;
+
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, false, 100U);
+    CHECK(command.state == AURORA_POWER_FAULT);
+    CHECK(command.duty_q15 == 0U);
+    CHECK(ctx.duty_q15 == 0U);
+    CHECK(ctx.power_integral == 0LL);
+
+    /* 清故障后不得直接回RUN，必须回到电池识别/预充。 */
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 200U);
+    CHECK(command.state == AURORA_POWER_PRECHARGE);
+    CHECK(!command.pwm_enable);
+    CHECK(ctx.duty_q15 == 0U);
+
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 201U);
+    CHECK(command.pwm_enable);
+    CHECK(command.duty_q15 > 0U);
+    CHECK(command.duty_q15 <= AURORA_DUTY_STEP_Q15);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_pwm_arm_race(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证首次放行必须先等待零CCR自然装载，且快速故障会立即撤销PWM。
+ *---------------------------------------------------------------------------*/
 static void test_pwm_arm_race(void)
 {
     aurora_service_t service;
@@ -371,6 +510,12 @@ static void test_pwm_arm_race(void)
     CHECK((service.app.protection.latched_mask & AURORA_FAULT_FAST_MOS_OCP) != 0U);
 }
 
+/*---------------------------------------------------------------------------*
+ * Name        : int main(void)
+ * Input       : 无
+ * Output      : 0表示全部Host回归通过；断言失败时进程提前退出
+ * Description : Host回归入口：依次执行测量、协议、存储、MPPT、充电、保护、功率级、PWM竞态和看门狗测试；全部通过后返回0。
+ *---------------------------------------------------------------------------*/
 int main(void)
 {
     test_measurement_block();
@@ -383,6 +528,7 @@ int main(void)
     test_fault_startup_and_no_battery();
     test_precharge_bootstrap_duty();
     test_temperature_faults_are_independent();
+    test_fault_rearm_resets_duty_origin();
     test_pwm_arm_race();
     test_watchdog_window_and_adc_overrun();
     printf("Aurora host tests: %u assertions passed.\n", g_assertions);
