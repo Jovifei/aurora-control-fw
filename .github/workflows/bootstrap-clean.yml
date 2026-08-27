@@ -39,7 +39,16 @@ jobs:
           curl --fail --location --retry 3 \
             --output "$RUNNER_TEMP/G32F031_DAL_SDK_V1.0.2.zip" \
             'https://global.geehy.com/uploads/tool/G32F031_DAL_SDK_V1.0.2.zip'
-          unzip -q "$RUNNER_TEMP/G32F031_DAL_SDK_V1.0.2.zip" -d "$RUNNER_TEMP/vendor-sdk"
+          python - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          archive = Path(os.environ['RUNNER_TEMP']) / 'G32F031_DAL_SDK_V1.0.2.zip'
+          destination = Path(os.environ['RUNNER_TEMP']) / 'vendor-sdk'
+          with zipfile.ZipFile(archive) as sdk_zip:
+              sdk_zip.extractall(destination)
+          PY
           SDK_DIR="$(find "$RUNNER_TEMP/vendor-sdk" -type d -name G32F031_DAL_SDK_V1.0.2 -print -quit)"
           if [ -z "$SDK_DIR" ]; then
             SDK_DIR="$RUNNER_TEMP/vendor-sdk"
