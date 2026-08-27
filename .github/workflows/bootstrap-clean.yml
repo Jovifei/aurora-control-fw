@@ -1,0 +1,174 @@
+name: Bootstrap clean firmware tree
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.bootstrap/**'
+      - '.github/workflows/bootstrap-clean.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-clean-main
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout bootstrap commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .bootstrap/part_*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/build_aurora_clean.py"
+          echo '3f1bbac06075fdd0dff02970e2718ee1cd74504f42fd040f612ff4eb4b742314  '"$RUNNER_TEMP/build_aurora_clean.py" | sha256sum --check --strict
+
+      - name: Obtain vendor SDK source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/Jovifei/Mppt_drive_300w.git "$RUNNER_TEMP/source-repository"
+          SDK_DIR="$(find "$RUNNER_TEMP/source-repository" -type d -name G32F031_DAL_SDK_V1.0.2 -print -quit)"
+          test -n "$SDK_DIR"
+          test -f "$SDK_DIR/Libraries/Device/Geehy/G32F031/Source/system_g32f031.c"
+          echo "AURORA_SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "AURORA_OUT=$RUNNER_TEMP/aurora-generated" >> "$GITHUB_ENV"
+
+      - name: Adapt generator to the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path(__import__('os').environ['RUNNER_TEMP']) / 'build_aurora_clean.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('from pathlib import Path\n', 'from pathlib import Path\nimport os\n', 1)
+          text = text.replace("OUT = Path('/mnt/data/aurora-control-fw')", "OUT = Path(os.environ['AURORA_OUT'])")
+          text = text.replace(
+              "SDK = Path('/mnt/data/v060_src/MPPT300W_G32F031_APP_v0.6.0_ISR_SAFETY_HARDENED/G32F031_DAL_SDK_V1.0.2')",
+              "SDK = Path(os.environ['AURORA_SDK_DIR'])",
+          )
+          text = text.replace(
+              "schematic = Path('/mnt/data/C300_MPPT(Boost)-V0.1.pdf')",
+              "schematic = Path('/path/intentionally/not/present/C300_MPPT(Boost)-V0.1.pdf')",
+          )
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+
+      - name: Generate clean source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$RUNNER_TEMP/build_aurora_clean.py"
+          test -f "$AURORA_OUT/app/mppt.c"
+          test -f "$AURORA_OUT/service/service.c"
+          test -f "$AURORA_OUT/driver/drv_pwm.c"
+          test -f "$AURORA_OUT/project/keil/AuroraControl.uvprojx"
+
+      - name: Add final hardware reference and binding note
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            --output "$AURORA_OUT/docs/14-REF-硬件原理图-V0.1.png" \
+            'https://raw.githubusercontent.com/Jovifei/Mppt_drive_300w/main/docs/schematic/render/page-1.png'
+          cat > "$AURORA_OUT/docs/13-硬件引脚与外设绑定.md" <<'EOF'
+          # 13 · 硬件引脚与外设绑定
+
+          本表以最终硬件图纸为板级基线。应用层不得包含端口号、复用号或寄存器；这些信息只允许出现在 `board/`、`driver/` 和 Keil 目标入口中。
+
+          | 引脚 | 网络/功能 | 软件用途 |
+          |---|---|---|
+          | PA0 | OPA0_O | MOS电流内部运放输出 |
+          | PA1 | OPA0_N | MOS电流运放负输入 |
+          | PA2 | OPA0_P | MOS电流运放正输入 |
+          | PA3 | OPA1_P | PV电流运放正输入 |
+          | PA4 | OPA1_N | PV电流运放负输入 |
+          | PA5 | OPA1_O | PV电流运放输出 |
+          | PA7 | COMP0_P | MOS快速过流比较输入 |
+          | PA8 | PV_I | PV平均电流ADC |
+          | PA9 | PV_U | PV电压ADC |
+          | PB0 | BAT_U | 电池端电压ADC |
+          | PB1 | BST_U | 继电器前母线电压ADC |
+          | PB2 | COMP2_N | PV快速过流比较输入 |
+          | PB12 | NTC_MOS | MOS温度ADC |
+          | PA10 | UR_TX | BLE通信TX |
+          | PA11 | UR_RX | BLE通信RX |
+          | PA12 | LINK | Link控制 |
+          | PA13 | RELAY | 继电器控制 |
+          | PA14 | GHC | 当前异步板不使用，固定安全态 |
+          | PA15 | GLC / ATMR_CH0 | 单路Boost PWM |
+          | PB5 | NTC_AMB | 环境温度ADC |
+          | PB6 | COMP2_P | PV快速过流比较参考 |
+          | PB7 | DEBUG_TX | 调试串口TX |
+          | PB8 | DEBUG_RX | 调试串口RX |
+          | PB9 | LED_RUN | 运行指示灯 |
+          | PB10 | COMP0_O | 内部比较器输出至U6 EN |
+          | PB11 | LED_FAULT | 故障指示灯 |
+
+          当前功率拓扑只有 `GLC` 单路PWM；不配置互补输出、死区或同步整流，不存在电池电流ADC。电池电流只能以PV功率和电池电压估算，并必须标记为估算值。
+          EOF
+          cat > "$AURORA_OUT/docs/15-远端导入与验证记录.md" <<'EOF'
+          # 15 · 远端导入与验证记录
+
+          本仓库由清理后的嵌入式工程生成，未导入旧MCU工程、闭源MPPT库、完整厂商示例、`legacy_*`、重复的`firmware/tests/tools`、构建目录或生成JSON。
+
+          远端导入前必须通过：目录依赖门禁、GCC严格编译与CTest、Clang严格编译与CTest、目标端语法检查。Host通过不代表Keil AC6链接或功率台架已经通过；功率输出门继续保持关闭。
+          EOF
+          python - <<'PY'
+          from pathlib import Path
+          p = Path(__import__('os').environ['AURORA_OUT']) / 'docs/00-文档索引.md'
+          text = p.read_text(encoding='utf-8').rstrip() + '\n'
+          text += '| 13 | 硬件引脚与外设绑定 | 最终PinMux、模拟通道与安全态 |\n'
+          text += '| 14 | REF-硬件原理图-V0.1 | 最终原理图整页渲染参考 |\n'
+          text += '| 15 | 远端导入与验证记录 | 仓库清理边界和验证证据 |\n'
+          p.write_text(text, encoding='utf-8', newline='\n')
+          PY
+
+      - name: Run architecture and host gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$AURORA_OUT"
+          python tools/check_architecture.py
+          python tools/run_checks.py
+          python tools/check_target_syntax.py
+
+      - name: Replace bootstrap tree with generated project
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          rsync -a \
+            --exclude '.git/' \
+            --exclude 'build/' \
+            --exclude 'build-*/' \
+            --exclude 'Testing/' \
+            "$AURORA_OUT/" "$GITHUB_WORKSPACE/"
+          cd "$GITHUB_WORKSPACE"
+          rm -f MANIFEST.sha256
+          find . -type f ! -path './.git/*' ! -name MANIFEST.sha256 -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > MANIFEST.sha256
+          sha256sum --check --strict MANIFEST.sha256
+
+      - name: Commit clean project to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: establish clean portable firmware baseline'
+          git push origin HEAD:main
