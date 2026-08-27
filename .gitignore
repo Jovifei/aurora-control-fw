@@ -1,0 +1,39 @@
+# Keil / compiler outputs
+Objects/
+Listings/
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.dep
+*.crf
+*.lnp
+*.htm
+*.build_log.htm
+*.uvguix.*
+*.uvoptx
+
+# Host build outputs
+build/
+build-*/
+Testing/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated reports and local captures
+*.json
+captures/
+logs/

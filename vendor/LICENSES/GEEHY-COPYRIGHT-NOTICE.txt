@@ -1,0 +1,67 @@
+Geehy Semiconductor Software License Agreement
+Version 1.3 published on January 8, 2025  
+© 2018-2026 Geehy Semiconductor Co., Ltd. - All Rights Reserved
+
+IMPORTANT: READ THE FOLLOWING SOFTWARE LICENSE AGREEMENT (HEREINAFTER REFERRED TO AS "AGREEMENT"). BY DOWNLOADING, ACCESSING, INSTALLING, COPYING, OR USING THE SOFTWARE PROVIDED BY GEEHY SEMICONDUCTOR CO., LTD. AND ITS AFFILIATES (HEREINAFTER REFERRED TO AS "GEEHY") OR ANY PORTION THEREOF (HEREINAFTER REFERRED TO AS "WORK" OR "PROGRAM"), YOU (THE LICENSEE, WHETHER AN INDIVIDUAL OR A REPRESENTATIVE OF YOUR EMPLOYER OR RELATED ENTITY) AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE TO ALL THE TERMS OF THIS AGREEMENT, DO NOT DOWNLOAD OR INSTALL THE SOFTWARE. IF YOU CHANGE YOUR MIND AND NO LONGER AGREE TO THE TERMS, STOP USING THE PROGRAM AND DELETE ALL COPIES OF THE PROGRAM IN YOUR POSSESSION. LICENSES FOR THIRD-PARTY OPEN-SOURCE SOFTWARE INCLUDED IN THE PROGRAM ARE GRANTED BY THE RESPECTIVE COPYRIGHT HOLDERS, AND ALL OTHER LICENSING INFORMATION RELATED TO THE OPEN-SOURCE SOFTWARE INCLUDED IN THIS PROGRAM IS SUBJECT TO THE CORRESPONDING OPEN-SOURCE SOFTWARE LICENSES. EACH LICENSEE IS PERMITTED TO DISTRIBUTE VERBATIM COPIES OF THIS AGREEMENT BUT SHOULD NOT ALTER IT.
+
+1. DEFINITION
+1)  "This Agreement" refers to the Software License Agreement between you and Geehy Semiconductor Co., Ltd.
+2)  "License" refers to all rights or authorizations granted to the Licensee by Geehy and other Licensors.
+3)  "Licensor" refers to the copyright owner granting the License or an entity authorized by the copyright owner.
+4)  "Licensee" refers to the individual or organization downloading, accessing, installing, copying, or otherwise using the Program. "You" is considered as Licensee.
+5)  "Copyright" refers to the copyright of the software.
+6)  "Work" refers to the software provided under this Agreement and its derivative works.  
+7)  "Program" refers to all or any part the Work authorized under the License, including source code and binary or other forms. 
+8)  "Modify" means copying or adapting the whole or part of the Work in a way that requires copyright permission. The results are referred to as "modified versions" or works "based on" earlier works.
+9)  "Covered Work" refers to the unmodified Program or works based on the Program.
+10) "Propagate" indicates actions that, without permission, would lead to direct or indirect infringement under applicable copyright law, except for executing or modifying a private copy.  Propagation includes copying, distribution (whether modified or not), making available to the public, and so on.
+11) "Convey" means allowing others to make or receive copies. Interaction without transferring copies is not considered conveying.
+12) "Third-party software" refers to any non-Geehy proprietary software (including open-source software) integrated in this product and may be subject to different licensing terms.
+13) "Documentation" includes any comments, annotations, instructions, manuals, and other materials, whether in print or electronic form, including but not limited to installation manuals and user guides.
+
+2. COPYRIGHT AND OWNERSHIP
+1)  The copyright holder of the Program and all its copies is Geehy and/or its Licensors. You shall not act in a way that harms the proprietary rights of Geehy and its Licensors, nor obtain any rights beyond the limited rights explicitly granted under this Agreement or other Licenses applicable to the Program.
+2)  You shall not remove copyright notices, additional terms, warranty disclaimers, liability limitations, patents, or other notices from the Program or any copies.
+3)  This Agreement shall not alter the ownership of the Program.
+
+3. LICENSE AND RESTRICTIONS
+1)  Subject to the terms and conditions of this Agreement, the Licensor hereby grants you a License to run an unmodified version of the Program. Provided that the License you have obtained remains valid, you may make, run, and propagate the Program but without conveying it. Complying with the terms regarding conveying, you may convey the Program to others, but no sublicensing is allowed. All rights granted under the License remain valid for the duration of the Program's copyright term.  
+2)  The Program or any part thereof, including Covered Works, must be used and executed in or with the corresponding series model chips (for example, MCU, MPU and DSP chips with CPU cores) manufactured by or for Geehy.
+
+4. CONVEYING
+1)  You may convey a verbatim copy of the Program's source code on any medium, provided that you conspicuously and completely retain all copyright statements on each copy; retain all applicable agreements, statements, licenses, and any terms applicable to the Program in their entirety; provide the following disclaimer in its entirety; and provide a copy of this Agreement and the Program to all recipients.
+2)  You may convey modified versions of Covered Works generated under the terms of Section 4, Paragraph 1, provided that you also meet all of the following conditions: the Program must include a prominent notice stating that you modified it, and giving a date of modification. The Program must be prominently marked as released under this Agreement and all applicable terms, amending the "complete retention" requirement in Section 4, Paragraph 1.
+3)  You may convey binary forms of the Program, provided that you reproduce the copyright notices in source code form under the conditions of Section 4, Paragraph 1.
+
+5. ADDITIONAL TERMS
+1)  The Licensee shall not promote or advertise in the name of the Licensors or the Program holder; without written permission from the Licensors, the names of Geehy or other contributors to the Program should not be used to promote products derived from the Program or its parts.
+2)  You shall not subject any portion or all of the software developed by Geehy (excluding third-party software) to any other open-source terms in any way. "Open-source terms" refer to any open-source license that requires source code to accompany (or otherwise be provided with) the software upon distribution, or any open-source license that substantially meets the open-source definition specified at www.opensource.org, and any other similar open-source licenses such as the GNU Lesser General Public License (LGPL), Eclipse Public License (EPL), Apache Software License, BSD License, and MIT License.
+
+6. THIRD-PARTY SOFTWARE
+1)  Open-source software: The Program contains third-party open-source software. Such open-source software is provided under applicable open-source agreements and is not subject to the terms and conditions of this Agreement. Downloading, accessing, installing, copying, or otherwise using the Program signifies your agreement to be bound by the license agreements of such open-source software.
+2)  Non-open-source software: The Program may also include specially designated third-party software (non-open-source software). Such third-party software is provided under the respective license agreements or other applicable agreements and is not subjected to the terms and conditions of this Agreement. By downloading, copying, installing, accessing, or otherwise using the Program, you agree to be bound by the third-party license agreements or other applicable agreements related to the third-party software.
+
+7. DISCLAIMER OF WARRANTY
+1)  To the extent permitted by applicable law, the Program is provided without warranty. Unless otherwise specified in a written statement, the copyright holder and other program providers provide the Program "as is" ,with no express or implied warranties, including but not limited to warranties of merchantability, fitness for a particular purpose (such as military, life support systems, medical, pollution control, or hazardous management systems, where failure or malfunction may result in injury, death, property, or environmental damage). You acknowledge and agree to assume all risks as to the quality and performance of the Program. If the Program shows any defect, you shall be responsible for the cost of all necessary servicing and correction.
+2)  If you or your customers use the licensed software for the " particular purposes" mentioned above, even if Geehy is aware of or has been informed in the written form of such usages, Geehy is not liable for your and your customers' use of the Program for particular purposes, and you and your customers shall be responsible for the risk associated with using the Program. Furthermore, you will indemnify and hold Geehy harmless against any and all claims, liabilities, damages, and related expenses (including reasonable attorney fees) that may arise from your and your customers' use of the Program for particular purposes.
+3)  If Geehy products are not labeled as "automotive grade," it indicates that they are not suitable for automotive applications. If users use the products beyond the specifications, application fields, or guidelines provided by Geehy, Geehy assumes no responsibility. If users need "automotive grade" software requirements, please contact Geehy official for authorization.
+
+8. LIMITATION OF LIABILITY
+1)  The Program is provided by Geehy and other Licensors "as is," and to the extent permitted by applicable law, the Program is provided without any warranty. Unless otherwise specified in a written statement, the copyright holder and/or other parties provide the Program "as is" without any form of warranty (express, implied, or statutory), including but not limited to warranties of merchantability, security, fitness for a particular purpose, and non-infringement of any third-party intellectual property. Any oral, written information or advice provided by Geehy shall not constitute any warranty.
+2)  Unless required by applicable law or a written agreement, no copyright holder or any other party who modifies and/or conveys the program under this Agreement shall be liable for your losses, including any general, special, incidental, or consequential damages arising from the use or inability to use the Program (such as data loss, data distortion, subsequent loss to you or third parties, other software's inability to operate in conjunction with the software, and so on).
+
+9. PATENT
+Unless explicitly agreed upon in this Agreement or applicable third-party software and open-source terms, neither Geehy nor any third party grants you any license or other rights concerning patents or intellectual property.
+
+10. COMPLIANCE
+You shall comply with all applicable laws and regulations affecting the use of the Program or any part thereof, including any applicable export control laws or regulations.
+
+11. TERMINATION OF AUTHORIZATION
+1)  Except as expressly authorized under this Agreement, you may not propagate or modify the Program. Any propagation or modification of the Program in violation of this Agreement shall automatically terminate the rights granted to you.
+2)  If your rights are terminated as described in this clause, rights already granted under this Agreement by you to others will not be terminated.
+
+12. UPDATES
+1)  Geehy will provide certain maintenance, support, or updates for the Program as needed and may release revised and/or new versions of this Agreement along with updated Program. These new versions will be based on the current version but differ in details to address issues or concerns.
+2)  It is recommended not to mix different versions of this Agreement with different versions of the Program.
+
+End of Terms and Conditions
