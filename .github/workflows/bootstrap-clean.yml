@@ -84,6 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           python "$RUNNER_TEMP/build_aurora_clean.py"
+          install -m 0755 "$GITHUB_WORKSPACE/.bootstrap/check_target_syntax.py" "$AURORA_OUT/tools/check_target_syntax.py"
           test -f "$AURORA_OUT/app/mppt.c"
           test -f "$AURORA_OUT/service/service.c"
           test -f "$AURORA_OUT/driver/drv_pwm.c"
