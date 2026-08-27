@@ -35,7 +35,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/Jovifei/Mppt_drive_300w.git "$RUNNER_TEMP/source-repository"
+          mkdir -p "$RUNNER_TEMP/source-repository"
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/source-repository.tar.gz" \
+            'https://codeload.github.com/Jovifei/Mppt_drive_300w/tar.gz/refs/heads/main'
+          tar --extract --gzip \
+            --file "$RUNNER_TEMP/source-repository.tar.gz" \
+            --directory "$RUNNER_TEMP/source-repository" \
+            --strip-components=1
           SDK_DIR="$(find "$RUNNER_TEMP/source-repository" -type d -name G32F031_DAL_SDK_V1.0.2 -print -quit)"
           test -n "$SDK_DIR"
           test -f "$SDK_DIR/Libraries/Device/Geehy/G32F031/Source/system_g32f031.c"
