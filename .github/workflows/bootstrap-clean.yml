@@ -163,7 +163,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 \
+            ! -name .git ! -name .github ! -name .bootstrap \
+            -exec rm -rf {} +
           rsync -a \
             --exclude '.git/' \
             --exclude 'build/' \
@@ -172,7 +174,7 @@ jobs:
             "$AURORA_OUT/" "$GITHUB_WORKSPACE/"
           cd "$GITHUB_WORKSPACE"
           rm -f MANIFEST.sha256
-          find . -type f ! -path './.git/*' ! -name MANIFEST.sha256 -print0 \
+          find . -type f ! -path './.git/*' ! -path './.github/*' ! -path './.bootstrap/*' ! -name MANIFEST.sha256 -print0 \
             | sort -z \
             | xargs -0 sha256sum > MANIFEST.sha256
           sha256sum --check --strict MANIFEST.sha256
