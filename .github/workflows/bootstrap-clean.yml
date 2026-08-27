@@ -31,20 +31,19 @@ jobs:
           cat .bootstrap/part_*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/build_aurora_clean.py"
           echo '3f1bbac06075fdd0dff02970e2718ee1cd74504f42fd040f612ff4eb4b742314  '"$RUNNER_TEMP/build_aurora_clean.py" | sha256sum --check --strict
 
-      - name: Obtain vendor SDK source
+      - name: Obtain official vendor SDK
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/source-repository"
+          mkdir -p "$RUNNER_TEMP/vendor-sdk"
           curl --fail --location --retry 3 \
-            --output "$RUNNER_TEMP/source-repository.tar.gz" \
-            'https://codeload.github.com/Jovifei/Mppt_drive_300w/tar.gz/refs/heads/main'
-          tar --extract --gzip \
-            --file "$RUNNER_TEMP/source-repository.tar.gz" \
-            --directory "$RUNNER_TEMP/source-repository" \
-            --strip-components=1
-          SDK_DIR="$(find "$RUNNER_TEMP/source-repository" -type d -name G32F031_DAL_SDK_V1.0.2 -print -quit)"
-          test -n "$SDK_DIR"
+            --output "$RUNNER_TEMP/G32F031_DAL_SDK_V1.0.2.zip" \
+            'https://global.geehy.com/uploads/tool/G32F031_DAL_SDK_V1.0.2.zip'
+          unzip -q "$RUNNER_TEMP/G32F031_DAL_SDK_V1.0.2.zip" -d "$RUNNER_TEMP/vendor-sdk"
+          SDK_DIR="$(find "$RUNNER_TEMP/vendor-sdk" -type d -name G32F031_DAL_SDK_V1.0.2 -print -quit)"
+          if [ -z "$SDK_DIR" ]; then
+            SDK_DIR="$RUNNER_TEMP/vendor-sdk"
+          fi
           test -f "$SDK_DIR/Libraries/Device/Geehy/G32F031/Source/system_g32f031.c"
           echo "AURORA_SDK_DIR=$SDK_DIR" >> "$GITHUB_ENV"
           echo "AURORA_OUT=$RUNNER_TEMP/aurora-generated" >> "$GITHUB_ENV"
