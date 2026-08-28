@@ -85,7 +85,7 @@ static void protection_step_at(aurora_protection_ctx_t *ctx,
                                uint32_t now_ms)
 {
     sample->timestamp_ms = now_ms;
-    aurora_protection_step(ctx, sample, profile, true, now_ms);
+    aurora_protection_step(ctx, sample, profile, true, true, now_ms);
 }
 
 /*---------------------------------------------------------------------------*
@@ -153,7 +153,7 @@ static void test_measurement_and_zero_calibration(void)
     CHECK((out.valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U);
 
     aurora_measurement_zero_cal_reset(&ctx);
-    fill_adc_block(raw, 2048U);
+    fill_adc_block(raw, 100U);
     for (i = 0U; i < (AURORA_ZERO_CAL_BLOCKS - 1U); ++i)
     {
         CHECK(aurora_measurement_zero_cal_accumulate(&ctx, raw,
@@ -165,7 +165,7 @@ static void test_measurement_and_zero_calibration(void)
           AURORA_STATUS_OK);
     CHECK(aurora_measurement_zero_cal_ready(&ctx));
     CHECK(!aurora_measurement_zero_cal_failed(&ctx));
-    CHECK(ctx.calibration.channel[0].zero_code == 2048);
+    CHECK(ctx.calibration.channel[0].zero_code == 100);
 }
 
 /*---------------------------------------------------------------------------*
@@ -475,15 +475,15 @@ static void test_software_ocp_requires_active_pwm(void)
     s = valid_sample(20000, 19000, 50000, 50000, 0U);
 
     s.timestamp_ms = 1U;
-    aurora_protection_step(&p, &s, &profile, false, 1U);
+    aurora_protection_step(&p, &s, &profile, true, false, 1U);
     s.timestamp_ms = 1001U;
-    aurora_protection_step(&p, &s, &profile, false, 1001U);
+    aurora_protection_step(&p, &s, &profile, true, false, 1001U);
     CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_PV_OVERCURRENT) == 0U);
 
     s.timestamp_ms = 2000U;
-    aurora_protection_step(&p, &s, &profile, true, 2000U);
+    aurora_protection_step(&p, &s, &profile, true, true, 2000U);
     s.timestamp_ms = 2100U;
-    aurora_protection_step(&p, &s, &profile, true, 2100U);
+    aurora_protection_step(&p, &s, &profile, true, true, 2100U);
     CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_PV_OVERCURRENT) != 0U);
 }
 
@@ -547,11 +547,19 @@ static void test_strict_precharge_and_battery_stability(void)
     aurora_power_stage_init(&ctx, 0U);
     command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger,
                                       true, false, false, 1U);
+    CHECK(command.state == AURORA_POWER_WAIT_PV);
+    CHECK(!command.relay_enable);
+
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger,
+                                      true, false, false,
+                                      1U + AURORA_PV_START_QUALIFY_MS);
     CHECK(command.state == AURORA_POWER_START_DELAY);
     CHECK(!command.relay_enable);
 
     command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger,
-                                      true, false, false, 1001U);
+                                      true, false, false,
+                                      1U + AURORA_PV_START_QUALIFY_MS +
+                                      AURORA_START_DELAY_MIN_MS);
     CHECK(command.state == AURORA_POWER_ZERO_CAL);
     command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger,
                                       true, true, false, 2001U);
@@ -776,6 +784,197 @@ static void test_pwm_arm_race(void)
     CHECK(!mock_pwm_active());
 }
 
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_v090_ntc_and_zero_quality(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证NTC开/短物理方向、25°C量级换算，以及PV_I零点块间spread超标会拒绝启动。
+ *---------------------------------------------------------------------------*/
+static void test_v090_ntc_and_zero_quality(void)
+{
+    aurora_measurement_ctx_t ctx;
+    aurora_measurement_t out;
+    aurora_measurement_calibration_t c = unit_calibration();
+    uint16_t raw[AURORA_ADC_BLOCK_WORDS];
+    uint32_t i;
+
+    fill_adc_block(raw, 100U);
+    for (i = 0U; i < AURORA_ADC_SCANS_PER_BLOCK; ++i)
+    {
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 4U] = 4094U;
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 5U] = 0U;
+    }
+    aurora_measurement_init(&ctx, &c);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 10U) ==
+          AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.mos_ntc_status == AURORA_NTC_STATUS_OPEN);
+    CHECK(out.ambient_ntc_status == AURORA_NTC_STATUS_SHORT);
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U);
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_AMB_TEMP) == 0U);
+
+    fill_adc_block(raw, 100U);
+    for (i = 0U; i < AURORA_ADC_SCANS_PER_BLOCK; ++i)
+    {
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 4U] = 3897U;
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 5U] = 3897U;
+    }
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 20U) ==
+          AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.mos_ntc_status == AURORA_NTC_STATUS_OK);
+    CHECK(out.ambient_ntc_status == AURORA_NTC_STATUS_OK);
+    CHECK(out.mos_temp_dC >= 240 && out.mos_temp_dC <= 260);
+
+    aurora_measurement_zero_cal_reset(&ctx);
+    for (i = 0U; i < AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS; ++i)
+    {
+        fill_adc_block(raw, (uint16_t)((i & 1U) ? 100U : 150U));
+        if (i + 1U < AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS)
+        {
+            CHECK(aurora_measurement_zero_cal_accumulate(&ctx, raw,
+                                                         AURORA_ADC_BLOCK_WORDS) ==
+                  AURORA_STATUS_BUSY);
+        }
+        else
+        {
+            CHECK(aurora_measurement_zero_cal_accumulate(&ctx, raw,
+                                                         AURORA_ADC_BLOCK_WORDS) ==
+                  AURORA_STATUS_INVALID);
+        }
+    }
+    CHECK(aurora_measurement_zero_cal_failed(&ctx));
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_v090_lead_temp_comp_and_mature_timing(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证铅酸温补安全钳制、TC去抖、Float低流60s和Recharge 1s成熟时间行为。
+ *---------------------------------------------------------------------------*/
+static void test_v090_lead_temp_comp_and_mature_timing(void)
+{
+    aurora_charger_ctx_t c;
+    aurora_measurement_t s;
+    aurora_charge_output_t o;
+
+    memset(&s, 0, sizeof(s));
+    s.valid_mask = AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_AMB_TEMP |
+                   AURORA_MEAS_VALID_BAT_I_EST;
+    s.ambient_ntc_status = AURORA_NTC_STATUS_OK;
+    s.battery_current_quality = AURORA_MEAS_QUALITY_ESTIMATED;
+    s.battery_current_est_ma = 1000;
+
+    aurora_charger_init(&c, AURORA_CHEM_LEAD, AURORA_PACK_48V, 0U);
+    s.ambient_temp_dC = 550;
+    s.battery_voltage_mv = 50000;
+    (void)aurora_charger_step(&c, &s, false, false, false, 1U);
+    CHECK(c.profile.cv_target_mv == 55840U);
+    CHECK(c.profile.float_target_mv == 52440U);
+
+    aurora_charger_init(&c, AURORA_CHEM_LEAD, AURORA_PACK_48V, 0U);
+    s.ambient_temp_dC = -200;
+    s.battery_voltage_mv = 50000;
+    (void)aurora_charger_step(&c, &s, false, false, false, 1U);
+    CHECK(c.profile.cv_max_mv <= c.profile.ov_fast_mv - AURORA_LEAD_TEMP_COMP_FAST_OV_GUARD_MV);
+
+    aurora_charger_init(&c, AURORA_CHEM_LEAD, AURORA_PACK_72V, 0U);
+    s.ambient_temp_dC = 250;
+    s.battery_voltage_mv = 71000;
+    o = aurora_charger_step(&c, &s, false, false, false, 1U);
+    CHECK(o.state == AURORA_CHARGE_TRICKLE);
+    s.battery_voltage_mv = 73000;
+    o = aurora_charger_step(&c, &s, false, false, false, 10U);
+    CHECK(o.state == AURORA_CHARGE_TRICKLE);
+    o = aurora_charger_step(&c, &s, false, false, false,
+                            10U + AURORA_TRICKLE_TO_CC_HOLD_MS);
+    CHECK(o.state == AURORA_CHARGE_CC);
+
+    c.state = AURORA_CHARGE_FLOAT;
+    c.float_started = true;
+    c.float_start_ms = 1000U;
+    c.tail_since_ms = 0U;
+    s.battery_voltage_mv = 82000;
+    s.battery_current_est_ma = 50;
+    o = aurora_charger_step(&c, &s, false, false, false, 2000U);
+    CHECK(o.state == AURORA_CHARGE_FLOAT);
+    o = aurora_charger_step(&c, &s, false, false, false,
+                            2000U + AURORA_TAIL_HOLD_MS);
+    CHECK(o.state == AURORA_CHARGE_FLOAT);
+    o = aurora_charger_step(&c, &s, false, false, false,
+                            2000U + AURORA_FLOAT_END_HOLD_MS);
+    CHECK(o.state == AURORA_CHARGE_COMPLETE);
+
+    c.state = AURORA_CHARGE_COMPLETE;
+    c.recharge_since_ms = 0U;
+    s.battery_voltage_mv = 76000;
+    o = aurora_charger_step(&c, &s, false, false, false, 70000U);
+    CHECK(o.state == AURORA_CHARGE_COMPLETE);
+    o = aurora_charger_step(&c, &s, false, false, false,
+                            70000U + AURORA_RECHARGE_HOLD_MS);
+    CHECK(o.state == AURORA_CHARGE_CC);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_v090_bus_saturation_and_current_plausibility(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证BST_U近满量程撤销BUS有效位并锁故障，以及PV_I运行/停机合理性诊断。
+ *---------------------------------------------------------------------------*/
+static void test_v090_bus_saturation_and_current_plausibility(void)
+{
+    aurora_measurement_ctx_t m;
+    aurora_measurement_calibration_t c = unit_calibration();
+    aurora_measurement_t s;
+    aurora_protection_ctx_t p;
+    aurora_charge_profile_t profile;
+    uint16_t raw[AURORA_ADC_BLOCK_WORDS];
+    size_t i;
+
+    fill_adc_block(raw, 100U);
+    for (i = 0U; i < AURORA_ADC_SCANS_PER_BLOCK; ++i)
+    {
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 3U] =
+            (uint16_t)(AURORA_ADC_NEAR_FULL_SCALE_CODE + 1U);
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 4U] = 3897U;
+        raw[i * AURORA_ADC_CHANNEL_COUNT + 5U] = 3897U;
+    }
+    aurora_measurement_init(&m, &c);
+    CHECK(aurora_measurement_process_block(&m, raw, AURORA_ADC_BLOCK_WORDS, 10U) ==
+          AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&m, &s));
+    CHECK((s.diagnostic_mask & AURORA_MEAS_DIAG_BUS_ADC_SATURATED) != 0U);
+    CHECK((s.valid_mask & AURORA_MEAS_VALID_BUS_V) == 0U);
+
+    CHECK(aurora_charge_profile_get(AURORA_CHEM_LEAD, AURORA_PACK_48V, &profile));
+    aurora_protection_init(&p, 0U);
+    aurora_protection_step(&p, &s, &profile, true, false, 10U);
+    CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_BUS_ADC_SATURATION) != 0U);
+
+    aurora_protection_init(&p, 0U);
+    s = valid_sample(20000, -1200, 50000, 50000, 0U);
+    protection_step_at(&p, &s, &profile, 1U);
+    protection_step_at(&p, &s, &profile, 11U);
+    CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_PV_CURRENT_PLAUSIBILITY) != 0U);
+
+    aurora_protection_init(&p, 0U);
+    s = valid_sample(20000, 3500, 50000, 50000, 0U);
+    s.timestamp_ms = 1U;
+    aurora_protection_step(&p, &s, &profile, false, false, 1U);
+    s.timestamp_ms = 1501U;
+    aurora_protection_step(&p, &s, &profile, false, false, 1501U);
+    CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_PV_CURRENT_PLAUSIBILITY) == 0U);
+
+    aurora_protection_init(&p, 0U);
+    s = valid_sample(20000, 3500, 50000, 50000, 0U);
+    s.timestamp_ms = 1U;
+    aurora_protection_step(&p, &s, &profile, true, false, 1U);
+    s.timestamp_ms = 1501U;
+    aurora_protection_step(&p, &s, &profile, true, false, 1501U);
+    CHECK((aurora_protection_fault_mask(&p) & AURORA_FAULT_PV_CURRENT_PLAUSIBILITY) != 0U);
+}
+
 /*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
@@ -785,6 +984,9 @@ static void test_pwm_arm_race(void)
 int main(void)
 {
     test_measurement_and_zero_calibration();
+    test_v090_ntc_and_zero_quality();
+    test_v090_lead_temp_comp_and_mature_timing();
+    test_v090_bus_saturation_and_current_plausibility();
     test_protocol_roundtrip();
     test_telemetry_legacy_identity();
     test_storage_atomic_format();
@@ -800,6 +1002,6 @@ int main(void)
     test_service_relay_transition_forces_pwm_off();
     test_watchdog_window_and_adc_overrun();
     test_pwm_arm_race();
-    printf("Aurora v0.8.0 host tests: %u assertions passed.\n", g_assertions);
+    printf("Aurora v0.9.0 host tests: %u assertions passed.\n", g_assertions);
     return 0;
 }

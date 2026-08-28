@@ -86,6 +86,8 @@
 /* V1.12.19启动窗口：>15V动态1~10s；13~15V固定15s；<13V不启动。 */
 #define AURORA_PV_START_MIN_MV                      (13000L)
 #define AURORA_PV_FAST_START_MV                     (15000L)
+/* 13V/15V启动门槛必须连续满足100ms，过滤弱光临界点抖动。 */
+#define AURORA_PV_START_QUALIFY_MS                   (100U)
 #define AURORA_START_DELAY_MIN_MS                   (1000U)
 #define AURORA_START_DELAY_MAX_MS                   (10000U)
 #define AURORA_START_DELAY_STEP_MS                  (1000U)
@@ -99,11 +101,19 @@
 /* ---------------- PV_I上电零点校准 ---------------- */
 /* PV>13V稳定2s后，在PWM和继电器关闭状态下开始PV_I零点校准。 */
 #define AURORA_ZERO_CAL_PV_STABLE_MS                (2000U)
-/* 使用32个完整DMA块平均得到运行时zero_code。 */
+/* 使用32个完整DMA块建立运行时zero_code，同时检查块间稳定性。 */
 #define AURORA_ZERO_CAL_BLOCKS                      (32U)
-/* 零点码安全窗口是工程候选范围，越界不允许发波。 */
-#define AURORA_ZERO_CAL_CODE_MIN                    (1024U)
+/* 新300W理论零点接近0；该宽窗口仅用于启动诊断/Host兼容，最终量产边界必须由实板冻结。 */
+#define AURORA_ZERO_CAL_CODE_MIN                    (0U)
 #define AURORA_ZERO_CAL_CODE_MAX                    (3072U)
+/* 32个块平均码之间允许的最大spread候选；超出视为供电/OPA/噪声不稳定，禁止进入PRECHARGE。 */
+#define AURORA_ZERO_CAL_SPREAD_MAX_CODE             (16U)
+/* 单个DMA块内部PV_I原始码最大允许峰峰值；超出时该块不计入有效零点证据。 */
+#define AURORA_ZERO_CAL_BLOCK_SPREAD_MAX_CODE       (16U)
+/* 最多观察256个DMA块；始终无法取得32个连续稳定块才判本轮零点失败。 */
+#define AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS          (256U)
+/* BST_U等ADC通道进入近满量程时视为测量饱和，不允许用于Relay压差判断。 */
+#define AURORA_ADC_NEAR_FULL_SCALE_CODE             (4080U)
 
 /* ---------------- 测量时效 ---------------- */
 #define AURORA_MEASUREMENT_STALE_MS                 (50U)
@@ -160,6 +170,16 @@
 #define AURORA_BAT_OV_RECOVER_DELAY_MS              (2500U)
 
 /* ---------------- 温度与NTC ---------------- */
+/* 新旧原理图均为5.1k上拉+100K/B3950下拉；ADC参考与上拉同源，因此5V→3.3V不会改变R-ADC比值。 */
+#define AURORA_NTC_PULL_OHM                         (5100UL)
+/* 物理开路会把ADC拉向VDD；物理短路会把ADC拉向GND。阈值留有-40°C正常端点余量。 */
+#define AURORA_NTC_OPEN_RAW_MIN                     (4093U)
+#define AURORA_NTC_SHORT_RAW_MAX                    (64U)
+#define AURORA_NTC_FAULT_DELAY_MS                   (1000U)
+#define AURORA_NTC_RECOVER_DELAY_MS                 (1000U)
+/* 继承120W成熟温度方向滤波思想：10ms观察，连续10次同方向变化才更新控制温度。 */
+#define AURORA_TEMP_FILTER_UPDATE_MS                (10U)
+#define AURORA_TEMP_FILTER_CONFIRM_COUNT            (10U)
 /* 用户确认：300W/本版本MOS从95°C开始降额，不再使用90°C。 */
 #define AURORA_MOS_DERATE_TEMP_DC                   (950)
 #define AURORA_MOS_DERATE_END_TEMP_DC               (1040)
@@ -175,11 +195,13 @@
 #define AURORA_AMB_LOW_RECOVER_TEMP_DC              (-150)
 #define AURORA_AMB_TEMP_TRIP_DELAY_MS               (1000U)
 #define AURORA_AMB_TEMP_RECOVER_DELAY_MS            (1000U)
-/* V2.7 NTC边界：>=125°C按开路，<=-40°C按短路；恢复也需稳定1s。 */
-#define AURORA_NTC_OPEN_TEMP_DC                     (1250)
-#define AURORA_NTC_SHORT_TEMP_DC                    (-400)
-#define AURORA_NTC_FAULT_DELAY_MS                   (1000U)
-#define AURORA_NTC_RECOVER_DELAY_MS                 (1000U)
+/* 铅酸成熟温补：25°C基准，-3mV/°C/2V cell，环境温度钳位-20~55°C。 */
+#define AURORA_LEAD_TEMP_COMP_REFERENCE_DC          (250)
+#define AURORA_LEAD_TEMP_COMP_MIN_DC                (-200)
+#define AURORA_LEAD_TEMP_COMP_MAX_DC                (550)
+#define AURORA_LEAD_TEMP_COMP_MV_PER_C_PER_CELL     (-3L)
+/* 新平台安全适配：温补后的CV上限至少低于固定Fast OV该裕量，防止低温温补撞上3ms保护层。 */
+#define AURORA_LEAD_TEMP_COMP_FAST_OV_GUARD_MV      (500U)
 
 /* ---------------- Duty/PWM ---------------- */
 #define AURORA_DUTY_MIN_Q15                         (655U)    /* 约2%。 */
@@ -215,9 +237,30 @@
 /* 无BAT_I硬件：CC以电池功率前馈+BAT_I_EST低带宽PI修正，增益为候选值。 */
 #define AURORA_CHARGER_CC_KP_MW_PER_MA              (10LL)
 #define AURORA_CHARGER_CC_KI_MW_PER_MA_STEP         (1LL)
+/* 120W成熟充电阶段转移时间行为；全部采用非阻塞时间/积分证据。 */
+#define AURORA_TRICKLE_TO_CC_HOLD_MS                (110U)
+#define AURORA_CC_TO_CV_SCORE_THRESHOLD             (10U)
+#define AURORA_CC_TO_CV_OVERDRIVE_1_MV              (100U)
+#define AURORA_CC_TO_CV_OVERDRIVE_2_MV              (200U)
+#define AURORA_CC_TO_CV_BASE_SCORE                  (1U)
+#define AURORA_CC_TO_CV_OVERDRIVE_1_SCORE           (1U)
+#define AURORA_CC_TO_CV_OVERDRIVE_2_SCORE           (4U)
+#define AURORA_CV_TO_CC_HOLD_MS                     (110U)
+#define AURORA_RECHARGE_HOLD_MS                     (1000U)
+#define AURORA_FLOAT_ENTRY_HOLD_MS                  (110U)
+#define AURORA_FLOAT_END_HOLD_MS                    (60000U)
+#define AURORA_FLOAT_LOW_VOLT_HOLD_MS               (12000U)
 #define AURORA_MAX_CHARGE_TIME_MS                   (900UL * 60UL * 1000UL)
 #define AURORA_FLOAT_TIME_MS                        (180UL * 60UL * 1000UL)
 #define AURORA_TAIL_HOLD_MS                         (1000U)
+/* 120W成熟PV_I合理性诊断，阈值按新3.3V/OPA链以mA表达，仍需台架冻结。 */
+#define AURORA_PV_I_RUN_NEGATIVE_TRIP_MA            (-1000L)
+#define AURORA_PV_I_RUN_NEGATIVE_DELAY_MS           (10U)
+#define AURORA_PV_I_OFF_ABS_TRIP_MA                 (3000L)
+#define AURORA_PV_I_OFF_ABS_DELAY_MS                (1500U)
+#define AURORA_PV_I_PLAUS_RECOVER_ABS_MA            (500L)
+#define AURORA_PV_I_PLAUS_RECOVER_DELAY_MS          (30000U)
+#define AURORA_BUS_ADC_SAT_RECOVER_DELAY_MS          (1000U)
 
 /* ---------------- CMP快速故障恢复 ---------------- */
 /* PWM真正运行后的快速OCP锁存，源消失并保持30s后才允许清除并重新走启动。 */

@@ -784,6 +784,7 @@ void aurora_app_step_1ms(aurora_app_t *app,
     aurora_protection_step(&app->protection,
                            &app->sample,
                            &app->charger.profile,
+                           aurora_measurement_zero_cal_ready(&app->measurement),
                            boost_output_active,
                            now_ms);
 

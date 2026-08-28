@@ -247,7 +247,7 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         return command;
     }
 
-    /* 跟踪PV>=13V持续时间，供V1.12.11零点校准前2s稳定条件使用。 */
+    /* 弱光临界点先做连续资格确认；>=13V同时继续作为零点校准前2s稳定计时。 */
     if (sample->pv_voltage_mv >= AURORA_PV_START_MIN_MV)
     {
         if (ctx->pv_valid_since_ms == 0U)
@@ -260,6 +260,18 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         ctx->pv_valid_since_ms = 0U;
     }
 
+    if (sample->pv_voltage_mv >= AURORA_PV_FAST_START_MV)
+    {
+        if (ctx->pv_fast_valid_since_ms == 0U)
+        {
+            ctx->pv_fast_valid_since_ms = now_ms;
+        }
+    }
+    else
+    {
+        ctx->pv_fast_valid_since_ms = 0U;
+    }
+
     if ((sample->valid_mask & required) == required)
     {
         relay_delta_mv = abs_i32(sample->bus_voltage_mv - sample->battery_voltage_mv);
@@ -269,12 +281,14 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
     {
     case AURORA_POWER_WAIT_PV:
         ctx->relay_closed = false;
-        if (sample->pv_voltage_mv >= AURORA_PV_FAST_START_MV)
+        if ((ctx->pv_fast_valid_since_ms != 0U) &&
+            (elapsed_ms(now_ms, ctx->pv_fast_valid_since_ms) >= AURORA_PV_START_QUALIFY_MS))
         {
             ctx->selected_start_delay_ms = ctx->dynamic_start_delay_ms;
             enter_state(ctx, AURORA_POWER_START_DELAY, now_ms);
         }
-        else if (sample->pv_voltage_mv >= AURORA_PV_START_MIN_MV)
+        else if ((ctx->pv_valid_since_ms != 0U) &&
+                 (elapsed_ms(now_ms, ctx->pv_valid_since_ms) >= AURORA_PV_START_QUALIFY_MS))
         {
             ctx->selected_start_delay_ms = AURORA_START_MID_VOLTAGE_DELAY_MS;
             enter_state(ctx, AURORA_POWER_START_DELAY, now_ms);
@@ -486,7 +500,8 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
     case AURORA_POWER_NO_SUN:
         ctx->relay_closed = false;
         ctx->duty_q15 = 0U;
-        if (sample->pv_voltage_mv >= AURORA_PV_START_MIN_MV)
+        if ((ctx->pv_valid_since_ms != 0U) &&
+            (elapsed_ms(now_ms, ctx->pv_valid_since_ms) >= AURORA_PV_START_QUALIFY_MS))
         {
             enter_state(ctx, AURORA_POWER_WAIT_PV, now_ms);
         }

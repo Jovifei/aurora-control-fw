@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* Protection内部定时条件数量；语义索引只在protection.c内定义。 */
-#define AURORA_PROTECTION_TIMER_COUNT               (30U)
+#define AURORA_PROTECTION_TIMER_COUNT               (34U)
 
 /* 单个真实毫秒条件定时器，不再用“执行N次”等价时间。 */
 typedef struct
@@ -38,6 +38,7 @@ void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
 void aurora_protection_step(aurora_protection_ctx_t *ctx,
                             const aurora_measurement_t *sample,
                             const aurora_charge_profile_t *profile,
+                            bool pv_current_calibrated,
                             bool boost_output_active,
                             uint32_t now_ms);
 bool aurora_protection_clear(aurora_protection_ctx_t *ctx,

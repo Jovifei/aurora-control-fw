@@ -58,7 +58,7 @@ bool drv_board_get_adc_calibration(size_t channel,
     switch (channel)
     {
     case BOARD_ADC_INDEX_PV_I:
-        /* 正向PV电流会使内部OPA输出码下降，因此polarity=-1。 */
+        /* 300W新板内部OPA×16没有旧VDDA/2偏置；正向PV电流候选为ADC码上升，最终以低流实测冻结极性。 */
         calibration->gain_num = BOARD_ADC_PV_I_GAIN_NUM;
         calibration->gain_den = BOARD_ADC_PV_I_GAIN_DEN;
         calibration->zero_code = BOARD_ADC_PV_I_ZERO_CODE;

@@ -7,8 +7,6 @@
 
 /* 去极值平均会从每个通道的数据块中移除一个最大值和一个最小值。 */
 #define MEASUREMENT_TRIMMED_EXTREME_COUNT           (2U)
-/* 最终原理图NTC网络的固定电阻，Ω；沿用120W成熟100K/B3950换算模型。 */
-#define MEASUREMENT_NTC_PULL_OHM                    (5100UL)
 /* 12位ADC阻值公式使用4096作为分母基数。 */
 #define MEASUREMENT_ADC_CODE_BASE                   (4096UL)
 /* 旧工程100K/B3950查表范围：-40~125°C，共166点。 */
@@ -134,6 +132,82 @@ static bool convert_channel(const aurora_adc_calibration_t *cal,
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static aurora_ntc_status_t ntc_status_from_raw(uint16_t raw)
+ * Input       : raw - NTC通道去极值平均ADC码
+ * Output      : OK/OPEN/SHORT物理状态
+ * Description : 5.1k上拉+NTC下拉结构中，开路把ADC拉向VDD，短路把ADC拉向GND；先判物理状态再做温度查表。
+ *---------------------------------------------------------------------------*/
+static aurora_ntc_status_t ntc_status_from_raw(uint16_t raw)
+{
+    if (raw >= AURORA_NTC_OPEN_RAW_MIN)
+    {
+        return AURORA_NTC_STATUS_OPEN;
+    }
+    if (raw <= AURORA_NTC_SHORT_RAW_MAX)
+    {
+        return AURORA_NTC_STATUS_SHORT;
+    }
+    return AURORA_NTC_STATUS_OK;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static int16_t directional_temperature_filter(int16_t candidate_dC,
+ *               int16_t *filtered_dC, uint8_t *rise_count, uint8_t *fall_count,
+ *               bool *initialized)
+ * Input       : candidate_dC - 新温度；filtered_dC/计数/initialized - 通道滤波状态
+ * Output      : 当前控制使用的滤波温度，0.1°C
+ * Description : 继承120W成熟思想：连续10次同方向变化后才更新，方向反转立即清除另一方向证据。
+ *---------------------------------------------------------------------------*/
+static int16_t directional_temperature_filter(int16_t candidate_dC,
+                                               int16_t *filtered_dC,
+                                               uint8_t *rise_count,
+                                               uint8_t *fall_count,
+                                               bool *initialized)
+{
+    if (!*initialized)
+    {
+        *filtered_dC = candidate_dC;
+        *rise_count = 0U;
+        *fall_count = 0U;
+        *initialized = true;
+        return *filtered_dC;
+    }
+
+    if (candidate_dC > *filtered_dC)
+    {
+        *fall_count = 0U;
+        if (*rise_count < UINT8_MAX)
+        {
+            (*rise_count)++;
+        }
+        if (*rise_count >= AURORA_TEMP_FILTER_CONFIRM_COUNT)
+        {
+            *filtered_dC = candidate_dC;
+            *rise_count = 0U;
+        }
+    }
+    else if (candidate_dC < *filtered_dC)
+    {
+        *rise_count = 0U;
+        if (*fall_count < UINT8_MAX)
+        {
+            (*fall_count)++;
+        }
+        if (*fall_count >= AURORA_TEMP_FILTER_CONFIRM_COUNT)
+        {
+            *filtered_dC = candidate_dC;
+            *fall_count = 0U;
+        }
+    }
+    else
+    {
+        *rise_count = 0U;
+        *fall_count = 0U;
+    }
+    return *filtered_dC;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static int16_t ntc_temperature_dC(uint16_t raw)
  * Input       : raw - NTC通道12位ADC平均码
  * Output      : 温度，0.1°C；超表范围分别返回-41.0°C或126.0°C
@@ -150,7 +224,7 @@ static int16_t ntc_temperature_dC(uint16_t raw)
         return -410;
     }
 
-    resistance = (uint32_t)(((uint64_t)raw * MEASUREMENT_NTC_PULL_OHM) /
+    resistance = (uint32_t)(((uint64_t)raw * AURORA_NTC_PULL_OHM) /
                             ((uint64_t)MEASUREMENT_ADC_CODE_BASE - raw));
     if (resistance >= k_ntc_100k_ohm[0])
     {
@@ -263,16 +337,72 @@ aurora_status_t aurora_measurement_process_block(aurora_measurement_ctx_t *ctx,
         next.battery_voltage_mv = value;
         next.valid_mask |= AURORA_MEAS_VALID_BAT_V;
     }
+    next.pv_current_raw = average[ADC_IDX_PV_I];
+    next.bus_voltage_raw = average[ADC_IDX_BUS_V];
+    next.mos_ntc_raw = average[ADC_IDX_MOS_TEMP];
+    next.ambient_ntc_raw = average[ADC_IDX_AMB_TEMP];
+
     if (convert_channel(&ctx->calibration.channel[ADC_IDX_BUS_V],
                         average[ADC_IDX_BUS_V], &value))
     {
         next.bus_voltage_mv = value;
-        next.valid_mask |= AURORA_MEAS_VALID_BUS_V;
+        if (average[ADC_IDX_BUS_V] >= AURORA_ADC_NEAR_FULL_SCALE_CODE)
+        {
+            /* 26:1分压在3.3V参考下约85.8V即到满量程；饱和值只保留诊断，不允许参与Relay压差。 */
+            next.diagnostic_mask |= AURORA_MEAS_DIAG_BUS_ADC_SATURATED;
+        }
+        else
+        {
+            next.valid_mask |= AURORA_MEAS_VALID_BUS_V;
+        }
     }
 
-    next.mos_temp_dC = ntc_temperature_dC(average[ADC_IDX_MOS_TEMP]);
-    next.ambient_temp_dC = ntc_temperature_dC(average[ADC_IDX_AMB_TEMP]);
-    next.valid_mask |= AURORA_MEAS_VALID_MOS_TEMP | AURORA_MEAS_VALID_AMB_TEMP;
+    next.mos_ntc_status = ntc_status_from_raw(average[ADC_IDX_MOS_TEMP]);
+    next.ambient_ntc_status = ntc_status_from_raw(average[ADC_IDX_AMB_TEMP]);
+
+    if ((ctx->last_temp_filter_ms == 0U) ||
+        ((timestamp_ms - ctx->last_temp_filter_ms) >= AURORA_TEMP_FILTER_UPDATE_MS))
+    {
+        if (next.mos_ntc_status == AURORA_NTC_STATUS_OK)
+        {
+            (void)directional_temperature_filter(
+                ntc_temperature_dC(average[ADC_IDX_MOS_TEMP]),
+                &ctx->mos_filtered_dC, &ctx->mos_rise_count, &ctx->mos_fall_count,
+                &ctx->mos_temp_initialized);
+        }
+        else
+        {
+            ctx->mos_temp_initialized = false;
+            ctx->mos_rise_count = 0U;
+            ctx->mos_fall_count = 0U;
+        }
+
+        if (next.ambient_ntc_status == AURORA_NTC_STATUS_OK)
+        {
+            (void)directional_temperature_filter(
+                ntc_temperature_dC(average[ADC_IDX_AMB_TEMP]),
+                &ctx->ambient_filtered_dC, &ctx->ambient_rise_count,
+                &ctx->ambient_fall_count, &ctx->ambient_temp_initialized);
+        }
+        else
+        {
+            ctx->ambient_temp_initialized = false;
+            ctx->ambient_rise_count = 0U;
+            ctx->ambient_fall_count = 0U;
+        }
+        ctx->last_temp_filter_ms = timestamp_ms;
+    }
+
+    if ((next.mos_ntc_status == AURORA_NTC_STATUS_OK) && ctx->mos_temp_initialized)
+    {
+        next.mos_temp_dC = ctx->mos_filtered_dC;
+        next.valid_mask |= AURORA_MEAS_VALID_MOS_TEMP;
+    }
+    if ((next.ambient_ntc_status == AURORA_NTC_STATUS_OK) && ctx->ambient_temp_initialized)
+    {
+        next.ambient_temp_dC = ctx->ambient_filtered_dC;
+        next.valid_mask |= AURORA_MEAS_VALID_AMB_TEMP;
+    }
 
     if ((next.valid_mask & (AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I)) ==
         (AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I))
@@ -374,6 +504,9 @@ void aurora_measurement_zero_cal_reset(aurora_measurement_ctx_t *ctx)
     {
         ctx->zero_cal_sum = 0U;
         ctx->zero_cal_blocks = 0U;
+        ctx->zero_cal_attempt_blocks = 0U;
+        ctx->zero_cal_min_code = UINT16_MAX;
+        ctx->zero_cal_max_code = 0U;
         ctx->zero_cal_ready = false;
         ctx->zero_cal_failed = false;
     }
@@ -384,14 +517,21 @@ void aurora_measurement_zero_cal_reset(aurora_measurement_ctx_t *ctx)
  *               aurora_measurement_ctx_t *ctx, const uint16_t *raw,
  *               size_t word_count)
  * Input       : ctx - 测量上下文；raw - PWM关闭时的完整DMA块；word_count - 块字数
- * Output      : OK表示校准完成；BUSY表示继续累计；INVALID表示参数或零点越界
- * Description : 累计32个完整PV_I块并更新运行时zero_code，避免理论2048码直接用于量产。
+ * Output      : OK表示校准完成；BUSY表示继续寻找连续稳定证据；INVALID表示达到最大重试仍无法建立可靠零点
+ * Description : 继承120W成熟“稳定后才接受零点”思想：先检查单块峰峰值，再要求32个连续有效块的均值跨度受限；
+ *               不稳定块会重启连续稳定窗口，只有累计观察达到上限仍失败才阻止本轮启动。
  *---------------------------------------------------------------------------*/
 aurora_status_t aurora_measurement_zero_cal_accumulate(aurora_measurement_ctx_t *ctx,
                                                         const uint16_t *raw,
                                                         size_t word_count)
 {
     uint32_t zero_code;
+    uint16_t block_code;
+    uint16_t block_min = UINT16_MAX;
+    uint16_t block_max = 0U;
+    uint16_t candidate_min;
+    uint16_t candidate_max;
+    size_t scan;
 
     if ((ctx == NULL) || (raw == NULL) || (word_count != AURORA_ADC_BLOCK_WORDS))
     {
@@ -406,21 +546,85 @@ aurora_status_t aurora_measurement_zero_cal_accumulate(aurora_measurement_ctx_t 
         return AURORA_STATUS_INVALID;
     }
 
-    ctx->zero_cal_sum += trimmed_average(raw, ADC_IDX_PV_I);
+    ctx->zero_cal_attempt_blocks++;
+    block_code = trimmed_average(raw, ADC_IDX_PV_I);
+    for (scan = 0U; scan < AURORA_ADC_SCANS_PER_BLOCK; ++scan)
+    {
+        const uint16_t value =
+            raw[(scan * AURORA_ADC_CHANNEL_COUNT) + ADC_IDX_PV_I];
+        if (value < block_min)
+        {
+            block_min = value;
+        }
+        if (value > block_max)
+        {
+            block_max = value;
+        }
+    }
+
+    /* 单块本身噪声过大或均值越出候选窗口：该块拒绝，并重新寻找连续稳定窗口。 */
+    if (((uint32_t)block_max - block_min) > AURORA_ZERO_CAL_BLOCK_SPREAD_MAX_CODE ||
+#if AURORA_ZERO_CAL_CODE_MIN > 0U
+        ((uint32_t)block_code < AURORA_ZERO_CAL_CODE_MIN) ||
+#endif
+        ((uint32_t)block_code > AURORA_ZERO_CAL_CODE_MAX))
+    {
+        ctx->zero_cal_sum = 0U;
+        ctx->zero_cal_blocks = 0U;
+        ctx->zero_cal_min_code = UINT16_MAX;
+        ctx->zero_cal_max_code = 0U;
+        if (ctx->zero_cal_attempt_blocks >= AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS)
+        {
+            ctx->zero_cal_failed = true;
+            return AURORA_STATUS_INVALID;
+        }
+        return AURORA_STATUS_BUSY;
+    }
+
+    if (ctx->zero_cal_blocks == 0U)
+    {
+        candidate_min = block_code;
+        candidate_max = block_code;
+    }
+    else
+    {
+        candidate_min = (block_code < ctx->zero_cal_min_code) ?
+                            block_code : ctx->zero_cal_min_code;
+        candidate_max = (block_code > ctx->zero_cal_max_code) ?
+                            block_code : ctx->zero_cal_max_code;
+    }
+
+    /* 均值发生漂移时，以当前稳定块作为新窗口第1块，而不是立即永久失败。 */
+    if (((uint32_t)candidate_max - candidate_min) > AURORA_ZERO_CAL_SPREAD_MAX_CODE)
+    {
+        ctx->zero_cal_sum = block_code;
+        ctx->zero_cal_blocks = 1U;
+        ctx->zero_cal_min_code = block_code;
+        ctx->zero_cal_max_code = block_code;
+        if (ctx->zero_cal_attempt_blocks >= AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS)
+        {
+            ctx->zero_cal_failed = true;
+            return AURORA_STATUS_INVALID;
+        }
+        return AURORA_STATUS_BUSY;
+    }
+
+    ctx->zero_cal_sum += block_code;
     ctx->zero_cal_blocks++;
+    ctx->zero_cal_min_code = candidate_min;
+    ctx->zero_cal_max_code = candidate_max;
+
     if (ctx->zero_cal_blocks < AURORA_ZERO_CAL_BLOCKS)
     {
+        if (ctx->zero_cal_attempt_blocks >= AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS)
+        {
+            ctx->zero_cal_failed = true;
+            return AURORA_STATUS_INVALID;
+        }
         return AURORA_STATUS_BUSY;
     }
 
     zero_code = ctx->zero_cal_sum / ctx->zero_cal_blocks;
-    if ((zero_code < AURORA_ZERO_CAL_CODE_MIN) ||
-        (zero_code > AURORA_ZERO_CAL_CODE_MAX))
-    {
-        ctx->zero_cal_failed = true;
-        return AURORA_STATUS_INVALID;
-    }
-
     ctx->calibration.channel[ADC_IDX_PV_I].zero_code = (int16_t)zero_code;
     ctx->zero_cal_ready = true;
     return AURORA_STATUS_OK;

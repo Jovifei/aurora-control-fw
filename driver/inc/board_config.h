@@ -81,18 +81,28 @@
 #define BOARD_ADC_FULL_SCALE_CODE                   (4095L)
 /* 模拟参考电压名义值，mV；实板标定前不得改为已验证。 */
 #define BOARD_ADC_REFERENCE_MV                      (3300L)
-/* PV_I：3mΩ分流器×内部16倍OPA，约16.79mA/码。 */
+/*
+ * PV_I：3mΩ分流器×内部16倍OPA，3.3V/12bit下理论约16.79mA/码。
+ * 300W新板没有旧120W的VDDA/2电流偏置，零电流理论码接近0；实际零点必须在PWM/Relay关闭时运行时校准。
+ * 正向电流使内部OPA输出升高，因此极性候选为+1；BOARD_GATE_ANALOG_CALIBRATED保持0直到实板方向和比例校准完成。
+ */
 #define BOARD_ADC_PV_I_GAIN_NUM                     (16790L)
 #define BOARD_ADC_PV_I_GAIN_DEN                     (1000L)
-#define BOARD_ADC_PV_I_ZERO_CODE                    (2048)
-#define BOARD_ADC_PV_I_POLARITY                     (-1)
+#define BOARD_ADC_PV_I_ZERO_CODE                    (0)
+#define BOARD_ADC_PV_I_POLARITY                     (1)
+/* 12bit ADC接近满量程判据；BST_U达到该区间时视为量程不可信，不允许据此吸合Relay。 */
+#define BOARD_ADC_NEAR_FULL_SCALE_CODE              (4080U)
 /* PV_U：75k/3k分压，比例26。 */
 #define BOARD_ADC_PV_U_DIVIDER_NUM                  (26L)
 #define BOARD_ADC_PV_U_DIVIDER_DEN                  (1L)
 /* BAT_U：15M/510k分压，比例15510/510。 */
 #define BOARD_ADC_BAT_U_DIVIDER_NUM                 (15510L)
 #define BOARD_ADC_BAT_U_DIVIDER_DEN                 (510L)
-/* BST_U：125k/5k分压，比例26。 */
+/*
+ * BST_U：125k/5k分压，比例26。3.3V ADC理论满量程仅约85.8V。
+ * 对72V高SOC档位存在量程风险：87.2V/93V均会超过ADC参考。软件必须把近满量程标记为不可信，
+ * 硬件分压是否调整列为v0.9.0 P0台架/硬件整改项，不能靠软件系数掩盖。
+ */
 #define BOARD_ADC_BUS_U_DIVIDER_NUM                 (26L)
 #define BOARD_ADC_BUS_U_DIVIDER_DEN                 (1L)
 

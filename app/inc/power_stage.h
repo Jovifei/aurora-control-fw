@@ -12,7 +12,8 @@ typedef struct
 {
     int64_t power_integral;                          /* 功率执行器积分项，Q15。 */
     uint32_t state_since_ms;                         /* 当前状态进入时间。 */
-    uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点。 */
+    uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点，兼作100ms启动资格与2s零点稳定依据。 */
+    uint32_t pv_fast_valid_since_ms;                 /* PV持续>=15V的起点，用于动态1~10s快速启动资格。 */
     uint32_t delta_ok_since_ms;                      /* BST_U/BAT_U压差持续满足起点。 */
     uint32_t no_sun_since_ms;                        /* 真正无PV持续起点。 */
     uint32_t bat_stability_since_ms;                 /* 10s电池稳定窗口起点。 */
