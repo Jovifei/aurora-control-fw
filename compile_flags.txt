@@ -11,6 +11,4 @@
 -Ivendor/cmsis/Include
 -Ivendor/device/Include
 -Ivendor/ddl/Include
--isystem
-D:/Keil_v5/ARM/ARMCLANG/include
 -Wno-unknown-warning-option

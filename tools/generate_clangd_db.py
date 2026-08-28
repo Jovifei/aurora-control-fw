@@ -132,7 +132,7 @@ def write_database(entries: list[dict[str, object]]) -> None:
     print(f"Wrote {OUTPUT} ({len(entries)} translation units)")
 
 
-def write_compile_flags(runtime_include: Path | None) -> None:
+def write_compile_flags() -> None:
     lines = [
         "--target=arm-none-eabi",
         "-mcpu=cortex-m0plus",
@@ -148,8 +148,6 @@ def write_compile_flags(runtime_include: Path | None) -> None:
         "-Ivendor/device/Include",
         "-Ivendor/ddl/Include",
     ]
-    if runtime_include is not None:
-        lines.extend(["-isystem", runtime_include.as_posix()])
     lines.append("-Wno-unknown-warning-option")
     FLAGS_TXT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote {FLAGS_TXT}")
@@ -190,7 +188,7 @@ def main(argv: list[str]) -> int:
             )
 
     write_database(entries)
-    write_compile_flags(runtime_include)
+    write_compile_flags()
     print(f"Compiler: {clang}")
     if runtime_include is not None:
         print(f"System headers: {runtime_include}")

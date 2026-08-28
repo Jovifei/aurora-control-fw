@@ -30,6 +30,24 @@ class ArchitectureCheckerTests(unittest.TestCase):
             if file_path.startswith("..\\"):
                 self.assertNotIn("..", file_name)
 
+    def test_clangd_workspace_files_are_allowed_but_database_is_ignored(self):
+        for relative in [".vscode/settings.json", ".vscode/extensions.json"]:
+            self.assertTrue((ROOT / relative).is_file(), relative)
+            ignored = subprocess.run(
+                ["git", "check-ignore", "-q", relative],
+                cwd=ROOT,
+                check=False,
+            )
+            self.assertNotEqual(ignored.returncode, 0, relative)
+
+        self.assertTrue((ROOT / "compile_commands.json").is_file())
+        database_ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "compile_commands.json"],
+            cwd=ROOT,
+            check=False,
+        )
+        self.assertEqual(database_ignored.returncode, 0)
+
     def test_product_layers_are_split_into_app_and_driver(self):
         self.assertFalse((ROOT / "project" / "keil").exists())
         self.assertFalse((ROOT / "service").exists())

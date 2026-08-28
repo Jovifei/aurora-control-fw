@@ -29,17 +29,20 @@ compile_commands.json
 
 # IDE / OS
 .vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
 
 # Generated reports and local captures
 *.json
+!.vscode/settings.json
+!.vscode/extensions.json
 captures/
 logs/
 
 # Python caches
 __pycache__/
 *.py[cod]
+
+# clangd background index cache
+.cache/

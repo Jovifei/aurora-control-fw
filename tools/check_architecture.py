@@ -59,9 +59,14 @@ for removed_dir in [root / "service", root / "board"]:
     if removed_dir.exists():
         errors.append(f"旧产品层目录不得存在: {removed_dir.name}")
 
-# 生成JSON和构建输出不得提交。
+# 仅允许clangd本地数据库和两份可提交的工作区配置；其余JSON仍禁止进入工程。
+allowed_json = {
+    root / "compile_commands.json",
+    root / ".vscode/settings.json",
+    root / ".vscode/extensions.json",
+}
 for path in root.rglob("*.json"):
-    if is_project_content(path):
+    if is_project_content(path) and path not in allowed_json:
         errors.append(f"仓库不应提交生成JSON: {path.relative_to(root)}")
 
 app_files = [*(root / "app/inc").glob("*.h"), *(root / "app/src").glob("*.c")]
