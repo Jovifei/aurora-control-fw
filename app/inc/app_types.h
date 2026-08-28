@@ -252,7 +252,8 @@ typedef struct
     bool weak_light;                                 /* true表示PV功率不足。 */
     bool input_limited;                              /* true表示PV电流/电压/功率包络正在限幅。 */
     bool thermal_limited;                            /* true表示温度包络正在限幅。 */
-    uint8_t output_reserved[3];                      /* 显式补齐布尔字段。 */
+    bool restart_required;                           /* true表示本轮阶段转换必须先退出RUN并重新做电池稳定准入。 */
+    uint8_t output_reserved[2];                      /* 显式补齐布尔字段。 */
 } aurora_charge_output_t;
 
 /* MPPT外环和PV电压PI输出。 */
