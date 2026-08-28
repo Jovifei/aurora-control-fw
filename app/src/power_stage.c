@@ -431,6 +431,21 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
     case AURORA_POWER_RUN:
         ctx->relay_closed = true;
 
+        /*
+         * Complete复充或Float低压维持失败时，先立即撤销Duty并重新做BAT_U稳定资格。
+         * 这属于正常充电会话重启：保持继电器闭合，不冒充PV_I传感器故障重新校零。
+         */
+        if (charger->restart_required)
+        {
+            ctx->duty_q15 = 0U;
+            ctx->power_integral = 0LL;
+            ctx->bat_stability_since_ms = now_ms;
+            ctx->bat_stability_min_mv = sample->battery_voltage_mv;
+            ctx->bat_stability_max_mv = sample->battery_voltage_mv;
+            enter_state(ctx, AURORA_POWER_BAT_STABILITY, now_ms);
+            break;
+        }
+
         /* 只有PV<13V且MPPT当前未运行才累计“真正无发电”30min。电池充满不等于无太阳。 */
         if ((sample->pv_voltage_mv < AURORA_PV_START_MIN_MV) && !mppt->valid)
         {
