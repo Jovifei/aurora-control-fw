@@ -29,7 +29,8 @@ app/src/       9个纯业务实现
 service/       ISR事件邮箱、主循环调度、APP与Driver唯一桥接
 board/         PinMap、标定、Flash地址和人工安全门禁
 driver/        G32F031目标外设实现
-project/keil/  AC6工程、main、中断和scatter
+service/      ISR桥接、目标入口、主循环调度和APP↔Driver安全桥
+project/      AC6工程、scatter和用户工程配置
 tests/         Host回归、故障注入和模拟驱动
 tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 ```
@@ -95,6 +96,21 @@ git status --short
 ```
 
 Keil/台架证据未完成时，提交说明必须明确写“Host验证通过，Keil链接/板级验证未执行”，不得使用“量产通过”“硬件安全闭环”等表述。
+
+## 7. 蓝牙与Debug路由
+
+工程默认由PA10/PA11承载蓝牙USART。需要观察`[GE_DEBUG]`日志时，在构建宏中选择：
+
+```text
+BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
+DEBUG_ENABLE=1
+```
+
+该模式把USART切换到PB7/PB8，并关闭产品协议解析和主动遥测；不要在蓝牙模式打开Debug打印，否则会污染蓝牙数据。打印实现位于`service/debug.c`，各模块开关位于`service/debug.h`。
+
+## 8. MOS温度状态
+
+PB12的板载MOS NTC已按原理图R37=5.1K、R42=100K 1% 3950实现-40°C～125°C查表换算。开路、短路或超出换算范围会锁存MOS温度传感器故障，必须按保护流程显式清除。PB5接CON4外接环境NTC，待实际探头型号和B值确认后再启用。
 
 
 ## 当前接手与审计

@@ -50,6 +50,11 @@ if app_subdirs != {"inc", "src"}:
     errors.append(f"app必须且只能包含inc/src: {sorted(app_subdirs)}")
 if list((root / "app").glob("*.[ch]")):
     errors.append("app根目录仍存在未迁移的.c/.h")
+project_sources = [path for path in (root / "project").glob("*.[ch]")]
+if project_sources:
+    errors.append(f"project根目录不得放生产源码: {[path.name for path in project_sources]}")
+if (root / "project/keil").exists():
+    errors.append("project下不得保留keil子目录")
 for flat_dir in [root / "service", root / "board"]:
     nested = [path for path in flat_dir.iterdir() if path.is_dir()]
     if nested:
@@ -119,16 +124,31 @@ expected_macros = {
     "BOARD_PIN_COMP0_OUT_AF": "7U",
     "BOARD_COMP0_FAULT_ACTIVE_LOW": "1U",
     "BOARD_PIN_LED_FAULT_NUMBER": "11U",
+    "BOARD_NTC_MOS_PULLUP_OHM": "5100L",
+    "BOARD_NTC_MOS_R25_OHM": "100000L",
+    "BOARD_NTC_MOS_BETA_KELVIN": "3950L",
     "BOARD_POWER_OUTPUT_ALLOWED": "0U",
 }
 for name, value in expected_macros.items():
     if re.search(rf"#define\s+{name}\s+\({re.escape(value)}\)", board_cfg) is None:
         errors.append(f"最终PinMap/门禁缺失或被改动: {name}=({value})")
+for token in [
+    "BOARD_USART_MODE_BLUETOOTH", "BOARD_USART_MODE_DEBUG",
+    "BOARD_USART_MODE",
+]:
+    if token not in board_cfg:
+        errors.append(f"USART路由配置缺失: {token}")
+if re.search(r"#define\s+BOARD_USART_MODE\s+BOARD_USART_MODE_BLUETOOTH", board_cfg) is None:
+    errors.append("USART默认路由必须是蓝牙PA10/PA11")
 
 uart = (root / "driver/src/drv_uart.c").read_text(encoding="utf-8", errors="ignore")
-if "DDL_GPIO_PIN_10; /* UR_TX / PA10 / AF0 */" not in uart or \
-   "DDL_GPIO_PIN_11; /* UR_RX / PA11 / AF0 */" not in uart:
-    errors.append("UART驱动未绑定最终PA10/PA11")
+for token in [
+    "BOARD_PIN_UART_TX_NUMBER", "BOARD_PIN_UART_RX_NUMBER",
+    "BOARD_PIN_DEBUG_TX_NUMBER", "BOARD_PIN_DEBUG_RX_NUMBER",
+    "DRV_UART_GPIO_PIN",
+]:
+    if token not in uart:
+        errors.append(f"UART驱动缺少路由引脚: {token}")
 comp = (root / "driver/src/drv_comp.c").read_text(encoding="utf-8", errors="ignore")
 if "PB10 / AF7 = COMP0_OUT" not in comp or "DDL_GPIO_AF_7" not in comp:
     errors.append("COMP0_OUT未绑定PB10/AF7")
@@ -157,7 +177,7 @@ if "drv_pwm_quiesce_break_irq_isr" not in pwm:
     errors.append("Break ISR缺少只屏蔽重复中断、不清锁存的接口")
 
 # ISR桥接保持轻量，不得调用APP重业务。
-isr = (root / "project/keil/interrupts.c").read_text(encoding="utf-8", errors="ignore")
+isr = (root / "service/interrupts.c").read_text(encoding="utf-8", errors="ignore")
 for forbidden_call in [
     "aurora_mppt_step", "aurora_charger_step", "aurora_measurement_process_block",
     "aurora_storage_encode_page", "aurora_ui_step"
@@ -170,6 +190,8 @@ for line in isr.splitlines():
         "budget" in stripped and "drv_uart_rx_ready_isr" in stripped
     ):
         errors.append(f"ISR中存在未证明有界的while: {stripped}")
+if "debug_printf" in isr or "DEBUG_" in isr:
+    errors.append("ISR不得直接输出Debug日志")
 
 app_c_count = len(list((root / "app/src").glob("*.c")))
 if app_c_count > 10:
@@ -178,9 +200,13 @@ if app_c_count > 10:
 cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
 if "app/src/app.c" not in cmake or "app/inc" not in cmake:
     errors.append("CMake未切换到app/src和app/inc")
-keil = (root / "project/keil/AuroraControl.uvprojx").read_text(encoding="utf-8", errors="ignore")
+if "service/debug.c" not in cmake:
+    errors.append("CMake未加入service/debug.c")
+keil = (root / "project/AuroraControl.uvprojx").read_text(encoding="utf-8", errors="ignore")
 if "app\\src\\app.c" not in keil or "app\\inc" not in keil:
     errors.append("Keil工程未切换到app/src和app/inc")
+if "..\\service\\debug.c" not in keil:
+    errors.append("Keil工程未加入service/debug.c")
 if re.search(r"<FileName>\.\.\\\.\.\\", keil):
     errors.append("Keil外部源码的FileName不得带父目录，避免中间文件落入源码路径")
 

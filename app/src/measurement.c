@@ -19,6 +19,30 @@ typedef enum
     ADC_IDX_AMB_TEMP
 } measurement_adc_index_t;
 
+/* NTC查表步长，单位0.1°C；表覆盖-40°C到125°C。 */
+#define MEASUREMENT_NTC_TABLE_STEP_DC               (50)
+/* NTC查表首项温度，单位0.1°C。 */
+#define MEASUREMENT_NTC_TABLE_MIN_TEMP_DC           (-400)
+/* NTC查表末项温度，单位0.1°C。 */
+#define MEASUREMENT_NTC_TABLE_MAX_TEMP_DC           (1250)
+/* 100K/3950 NTC在-40°C到125°C的理论阻值表，单位ohm。 */
+static const uint32_t k_ntc_100k_3950_resistance_ohm[] =
+{
+    4018597U, 2815768U, 2002039U, 1443169U, 1053847U, 778981U,
+    582457U, 440260U, 336206U, 259246U, 201746U, 158371U,
+    125353U, 100000U, 80371U, 65055U, 53015U, 43481U,
+    35882U, 29784U, 24862U, 20864U, 17598U, 14917U,
+    12703U, 10867U, 9336U, 8054U, 6975U, 6064U,
+    5291U, 4633U, 4071U, 3588U
+};
+
+/* 查表对应的R25，单位ohm；必须与board层提供的参数一致。 */
+#define MEASUREMENT_NTC_R25_OHM                     (100000L)
+/* 查表对应的Beta参数，单位K；必须与board层提供的参数一致。 */
+#define MEASUREMENT_NTC_BETA_KELVIN                 (3950L)
+/* 查表对应的Beta参考温度，单位0.1°C。 */
+#define MEASUREMENT_NTC_REFERENCE_TEMP_DC           (250)
+
 /*---------------------------------------------------------------------------*
  * Name        : static int32_t clamp_i32(int64_t value)
  * Input       : value - 64位有符号中间结果
@@ -73,11 +97,99 @@ static uint16_t trimmed_average(const uint16_t *raw, size_t channel)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static bool convert_ntc_channel(const aurora_adc_calibration_t *cal,
+ *               uint16_t raw, int32_t *physical)
+ * Input       : cal - NTC标定参数；raw - 去极值平均ADC码；physical - 温度输出地址
+ * Output      : true - 温度换算成功；false - 参数错误、开短路或超出查表范围
+ * Description : 按5.1K上拉和100K/3950 Beta曲线计算NTC阻值，再用-40°C到125°C表插值输出0.1°C温度。
+ *---------------------------------------------------------------------------*/
+static bool convert_ntc_channel(const aurora_adc_calibration_t *cal,
+                                uint16_t raw,
+                                int32_t *physical)
+{
+    const size_t table_count = sizeof(k_ntc_100k_3950_resistance_ohm) /
+                               sizeof(k_ntc_100k_3950_resistance_ohm[0]);
+    uint32_t full_scale;
+    uint32_t pullup;
+    uint32_t coldest_code;
+    uint32_t hottest_code;
+    uint64_t numerator;
+    uint32_t denominator;
+    uint32_t resistance;
+    size_t index;
+
+    if ((cal == NULL) || (physical == NULL) || !cal->valid ||
+        (cal->kind != AURORA_ADC_CALIBRATION_NTC_BETA) ||
+        (cal->ntc_pullup_ohm <= 0) || (cal->ntc_r25_ohm != MEASUREMENT_NTC_R25_OHM) ||
+        (cal->ntc_beta_kelvin != MEASUREMENT_NTC_BETA_KELVIN) ||
+        (cal->ntc_full_scale_code <= 0) ||
+        (cal->ntc_full_scale_code <= (int32_t)raw) || (raw == 0U) ||
+        (cal->ntc_reference_temp_dc != MEASUREMENT_NTC_REFERENCE_TEMP_DC) ||
+        (cal->ntc_min_temp_dc != MEASUREMENT_NTC_TABLE_MIN_TEMP_DC) ||
+        (cal->ntc_max_temp_dc != MEASUREMENT_NTC_TABLE_MAX_TEMP_DC))
+    {
+        return false;
+    }
+
+    full_scale = (uint32_t)cal->ntc_full_scale_code;
+    pullup = (uint32_t)cal->ntc_pullup_ohm;
+    coldest_code = (uint32_t)(((uint64_t)full_scale *
+                               k_ntc_100k_3950_resistance_ohm[0] +
+                               (pullup + k_ntc_100k_3950_resistance_ohm[0]) / 2U) /
+                              (pullup + k_ntc_100k_3950_resistance_ohm[0]));
+    hottest_code = (uint32_t)(((uint64_t)full_scale *
+                               k_ntc_100k_3950_resistance_ohm[table_count - 1U] +
+                               (pullup + k_ntc_100k_3950_resistance_ohm[table_count - 1U]) / 2U) /
+                              (pullup + k_ntc_100k_3950_resistance_ohm[table_count - 1U]));
+    if ((raw < hottest_code) || (raw > coldest_code))
+    {
+        return false;
+    }
+
+    denominator = full_scale - (uint32_t)raw;
+    numerator = (uint64_t)pullup * (uint32_t)raw;
+    resistance = (uint32_t)((numerator + (denominator / 2U)) / denominator);
+    if (resistance > k_ntc_100k_3950_resistance_ohm[0])
+    {
+        *physical = cal->ntc_min_temp_dc;
+        return true;
+    }
+    if (resistance < k_ntc_100k_3950_resistance_ohm[table_count - 1U])
+    {
+        *physical = cal->ntc_max_temp_dc;
+        return true;
+    }
+
+    for (index = 0U; index + 1U < table_count; ++index)
+    {
+        const uint32_t high_resistance = k_ntc_100k_3950_resistance_ohm[index];
+        const uint32_t low_resistance = k_ntc_100k_3950_resistance_ohm[index + 1U];
+
+        if ((resistance <= high_resistance) && (resistance >= low_resistance))
+        {
+            const uint32_t resistance_span = high_resistance - low_resistance;
+            const uint32_t resistance_delta = high_resistance - resistance;
+            const int64_t base_temp = (int64_t)cal->ntc_min_temp_dc +
+                                       ((int64_t)index * MEASUREMENT_NTC_TABLE_STEP_DC);
+            const int64_t temp_delta =
+                (((int64_t)resistance_delta * MEASUREMENT_NTC_TABLE_STEP_DC) +
+                 (resistance_span / 2U)) /
+                resistance_span;
+
+            *physical = clamp_i32(base_temp + temp_delta);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static bool convert_channel(const aurora_adc_calibration_t *cal,
  *               uint16_t raw, int32_t *physical)
  * Input       : cal - 通道标定参数；raw - 经过滤波的ADC码；physical - 物理量输出地址
  * Output      : true - 已完成有效换算；false - 标定或输出参数无效
- * Description : 按零点、比例、极性和偏移换算物理量；标定无效时不发布该通道有效位。
+ * Description : 按标定类型执行线性或NTC换算；标定无效时不发布该通道有效位。
  *---------------------------------------------------------------------------*/
 static bool convert_channel(const aurora_adc_calibration_t *cal,
                             uint16_t raw,
@@ -85,7 +197,16 @@ static bool convert_channel(const aurora_adc_calibration_t *cal,
 {
     int64_t value;
 
-    if ((cal == NULL) || (physical == NULL) || !cal->valid || (cal->gain_den == 0))
+    if ((cal == NULL) || (physical == NULL))
+    {
+        return false;
+    }
+    if (cal->kind == AURORA_ADC_CALIBRATION_NTC_BETA)
+    {
+        return convert_ntc_channel(cal, raw, physical);
+    }
+    if ((cal->kind != AURORA_ADC_CALIBRATION_LINEAR) ||
+        !cal->valid || (cal->gain_den == 0))
     {
         return false;
     }

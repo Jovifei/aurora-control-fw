@@ -18,6 +18,10 @@ extern "C" {
                                                      DRV_ADC_SCANS_PER_BLOCK)
 /* Q15中100%占空比标度。 */
 #define DRV_DUTY_Q15_ONE                            (32768U)
+/* ATMR共享中断待处理位：Break事件。 */
+#define DRV_PWM_IRQ_BREAK                            (1U << 0)
+/* ATMR共享中断待处理位：一次性零CCR Update事件。 */
+#define DRV_PWM_IRQ_UPDATE                           (1U << 1)
 /* 驱动故障位：MOS支路快速过流。 */
 #define DRV_FAULT_MOS_OCP                           (1UL << 0)
 /* 驱动故障位：PV输入快速过流。 */
@@ -69,6 +73,7 @@ bool drv_pwm_break_source_active(void);
 bool drv_pwm_break_latched(void);
 bool drv_pwm_clear_break_latch(void);
 uint32_t drv_pwm_applied_sequence(void);
+uint8_t drv_pwm_irq_pending_isr(void);
 void drv_pwm_update_isr_ack(void);
 
 /* 内部OPA/COMP快速故障链。 */
@@ -82,7 +87,7 @@ void drv_io_set_relay(bool on);
 void drv_io_set_link(bool on);
 void drv_io_set_leds(bool run_on, bool fault_on);
 
-/* 产品UART的环形发送与ISR字节接口。 */
+/* 蓝牙/Debug共享USART的环形发送与ISR字节接口。 */
 bool drv_uart_init(void);
 bool drv_uart_send(const uint8_t *data, size_t length);
 bool drv_uart_tx_busy(void);

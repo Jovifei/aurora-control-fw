@@ -12,7 +12,7 @@ SOURCE_ROOTS = [
     ROOT / "board",
     ROOT / "driver/src",
     ROOT / "service",
-    ROOT / "project/keil",
+    ROOT / "project",
     ROOT / "tests",
 ]
 HEADER_ROOTS = [

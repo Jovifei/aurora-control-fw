@@ -164,6 +164,28 @@ size_t mock_uart_tx_length(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : const uint8_t *mock_uart_tx_data(void)
+ * Input       : 无
+ * Output      : Host模拟UART累计发送缓存首地址
+ * Description : 返回当前发送缓存，供Debug日志测试检查前缀和模块标签。
+ *---------------------------------------------------------------------------*/
+const uint8_t *mock_uart_tx_data(void)
+{
+    return g_uart_tx;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void mock_uart_clear_tx(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 清空Host模拟UART发送缓存，不改变其他模拟外设状态。
+ *---------------------------------------------------------------------------*/
+void mock_uart_clear_tx(void)
+{
+    g_uart_tx_length = 0U;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : bool mock_relay(void)
  * Input       : 无
  * Output      : true表示继电器控制命令为闭合；false表示命令为断开

@@ -308,6 +308,28 @@ uint32_t drv_pwm_applied_sequence(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : uint8_t drv_pwm_irq_pending_isr(void)
+ * Input       : 无
+ * Output      : DRV_PWM_IRQ_BREAK/DRV_PWM_IRQ_UPDATE组合位
+ * Description : 在驱动层快照ATMR共享向量的Break和一次性Update待处理状态，供Service按安全优先级分发。
+ *---------------------------------------------------------------------------*/
+uint8_t drv_pwm_irq_pending_isr(void)
+{
+    uint8_t pending = 0U;
+
+    if (DDL_ATMR_IsActiveFlag_BRK(ATMR) != 0U)
+    {
+        pending |= DRV_PWM_IRQ_BREAK;
+    }
+    if ((DDL_ATMR_IsEnabledIT_UPDATE(ATMR) != 0U) &&
+        (DDL_ATMR_IsActiveFlag_UPDATE(ATMR) != 0U))
+    {
+        pending |= DRV_PWM_IRQ_UPDATE;
+    }
+    return pending;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : void drv_pwm_update_isr_ack(void)
  * Input       : 无
  * Output      : 无

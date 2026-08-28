@@ -10,11 +10,14 @@ static uint8_t g_tx[BOARD_UART_TX_BUFFER_SIZE];
 static volatile uint16_t g_tx_head;
 static volatile uint16_t g_tx_tail;
 
+/* 把board层引脚编号转换为DDL GPIO位掩码，避免驱动再次复制PinMap数值。 */
+#define DRV_UART_GPIO_PIN(number)                   (1UL << (number))
+
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_uart_init(void)
  * Input       : 无
  * Output      : true表示GPIO、USART和RX中断初始化成功；false表示DDL初始化失败
- * Description : 配置PA10/PA11 USART、115200 8N1和RX中断，并清空发送环形缓冲。
+ * Description : 按BOARD_USART_MODE配置蓝牙PA10/PA11或Debug PB7/PB8，初始化115200 8N1和收发缓冲。
  *---------------------------------------------------------------------------*/
 bool drv_uart_init(void)
 {
@@ -22,7 +25,8 @@ bool drv_uart_init(void)
     DDL_USART_InitTypeDef usart = {0U};
 
     DDL_RCC_Unlock();
-    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA);
+    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA |
+                              DDL_AHB_GRP1_PERIPH_GPIOB);
     DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_USART);
     DDL_RCC_Lock();
 
@@ -32,12 +36,27 @@ bool drv_uart_init(void)
     gpio.InputEnable = DDL_GPIO_INPUT_ENABLE;
     gpio.Pull = DDL_GPIO_PULL_UP;
     gpio.Alternate = DDL_GPIO_AF_0;
+#if (BOARD_USART_MODE == BOARD_USART_MODE_BLUETOOTH)
+#if (BOARD_PIN_UART_TX_PORT != 'A') || (BOARD_PIN_UART_RX_PORT != 'A')
+#error "Bluetooth USART pins must remain on GPIOA"
+#endif
     DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_DISABLE);
-    gpio.Pin = DDL_GPIO_PIN_10; /* UR_TX / PA10 / AF0 */
+    gpio.Pin = DRV_UART_GPIO_PIN(BOARD_PIN_UART_TX_NUMBER); /* UR_TX -> BLE_RX */
     DDL_GPIO_Init(GPIOA, &gpio);
-    gpio.Pin = DDL_GPIO_PIN_11; /* UR_RX / PA11 / AF0 */
+    gpio.Pin = DRV_UART_GPIO_PIN(BOARD_PIN_UART_RX_NUMBER); /* BLE_TX -> UR_RX */
     DDL_GPIO_Init(GPIOA, &gpio);
     DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_ENABLE);
+#else
+#if (BOARD_PIN_DEBUG_TX_PORT != 'B') || (BOARD_PIN_DEBUG_RX_PORT != 'B')
+#error "Debug USART pins must remain on GPIOB"
+#endif
+    DDL_GPIO_LockKey(GPIOB, DDL_GPIO_LOCK_DISABLE);
+    gpio.Pin = DRV_UART_GPIO_PIN(BOARD_PIN_DEBUG_TX_NUMBER); /* DEBUG_TX / USART / AF0 */
+    DDL_GPIO_Init(GPIOB, &gpio);
+    gpio.Pin = DRV_UART_GPIO_PIN(BOARD_PIN_DEBUG_RX_NUMBER); /* DEBUG_RX / USART / AF0 */
+    DDL_GPIO_Init(GPIOB, &gpio);
+    DDL_GPIO_LockKey(GPIOB, DDL_GPIO_LOCK_ENABLE);
+#endif
 
     usart.BaudRate = BOARD_UART_BAUDRATE;
     usart.DataWidth = DDL_USART_DATAWIDTH_8B;
@@ -53,7 +72,12 @@ bool drv_uart_init(void)
 
     g_tx_head = 0U;
     g_tx_tail = 0U;
+#if (BOARD_USART_MODE == BOARD_USART_MODE_BLUETOOTH)
     DDL_USART_EnableIT_RXNE(USART);
+#else
+    /* Debug路由只输出日志，关闭RX中断防止调试输入进入产品协议。 */
+    DDL_USART_DisableIT_RXNE(USART);
+#endif
     DDL_USART_Enable(USART);
     NVIC_EnableIRQ(USART_IRQn);
     return true;

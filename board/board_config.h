@@ -31,6 +31,18 @@
 #define BOARD_PIN_DEBUG_TX_NUMBER                   (7U)
 #define BOARD_PIN_DEBUG_RX_PORT                     ('B')
 #define BOARD_PIN_DEBUG_RX_NUMBER                   (8U)
+/* USART路由模式：默认使用PA10/PA11承载蓝牙数据。 */
+#define BOARD_USART_MODE_BLUETOOTH                  (0U)
+/* USART路由模式：切换到PB7/PB8承载GE_DEBUG日志。 */
+#define BOARD_USART_MODE_DEBUG                      (1U)
+/* 当前构建使用的USART路由；Keil/CMake可用编译宏覆盖。 */
+#ifndef BOARD_USART_MODE
+#define BOARD_USART_MODE                            BOARD_USART_MODE_BLUETOOTH
+#endif
+#if (BOARD_USART_MODE != BOARD_USART_MODE_BLUETOOTH) && \
+    (BOARD_USART_MODE != BOARD_USART_MODE_DEBUG)
+#error "BOARD_USART_MODE must select Bluetooth or Debug route"
+#endif
 /* PB9：运行指示灯。 */
 #define BOARD_PIN_LED_RUN_PORT                      ('B')
 #define BOARD_PIN_LED_RUN_NUMBER                    (9U)
@@ -79,6 +91,18 @@
 /* BST_U：125k/5k分压，比例26。 */
 #define BOARD_ADC_BUS_U_DIVIDER_NUM                 (26L)
 #define BOARD_ADC_BUS_U_DIVIDER_DEN                 (1L)
+/* 板载MOS NTC的分压上拉电阻，单位ohm；对应原理图R37=5.1K。 */
+#define BOARD_NTC_MOS_PULLUP_OHM                    (5100L)
+/* 板载MOS NTC的25°C标称阻值，单位ohm；对应原理图R42=100K。 */
+#define BOARD_NTC_MOS_R25_OHM                       (100000L)
+/* 板载MOS NTC的Beta参数，单位K；对应原理图R42=3950K。 */
+#define BOARD_NTC_MOS_BETA_KELVIN                   (3950L)
+/* Beta公式参考温度，单位0.1°C；固定为25.0°C。 */
+#define BOARD_NTC_MOS_REFERENCE_TEMP_DC             (250)
+/* MOS NTC查表最低有效温度，单位0.1°C。 */
+#define BOARD_NTC_MOS_MIN_TEMP_DC                   (-400)
+/* MOS NTC查表最高有效温度，单位0.1°C。 */
+#define BOARD_NTC_MOS_MAX_TEMP_DC                   (1250)
 
 /* ATMR计数时钟，单位Hz。 */
 #define BOARD_PWM_TIMER_CLOCK_HZ                    (64000000UL)

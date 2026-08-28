@@ -338,7 +338,7 @@
               <MiscControls>-std=c11 -Wall -Wextra -Werror</MiscControls>
               <Define>USE_FULL_DDL_DRIVER,G32F031xx</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\app\inc;..\..\service;..\..\driver\inc;..\..\board;..\..\vendor\cmsis\Include;..\..\vendor\device\Include;..\..\vendor\ddl\Include</IncludePath>
+              <IncludePath>..\app\inc;..\service;..\driver\inc;..\board;..\vendor\cmsis\Include;..\vendor\device\Include;..\vendor\ddl\Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -454,47 +454,47 @@
             <File>
               <FileName>app.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\app.c</FilePath>
+              <FilePath>..\app\src\app.c</FilePath>
             </File>
             <File>
               <FileName>charger.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\charger.c</FilePath>
+              <FilePath>..\app\src\charger.c</FilePath>
             </File>
             <File>
               <FileName>measurement.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\measurement.c</FilePath>
+              <FilePath>..\app\src\measurement.c</FilePath>
             </File>
             <File>
               <FileName>mppt.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\mppt.c</FilePath>
+              <FilePath>..\app\src\mppt.c</FilePath>
             </File>
             <File>
               <FileName>power_stage.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\power_stage.c</FilePath>
+              <FilePath>..\app\src\power_stage.c</FilePath>
             </File>
             <File>
               <FileName>protection.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\protection.c</FilePath>
+              <FilePath>..\app\src\protection.c</FilePath>
             </File>
             <File>
               <FileName>protocol.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\protocol.c</FilePath>
+              <FilePath>..\app\src\protocol.c</FilePath>
             </File>
             <File>
               <FileName>storage.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\storage.c</FilePath>
+              <FilePath>..\app\src\storage.c</FilePath>
             </File>
             <File>
               <FileName>ui.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\app\src\ui.c</FilePath>
+              <FilePath>..\app\src\ui.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -573,7 +573,22 @@
             <File>
               <FileName>service.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\service\service.c</FilePath>
+              <FilePath>..\service\service.c</FilePath>
+            </File>
+            <File>
+              <FileName>main.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\service\main.c</FilePath>
+            </File>
+            <File>
+              <FileName>interrupts.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\service\interrupts.c</FilePath>
+            </File>
+            <File>
+              <FileName>debug.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\service\debug.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -652,42 +667,42 @@
             <File>
               <FileName>drv_adc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_adc.c</FilePath>
+              <FilePath>..\driver\src\drv_adc.c</FilePath>
             </File>
             <File>
               <FileName>drv_comp.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_comp.c</FilePath>
+              <FilePath>..\driver\src\drv_comp.c</FilePath>
             </File>
             <File>
               <FileName>drv_flash.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_flash.c</FilePath>
+              <FilePath>..\driver\src\drv_flash.c</FilePath>
             </File>
             <File>
               <FileName>drv_io.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_io.c</FilePath>
+              <FilePath>..\driver\src\drv_io.c</FilePath>
             </File>
             <File>
               <FileName>drv_pwm.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_pwm.c</FilePath>
+              <FilePath>..\driver\src\drv_pwm.c</FilePath>
             </File>
             <File>
               <FileName>drv_system.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_system.c</FilePath>
+              <FilePath>..\driver\src\drv_system.c</FilePath>
             </File>
             <File>
               <FileName>drv_uart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_uart.c</FilePath>
+              <FilePath>..\driver\src\drv_uart.c</FilePath>
             </File>
             <File>
               <FileName>drv_watchdog.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\driver\src\drv_watchdog.c</FilePath>
+              <FilePath>..\driver\src\drv_watchdog.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -766,7 +781,7 @@
             <File>
               <FileName>board.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\board\board.c</FilePath>
+              <FilePath>..\board\board.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -845,67 +860,67 @@
             <File>
               <FileName>startup_g32f031.s</FileName>
               <FileType>2</FileType>
-              <FilePath>..\..\vendor\device\Source\startup_g32f031.s</FilePath>
+              <FilePath>..\vendor\device\Source\startup_g32f031.s</FilePath>
             </File>
             <File>
               <FileName>system_g32f031.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\device\Source\system_g32f031.c</FilePath>
+              <FilePath>..\vendor\device\Source\system_g32f031.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_adc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_adc.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_adc.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_atmr.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_atmr.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_atmr.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_comp0.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_comp0.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_comp0.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_comp1.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_comp1.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_comp1.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_dma.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_dma.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_dma.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_flash.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_flash.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_flash.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_gpio.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_gpio.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_gpio.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_opa.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_opa.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_opa.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_rcc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_rcc.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_rcc.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_usart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_usart.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_usart.c</FilePath>
             </File>
             <File>
               <FileName>g32f031_ddl_utils.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\vendor\ddl\Source\g32f031_ddl_utils.c</FilePath>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_utils.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -982,17 +997,7 @@
           </GroupOption>
           <Files>
             <File>
-              <FileName>.\main.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\main.c</FilePath>
-            </File>
-            <File>
-              <FileName>.\interrupts.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\interrupts.c</FilePath>
-            </File>
-            <File>
-              <FileName>.\AuroraControl.sct</FileName>
+              <FileName>AuroraControl.sct</FileName>
               <FileType>5</FileType>
               <FilePath>.\AuroraControl.sct</FilePath>
             </File>

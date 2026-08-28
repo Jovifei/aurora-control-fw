@@ -26,6 +26,11 @@ extern "C" {
 /* 旧产品协议允许的最大数据载荷长度。 */
 #define AURORA_PROTOCOL_MAX_DATA                    (127U)
 
+/* ADC标定类型：线性通道使用零点/增益，NTC通道使用Beta曲线。 */
+#define AURORA_ADC_CALIBRATION_LINEAR               (0U)
+/* ADC标定类型：由分压电阻和Beta参数换算NTC温度。 */
+#define AURORA_ADC_CALIBRATION_NTC_BETA             (1U)
+
 /* 测量有效位：PV电压已由ADC直接测得。 */
 #define AURORA_MEAS_VALID_PV_V                      (1UL << 0)
 /* 测量有效位：PV电流已由ADC直接测得。 */
@@ -77,6 +82,8 @@ extern "C" {
 #define AURORA_FAULT_ADC_OVERRUN                    (1UL << 15)
 /* 故障位：Break已锁存但比较器原因无法细分。 */
 #define AURORA_FAULT_FAST_BREAK                     (1UL << 16)
+/* 故障位：MOS NTC开路、短路或温度超出有效换算范围。 */
+#define AURORA_FAULT_MOS_TEMP_INVALID               (1UL << 17)
 
 /* 通用函数返回状态。 */
 typedef enum
@@ -134,7 +141,7 @@ typedef struct
     int16_t ambient_temp_dC;                         /* 环境温度，0.1°C。 */
 } aurora_measurement_t;
 
-/* 单个ADC逻辑通道的线性标定参数。 */
+/* 单个ADC逻辑通道的线性或NTC标定参数。 */
 typedef struct
 {
     int32_t gain_num;                                /* 增益分子，输出物理单位/码。 */
@@ -143,6 +150,17 @@ typedef struct
     int16_t zero_code;                               /* 双向电流通道的零电流码值。 */
     int8_t polarity;                                 /* +1正向，-1反向。 */
     bool valid;                                      /* 完成标定且允许参与控制。 */
+    uint8_t kind;                                    /* AURORA_ADC_CALIBRATION_*类型。 */
+    uint8_t layout_reserved;                         /* 显式补齐标定类型字段。 */
+    uint16_t ntc_layout_reserved;                    /* 显式补齐NTC参数起始对齐。 */
+    int32_t ntc_pullup_ohm;                          /* NTC上拉电阻，单位ohm。 */
+    int32_t ntc_r25_ohm;                              /* NTC在25°C的标称阻值，单位ohm。 */
+    int32_t ntc_beta_kelvin;                          /* NTC Beta参数，单位K。 */
+    int32_t ntc_full_scale_code;                     /* ADC满量程码值，单位code。 */
+    int16_t ntc_reference_temp_dc;                   /* Beta参考温度，0.1°C。 */
+    int16_t ntc_min_temp_dc;                          /* 有效换算最低温度，0.1°C。 */
+    int16_t ntc_max_temp_dc;                          /* 有效换算最高温度，0.1°C。 */
+    int16_t ntc_value_reserved;                       /* 显式补齐标定对象尾部。 */
 } aurora_adc_calibration_t;
 
 /* 全部ADC逻辑通道的标定集合。 */

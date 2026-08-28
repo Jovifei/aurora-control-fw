@@ -3,6 +3,7 @@
 #include "app_config.h"
 #include "board.h"
 #include "driver.h"
+#include "debug.h"
 
 #include <string.h>
 
@@ -193,6 +194,13 @@ static void process_adc(aurora_service_t *service)
                                         block,
                                         drv_adc_block_words(),
                                         service->adc_timestamp_ms[index]);
+                if (service->app.sample.sequence == 1U)
+                {
+                    DEBUG_NTC_PRINTF("mos_valid=%u mos_temp_dc=%d",
+                                     (unsigned)((service->app.sample.valid_mask &
+                                                 AURORA_MEAS_VALID_MOS_TEMP) != 0U),
+                                     (int)service->app.sample.mos_temp_dC);
+                }
                 service->watchdog_seen |= SERVICE_WDG_TICKET_ADC;
             }
 
@@ -211,6 +219,12 @@ static void process_adc(aurora_service_t *service)
  *---------------------------------------------------------------------------*/
 static void process_uart(aurora_service_t *service, uint32_t now_ms)
 {
+#if (BOARD_USART_MODE == BOARD_USART_MODE_DEBUG)
+    (void)service;
+    (void)now_ms;
+    /* Debug路由仅输出日志，禁止把调试输入误送入产品协议解析器。 */
+    return;
+#else
     aurora_protocol_frame_t request;
     aurora_protocol_frame_t response;
     bool has_response;
@@ -250,6 +264,15 @@ static void process_uart(aurora_service_t *service, uint32_t now_ms)
                     (void)drv_uart_send(wire, wire_length);
                 }
             }
+            if ((request.resource == AURORA_PROTOCOL_RESOURCE_SETTING) &&
+                (request.action == AURORA_PROTOCOL_ACTION_WRITE))
+            {
+                DEBUG_BLE_PRINTF("setting result=%u chemistry=%u pack=%u",
+                                 (unsigned)((has_response) ? response.data[0] :
+                                                       AURORA_PROTOCOL_RESULT_INVALID),
+                                 (unsigned)service->app.storage.settings.chemistry,
+                                 (unsigned)service->app.storage.settings.pack);
+            }
         }
     }
 
@@ -258,6 +281,7 @@ static void process_uart(aurora_service_t *service, uint32_t now_ms)
     {
         atomic_or_u32(&service->event_flags, SERVICE_EVENT_UART_RX);
     }
+#endif
 }
 
 /*---------------------------------------------------------------------------*
@@ -330,6 +354,8 @@ static void service_storage(aurora_service_t *service, uint32_t now_ms)
         aurora_protection_latch_fast_fault(&service->app.protection,
                                            AURORA_FAULT_STORAGE,
                                            now_ms);
+        DEBUG_STORAGE_PRINTF("write_failed address=0x%08lx",
+                             (unsigned long)target);
         return;
     }
 
@@ -341,9 +367,14 @@ static void service_storage(aurora_service_t *service, uint32_t now_ms)
         aurora_protection_latch_fast_fault(&service->app.protection,
                                            AURORA_FAULT_STORAGE,
                                            now_ms);
+        DEBUG_STORAGE_PRINTF("commit_failed address=0x%08lx",
+                             (unsigned long)target);
         return;
     }
     service->app.storage.dirty = false;
+    DEBUG_STORAGE_PRINTF("saved sequence=%lu address=0x%08lx",
+                         (unsigned long)service->app.storage.sequence,
+                         (unsigned long)target);
 }
 
 /*---------------------------------------------------------------------------*
@@ -376,6 +407,8 @@ static void service_watchdog(aurora_service_t *service, uint32_t now_ms)
         {
             /* 整个工程只有这里允许喂硬件看门狗。 */
             drv_watchdog_feed();
+            DEBUG_WDG_PRINTF("feed tickets=0x%08lx",
+                             (unsigned long)required);
         }
         service->watchdog_seen = 0U;
         service->watchdog_window_start_ms = now_ms;
@@ -441,6 +474,16 @@ bool aurora_service_init(aurora_service_t *service)
             calibration.channel[channel].zero_code = board_cal.zero_code;
             calibration.channel[channel].polarity = board_cal.polarity;
             calibration.channel[channel].valid = board_cal.valid;
+            calibration.channel[channel].kind = board_cal.kind;
+            calibration.channel[channel].ntc_pullup_ohm = board_cal.ntc_pullup_ohm;
+            calibration.channel[channel].ntc_r25_ohm = board_cal.ntc_r25_ohm;
+            calibration.channel[channel].ntc_beta_kelvin = board_cal.ntc_beta_kelvin;
+            calibration.channel[channel].ntc_full_scale_code =
+                board_cal.ntc_full_scale_code;
+            calibration.channel[channel].ntc_reference_temp_dc =
+                board_cal.ntc_reference_temp_dc;
+            calibration.channel[channel].ntc_min_temp_dc = board_cal.ntc_min_temp_dc;
+            calibration.channel[channel].ntc_max_temp_dc = board_cal.ntc_max_temp_dc;
         }
     }
     aurora_app_init(&service->app, &calibration, now_ms);
@@ -452,6 +495,13 @@ bool aurora_service_init(aurora_service_t *service)
     {
         return false;
     }
+    debug_init();
+    DEBUG_SYSTEM_PRINTF("USART mode=%u", (unsigned)BOARD_USART_MODE);
+#if (BOARD_USART_MODE == BOARD_USART_MODE_BLUETOOTH)
+    DEBUG_BLE_PRINTF("transport=bluetooth");
+#else
+    DEBUG_SYSTEM_PRINTF("transport=debug");
+#endif
     service->initialized = true;
     return true;
 }
@@ -480,6 +530,8 @@ void aurora_service_poll(aurora_service_t *service)
     {
         const uint32_t faults = atomic_exchange_u32(&service->pending_fault_mask, 0U);
         aurora_app_on_fast_fault(&service->app, faults, now_ms);
+        DEBUG_PROTECTION_PRINTF("fast_fault=0x%08lx",
+                                (unsigned long)faults);
         force_safe_off(service);
     }
     if ((events & SERVICE_EVENT_ADC) != 0U)
@@ -501,6 +553,7 @@ void aurora_service_poll(aurora_service_t *service)
 
     apply_power_command(service);
 
+#if (BOARD_USART_MODE == BOARD_USART_MODE_BLUETOOTH)
     if ((now_ms - service->last_telemetry_ms) >= AURORA_TELEMETRY_PERIOD_MS)
     {
         aurora_protocol_frame_t telemetry;
@@ -519,6 +572,7 @@ void aurora_service_poll(aurora_service_t *service)
         }
         service->last_telemetry_ms = now_ms;
     }
+#endif
 
     service_storage(service, now_ms);
     service_watchdog(service, now_ms);

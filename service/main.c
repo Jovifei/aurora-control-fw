@@ -2,6 +2,9 @@
 
 #include "g32f031xx.h"
 
+/* 目标启动入口的公开原型，满足ARMClang缺少原型检查。 */
+int main(void);
+
 extern aurora_service_t g_aurora_service;
 
 aurora_service_t g_aurora_service;

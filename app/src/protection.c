@@ -184,12 +184,23 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
                                      (int16_t)AURORA_MOS_TRIP_TEMP_DC;
         const bool mos_fault = mos_valid && (sample->mos_temp_dC > limit_dC);
 
-        /* active期间使用恢复阈值形成迟滞，避免温度在边界附近反复抖动。 */
-        debounce_fault(ctx,
-                       mos_fault,
-                       &ctx->mos_temp_count,
-                       AURORA_FAULT_MOS_OVERTEMP,
-                       now_ms);
+        if (!mos_valid)
+        {
+            /* MOS NTC无效时立即锁存，防止开路/短路被误认为低温而继续发波。 */
+            latch_fault(ctx, AURORA_FAULT_MOS_TEMP_INVALID, now_ms);
+        }
+        else
+        {
+            /* 温度恢复有效只撤销传感器无效active，latched仍需显式清除。 */
+            ctx->active_mask &= (uint32_t)~AURORA_FAULT_MOS_TEMP_INVALID;
+
+            /* active期间使用恢复阈值形成迟滞，避免温度在边界附近反复抖动。 */
+            debounce_fault(ctx,
+                           mos_fault,
+                           &ctx->mos_temp_count,
+                           AURORA_FAULT_MOS_OVERTEMP,
+                           now_ms);
+        }
     }
 
     {

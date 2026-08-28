@@ -3,7 +3,6 @@
 #include "app_types.h"
 #include "board_config.h"
 #include "driver.h"
-#include "g32f031_ddl_atmr.h"
 
 extern aurora_service_t g_aurora_service;
 
@@ -112,14 +111,15 @@ void COMP1_2_3_IRQHandler(void)
  *---------------------------------------------------------------------------*/
 void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
 {
+    const uint8_t pending = drv_pwm_irq_pending_isr();
+
     /* Break优先于Update；锁存位不在ISR内清除，只屏蔽重复Break中断。 */
-    if (DDL_ATMR_IsActiveFlag_BRK(ATMR) != 0U)
+    if ((pending & DRV_PWM_IRQ_BREAK) != 0U)
     {
         drv_pwm_quiesce_break_irq_isr();
         handle_fast_comparator_fault();
     }
-    if ((DDL_ATMR_IsEnabledIT_UPDATE(ATMR) != 0U) &&
-        (DDL_ATMR_IsActiveFlag_UPDATE(ATMR) != 0U))
+    if ((pending & DRV_PWM_IRQ_UPDATE) != 0U)
     {
         aurora_service_isr_pwm_update(&g_aurora_service);
     }

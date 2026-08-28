@@ -1,6 +1,7 @@
 #include "app.h"
 #include "app_config.h"
 #include "board.h"
+#include "debug.h"
 #include "mock_driver.h"
 #include "service.h"
 
@@ -52,6 +53,61 @@ static aurora_measurement_calibration_t unit_calibration(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static aurora_measurement_calibration_t board_calibration(void)
+ * Input       : 无
+ * Output      : 由board层复制出的六通道标定结构
+ * Description : 复现Service启动时的板级标定复制，确保Host测试覆盖NTC类型和参数传递。
+ *---------------------------------------------------------------------------*/
+static aurora_measurement_calibration_t board_calibration(void)
+{
+    aurora_measurement_calibration_t c;
+    aurora_board_adc_calibration_t board_cal;
+    size_t channel;
+
+    memset(&c, 0, sizeof(c));
+    for (channel = 0U; channel < AURORA_ADC_CHANNEL_COUNT; ++channel)
+    {
+        CHECK(aurora_board_get_adc_calibration(channel, &board_cal));
+        c.channel[channel].gain_num = board_cal.gain_num;
+        c.channel[channel].gain_den = board_cal.gain_den;
+        c.channel[channel].offset = board_cal.offset;
+        c.channel[channel].zero_code = board_cal.zero_code;
+        c.channel[channel].polarity = board_cal.polarity;
+        c.channel[channel].valid = board_cal.valid;
+        c.channel[channel].kind = board_cal.kind;
+        c.channel[channel].ntc_pullup_ohm = board_cal.ntc_pullup_ohm;
+        c.channel[channel].ntc_r25_ohm = board_cal.ntc_r25_ohm;
+        c.channel[channel].ntc_beta_kelvin = board_cal.ntc_beta_kelvin;
+        c.channel[channel].ntc_full_scale_code = board_cal.ntc_full_scale_code;
+        c.channel[channel].ntc_reference_temp_dc = board_cal.ntc_reference_temp_dc;
+        c.channel[channel].ntc_min_temp_dc = board_cal.ntc_min_temp_dc;
+        c.channel[channel].ntc_max_temp_dc = board_cal.ntc_max_temp_dc;
+    }
+    return c;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void fill_constant_adc_block(uint16_t *raw, uint16_t mos_code)
+ * Input       : raw - ADC块输出地址；mos_code - MOS NTC模拟ADC码
+ * Output      : 无
+ * Description : 生成六通道十六次扫描的稳定输入，只替换MOS NTC通道以测试温度换算。
+ *---------------------------------------------------------------------------*/
+static void fill_constant_adc_block(uint16_t *raw, uint16_t mos_code)
+{
+    size_t scan;
+    size_t channel;
+
+    for (scan = 0U; scan < AURORA_ADC_SCANS_PER_BLOCK; ++scan)
+    {
+        for (channel = 0U; channel < AURORA_ADC_CHANNEL_COUNT; ++channel)
+        {
+            raw[scan * AURORA_ADC_CHANNEL_COUNT + channel] = 2048U;
+        }
+        raw[scan * AURORA_ADC_CHANNEL_COUNT + BOARD_ADC_INDEX_NTC_MOS] = mos_code;
+    }
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void test_measurement_block(void)
  * Input       : 无
  * Output      : 无
@@ -82,6 +138,186 @@ static void test_measurement_block(void)
     CHECK(out.pv_voltage_mv == 110);
     CHECK((out.valid_mask & AURORA_MEAS_VALID_PV_POWER) != 0U);
 }
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_mos_ntc_conversion(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证原理图100K/3950 MOS NTC的参数传递、温度换算单调性和开短路拒绝。
+ *---------------------------------------------------------------------------*/
+static void test_mos_ntc_conversion(void)
+{
+    aurora_measurement_ctx_t ctx;
+    aurora_measurement_t out;
+    aurora_measurement_calibration_t calibration = board_calibration();
+    uint16_t raw[AURORA_ADC_BLOCK_WORDS];
+    const aurora_adc_calibration_t *mos =
+        &calibration.channel[BOARD_ADC_INDEX_NTC_MOS];
+    int16_t temperature_25;
+    int16_t temperature_75;
+    int16_t temperature_90;
+
+    CHECK(mos->valid);
+    CHECK(mos->kind == AURORA_ADC_CALIBRATION_NTC_BETA);
+    CHECK(mos->ntc_pullup_ohm == 5100);
+    CHECK(mos->ntc_r25_ohm == 100000);
+    CHECK(mos->ntc_beta_kelvin == 3950);
+
+    fill_constant_adc_block(raw, 3896U);
+    aurora_measurement_init(&ctx, &calibration);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 1U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP);
+    CHECK(out.mos_temp_dC >= 245);
+    CHECK(out.mos_temp_dC <= 255);
+    temperature_25 = out.mos_temp_dC;
+
+    fill_constant_adc_block(raw, 3052U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 2U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP);
+    CHECK(out.mos_temp_dC >= 745);
+    CHECK(out.mos_temp_dC <= 755);
+    temperature_75 = out.mos_temp_dC;
+
+    fill_constant_adc_block(raw, 2648U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 3U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP);
+    CHECK(out.mos_temp_dC >= 895);
+    CHECK(out.mos_temp_dC <= 905);
+    temperature_90 = out.mos_temp_dC;
+    CHECK(temperature_25 < temperature_75);
+    CHECK(temperature_75 < temperature_90);
+
+    fill_constant_adc_block(raw, 0U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 4U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U);
+
+    fill_constant_adc_block(raw, 4095U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 5U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U);
+
+    fill_constant_adc_block(raw, 4090U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 6U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP);
+    CHECK(out.mos_temp_dC >= -405);
+    CHECK(out.mos_temp_dC <= -395);
+
+    fill_constant_adc_block(raw, 4091U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 7U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U);
+
+    fill_constant_adc_block(raw, 1692U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 8U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK(out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP);
+    CHECK(out.mos_temp_dC >= 1245);
+    CHECK(out.mos_temp_dC <= 1255);
+
+    fill_constant_adc_block(raw, 1691U);
+    CHECK(aurora_measurement_process_block(&ctx, raw, AURORA_ADC_BLOCK_WORDS, 9U) == AURORA_STATUS_OK);
+    CHECK(aurora_measurement_read(&ctx, &out));
+    CHECK((out.valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_mos_ntc_invalid_latches_fault(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证MOS NTC无效时立即锁存传感器故障，恢复有效后只清active而不自动清除latched。
+ *---------------------------------------------------------------------------*/
+static void test_mos_ntc_invalid_latches_fault(void)
+{
+    aurora_protection_ctx_t protection;
+    aurora_charge_profile_t profile;
+    aurora_measurement_t sample;
+
+    CHECK(aurora_charge_profile_get(AURORA_CHEM_LEAD, AURORA_PACK_72V, &profile));
+    memset(&sample, 0, sizeof(sample));
+    sample.sequence = 1U;
+    sample.timestamp_ms = 1U;
+    sample.valid_mask = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I |
+                        AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V;
+    sample.pv_voltage_mv = 30000;
+    sample.battery_voltage_mv = 72000;
+    sample.bus_voltage_mv = 71000;
+
+    aurora_protection_init(&protection, 0U);
+    aurora_protection_step(&protection, &sample, &profile, 2U);
+    CHECK((protection.active_mask & AURORA_FAULT_MOS_TEMP_INVALID) != 0U);
+    CHECK((protection.latched_mask & AURORA_FAULT_MOS_TEMP_INVALID) != 0U);
+    CHECK(!aurora_protection_is_safe(&protection));
+
+    sample.timestamp_ms = 3U;
+    sample.valid_mask |= AURORA_MEAS_VALID_MOS_TEMP;
+    sample.mos_temp_dC = 500;
+    aurora_protection_step(&protection, &sample, &profile, 3U);
+    CHECK((protection.active_mask & AURORA_FAULT_MOS_TEMP_INVALID) == 0U);
+    CHECK((protection.latched_mask & AURORA_FAULT_MOS_TEMP_INVALID) != 0U);
+}
+
+#if !defined(AURORA_HOST_DEBUG_TEST)
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_debug_global_switch_is_off(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证默认蓝牙构建的全局Debug开关关闭时不会向共享USART写入日志。
+ *---------------------------------------------------------------------------*/
+static void test_debug_global_switch_is_off(void)
+{
+    mock_reset();
+    debug_init();
+    DEBUG_SYSTEM_PRINTF("disabled=%u", 1U);
+    CHECK(mock_uart_tx_length() == 0U);
+}
+#endif
+
+#if defined(AURORA_HOST_DEBUG_TEST)
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_debug_prefix_and_mode_exclusion(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证Debug日志带公司前缀和模块标签，且Debug模式不发送产品遥测。
+ *---------------------------------------------------------------------------*/
+static void test_debug_prefix_and_mode_exclusion(void)
+{
+    aurora_service_t service;
+    char text[256];
+    size_t length;
+
+    mock_reset();
+    debug_init();
+    DEBUG_SYSTEM_PRINTF("boot=%u", 1U);
+    DEBUG_BLE_PRINTF("route=debug");
+    {
+        char long_text[300];
+        memset(long_text, 'x', sizeof(long_text) - 1U);
+        long_text[sizeof(long_text) - 1U] = '\0';
+        DEBUG_SYSTEM_PRINTF("long=%s", long_text);
+        CHECK(debug_dropped_count() == 1U);
+    }
+    length = mock_uart_tx_length();
+    CHECK(length > 0U);
+    CHECK(length < sizeof(text));
+    memcpy(text, mock_uart_tx_data(), length);
+    text[length] = '\0';
+    CHECK(strstr(text, "[GE_DEBUG][SYSTEM]") != NULL);
+    CHECK(strstr(text, "[GE_DEBUG][BLE]") != NULL);
+
+    mock_reset();
+    CHECK(aurora_service_init(&service));
+    mock_uart_clear_tx();
+    mock_advance_ms(AURORA_TELEMETRY_PERIOD_MS);
+    aurora_service_isr_tick(&service);
+    aurora_service_poll(&service);
+    CHECK(mock_uart_tx_length() == 0U);
+}
+#endif
 
 /*---------------------------------------------------------------------------*
  * Name        : static void test_protocol_roundtrip(void)
@@ -119,6 +355,43 @@ static void test_protocol_roundtrip(void)
     CHECK(rx.data_length == AURORA_PROTOCOL_SETTING_DATA_LENGTH);
     CHECK(rx.data[0] == tx.data[0]);
     CHECK(rx.data[1] == tx.data[1]);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_bluetooth_pack_settings(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证蓝牙承载的现有设置帧可安全切换48V、60V、72V并标记Flash保存。
+ *---------------------------------------------------------------------------*/
+static void test_bluetooth_pack_settings(void)
+{
+    aurora_app_t app;
+    aurora_measurement_calibration_t calibration = unit_calibration();
+    aurora_protocol_frame_t request;
+    aurora_protocol_frame_t response;
+    bool has_response;
+    aurora_battery_pack_t pack;
+
+    for (pack = AURORA_PACK_48V; pack < AURORA_PACK_COUNT; ++pack)
+    {
+        memset(&request, 0, sizeof(request));
+        request.action = AURORA_PROTOCOL_ACTION_WRITE;
+        request.resource = AURORA_PROTOCOL_RESOURCE_SETTING;
+        request.data_length = AURORA_PROTOCOL_SETTING_DATA_LENGTH;
+        request.data[0] = AURORA_CHEM_LEAD;
+        request.data[1] = (uint8_t)pack;
+        aurora_app_init(&app, &calibration, 0U);
+        aurora_app_on_protocol_frame(&app,
+                                     &request,
+                                     &response,
+                                     &has_response,
+                                     1U);
+        CHECK(has_response);
+        CHECK(response.data[0] == AURORA_PROTOCOL_RESULT_OK);
+        CHECK(app.storage.settings.pack == pack);
+        CHECK(app.charger.profile.pack == pack);
+        CHECK(app.storage.dirty);
+    }
 }
 
 
@@ -344,9 +617,11 @@ static void test_fault_startup_and_no_battery(void)
     s.sequence = 1U;
     s.timestamp_ms = 1U;
     s.valid_mask = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I |
-                   AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V;
+                   AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V |
+                   AURORA_MEAS_VALID_MOS_TEMP;
     s.pv_voltage_mv = 0;
     s.battery_voltage_mv = 0;
+    s.mos_temp_dC = 250;
     aurora_protection_step(&p, &s, &profile, 2U);
     CHECK(p.latched_mask == 0U);
 }
@@ -542,6 +817,9 @@ static void test_pwm_arm_race(void)
     CHECK((service.app.protection.latched_mask & AURORA_FAULT_FAST_MOS_OCP) != 0U);
 }
 
+/* Host回归入口的公开原型，满足ARMClang缺少原型检查。 */
+int main(void);
+
 /*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
@@ -551,7 +829,13 @@ static void test_pwm_arm_race(void)
 int main(void)
 {
     test_measurement_block();
+    test_mos_ntc_conversion();
+    test_mos_ntc_invalid_latches_fault();
+#if !defined(AURORA_HOST_DEBUG_TEST)
+    test_debug_global_switch_is_off();
+#endif
     test_protocol_roundtrip();
+    test_bluetooth_pack_settings();
     test_protocol_back_to_back_frames();
     test_telemetry_legacy_identity();
     test_storage_atomic_format();
@@ -563,6 +847,9 @@ int main(void)
     test_fault_rearm_resets_duty_origin();
     test_pwm_arm_race();
     test_watchdog_window_and_adc_overrun();
+#if defined(AURORA_HOST_DEBUG_TEST)
+    test_debug_prefix_and_mode_exclusion();
+#endif
     printf("Aurora host tests: %u assertions passed.\n", g_assertions);
     return 0;
 }
