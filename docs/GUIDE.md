@@ -112,6 +112,10 @@ DEBUG_ENABLE=1
 
 PB12的板载MOS NTC已按原理图R37=5.1K、R42=100K 1% 3950实现-40°C～125°C查表换算。开路、短路或超出换算范围会锁存MOS温度传感器故障，必须按保护流程显式清除。PB5接CON4外接环境NTC，待实际探头型号和B值确认后再启用。
 
+## 9. MCU弱光供电资格
+
+目标入口必须先建立最小安全GPIO，再调用 `drv_system_wait_for_supply_stable()`；只有PVD Ready、VDD高于2.8V候选门限并连续稳定100ms后，才能进入 `aurora_runtime_init()` 初始化IWDT、PWM、COMP、ADC和UART。`BOARD_MCU_PVD_RESET_ENABLE` 与 `BOARD_MCU_PVD_IRQ_ENABLE` 必须保持0；弱光供电不足只等待。
+
 
 ## 当前接手与审计
 

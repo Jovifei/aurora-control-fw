@@ -1,6 +1,6 @@
 # Aurora Control Firmware
 
-> 工程整理发布：**v0.7.2**。本版本继续统一应用层与驱动层目录，并记录编译修复后的安全审计结果。
+> 当前集成基线：**v0.8.3**。在两层 `APP → Driver → Vendor` 目录上保留 v0.8.0 的充电/保护行为、v0.8.1 的PVD供电资格，以及完整蓝牙/Debug与MOS NTC安全机制。
 
 单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
 
@@ -45,6 +45,9 @@ storage      片内Flash双页Journal、CRC和Commit Marker
 - [参数标定与Codex交接清单](docs/17-参数标定与Codex交接清单.md)
 - [v0.7.2目录规范与交接说明](docs/18-v0.7.2目录规范与交接说明.md)
 - [编译修复提交2740523审计](docs/19-编译修复提交2740523审计.md)
+- [v0.8.0行为迁移与台架清单](docs/22-REF-120W-V2.7行为与参数基线.md)
+- [v0.8.1 PVD供电资格](docs/28-REF-G32F031-MCU供电稳定启动与PVD设计依据.md)
+- [v0.8.3两层架构与迁移报告](docs/30-v0.8.3-两层产品架构重构说明.md)
 
 ## 本地验证
 
@@ -64,6 +67,8 @@ Cortex-M0+ target syntax check
 ```
 
 Host回归、目标语法检查和Keil链接结果以本次交接报告及最新验证命令输出为准；Host通过不等于功率板验收通过。
+
+MCU弱光启动遵循：最小安全GPIO → PVD Ready → VDD连续稳定 → `aurora_runtime_init()`。PVD Reset/IRQ保持关闭；供电不足时只等待，不创建APP故障或启动IWDT复位循环。
 
 ## IDE / clangd 函数跳转
 

@@ -413,3 +413,89 @@ void aurora_measurement_estimate_battery_current(aurora_measurement_t *sample,
     sample->battery_current_quality = AURORA_MEAS_QUALITY_ESTIMATED;
     sample->valid_mask |= AURORA_MEAS_VALID_BAT_I_EST;
 }
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_measurement_zero_cal_reset(aurora_measurement_ctx_t *ctx)
+ * Input       : ctx - 测量上下文
+ * Output      : 无
+ * Description : 清除本轮PV_I运行时零点累计；不改写已经发布的测量快照。
+ *---------------------------------------------------------------------------*/
+void aurora_measurement_zero_cal_reset(aurora_measurement_ctx_t *ctx)
+{
+    if (ctx != NULL)
+    {
+        ctx->zero_cal_sum = 0U;
+        ctx->zero_cal_blocks = 0U;
+        ctx->zero_cal_ready = false;
+        ctx->zero_cal_failed = false;
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : aurora_status_t aurora_measurement_zero_cal_accumulate(
+ *               aurora_measurement_ctx_t *ctx, const uint16_t *raw,
+ *               size_t word_count)
+ * Input       : ctx - 测量上下文；raw - PWM关闭时的完整DMA块；word_count - 块字数
+ * Output      : OK表示校准完成；BUSY表示继续累计；INVALID表示参数或零点越界
+ * Description : 累计完整PV_I块并更新运行时zero_code，避免理论2048码直接用于量产。
+ *---------------------------------------------------------------------------*/
+aurora_status_t aurora_measurement_zero_cal_accumulate(aurora_measurement_ctx_t *ctx,
+                                                        const uint16_t *raw,
+                                                        size_t word_count)
+{
+    uint32_t zero_code;
+
+    if ((ctx == NULL) || (raw == NULL) || (word_count != AURORA_ADC_BLOCK_WORDS))
+    {
+        return AURORA_STATUS_INVALID;
+    }
+    if (ctx->zero_cal_ready)
+    {
+        return AURORA_STATUS_OK;
+    }
+    if (ctx->zero_cal_failed)
+    {
+        return AURORA_STATUS_INVALID;
+    }
+
+    ctx->zero_cal_sum += trimmed_average(raw, ADC_IDX_PV_I);
+    ctx->zero_cal_blocks++;
+    if (ctx->zero_cal_blocks < AURORA_ZERO_CAL_BLOCKS)
+    {
+        return AURORA_STATUS_BUSY;
+    }
+
+    zero_code = ctx->zero_cal_sum / ctx->zero_cal_blocks;
+    if ((zero_code < AURORA_ZERO_CAL_CODE_MIN) ||
+        (zero_code > AURORA_ZERO_CAL_CODE_MAX))
+    {
+        ctx->zero_cal_failed = true;
+        return AURORA_STATUS_INVALID;
+    }
+
+    ctx->calibration.channel[ADC_IDX_PV_I].zero_code = (int16_t)zero_code;
+    ctx->zero_cal_ready = true;
+    return AURORA_STATUS_OK;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool aurora_measurement_zero_cal_ready(const aurora_measurement_ctx_t *ctx)
+ * Input       : ctx - 测量上下文
+ * Output      : true表示PV_I运行时零点已经完成
+ * Description : 供功率级启动状态机读取校准门禁，不触发新的采样。
+ *---------------------------------------------------------------------------*/
+bool aurora_measurement_zero_cal_ready(const aurora_measurement_ctx_t *ctx)
+{
+    return (ctx != NULL) && ctx->zero_cal_ready;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool aurora_measurement_zero_cal_failed(const aurora_measurement_ctx_t *ctx)
+ * Input       : ctx - 测量上下文
+ * Output      : true表示本轮零点码超出候选安全窗口
+ * Description : 零点异常时上层保持功率关闭并重新走启动/诊断流程。
+ *---------------------------------------------------------------------------*/
+bool aurora_measurement_zero_cal_failed(const aurora_measurement_ctx_t *ctx)
+{
+    return (ctx != NULL) && ctx->zero_cal_failed;
+}

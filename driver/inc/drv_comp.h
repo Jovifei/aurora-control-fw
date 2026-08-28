@@ -1,21 +1,16 @@
 #ifndef AURORA_DRV_COMP_H
 #define AURORA_DRV_COMP_H
 
-#include "driver.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* 驱动故障位：MOS支路快速过流。 */
+#define DRV_FAULT_MOS_OCP                           (1UL << 0)
+/* 驱动故障位：PV输入快速过流。 */
+#define DRV_FAULT_PV_OCP                            (1UL << 1)
 
-/* 初始化内部OPA/COMP快速故障链。 */
 bool drv_comp_init(void);
-/* 读取已锁存的比较器故障原因。 */
 uint32_t drv_comp_fault_mask(void);
-/* 应答比较器中断标志，不清除安全Break锁存。 */
 void drv_comp_irq_ack(void);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

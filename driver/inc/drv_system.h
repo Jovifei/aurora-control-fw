@@ -1,31 +1,32 @@
 #ifndef AURORA_DRV_SYSTEM_H
 #define AURORA_DRV_SYSTEM_H
 
-#include "driver.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
+/* 保存PRIMASK的类型。 */
+typedef uint32_t aurora_irq_state_t;
+
+#if defined(G32F031xx)
+/* 目标复位调用不会返回，供ArmClang进行控制流分析。 */
+#define DRV_SYSTEM_NORETURN                         __attribute__((noreturn))
+#else
+/* Host mock需要继续执行测试，不能继承目标noreturn属性。 */
+#define DRV_SYSTEM_NORETURN
 #endif
 
-/* 初始化系统时钟和毫秒节拍。 */
 void drv_system_init(void);
-/* 读取当前毫秒时间。 */
 uint32_t drv_time_now_ms(void);
-/* 在SysTick ISR中递增系统时间。 */
 void drv_time_tick_isr(void);
-/* 保存并屏蔽中断。 */
 aurora_irq_state_t drv_irq_save(void);
-/* 恢复此前的中断状态。 */
 void drv_irq_restore(aurora_irq_state_t state);
-/* 配置中断优先级。 */
 void drv_irq_configure_priorities(void);
-/* 触发目标系统复位；Host模拟会返回。 */
+bool drv_system_supply_qualifier_init(void);
+bool drv_system_supply_monitor_ready(void);
+bool drv_system_supply_is_good(void);
+bool drv_system_wait_for_supply_stable(void);
+void drv_system_supply_qualifier_stop(void);
 DRV_SYSTEM_NORETURN void drv_system_reset(void);
-/* 等待下一次中断，应用入口不直接包含芯片头文件。 */
 void drv_wait_for_interrupt(void);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

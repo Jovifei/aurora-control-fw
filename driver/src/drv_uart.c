@@ -1,6 +1,7 @@
 #include "drv_uart.h"
 
 #include "board_config.h"
+#include "drv_system.h"
 #include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_gpio.h"
 #include "g32f031_ddl_rcc.h"

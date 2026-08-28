@@ -1,6 +1,9 @@
 #include "drv_pwm.h"
 
+#include <stddef.h>
+
 #include "board_config.h"
+#include "drv_system.h"
 #include "g32f031_ddl_atmr.h"
 #include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_comp0.h"
