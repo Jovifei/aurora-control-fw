@@ -1,5 +1,5 @@
-#ifndef AURORA_BOARD_H
-#define AURORA_BOARD_H
+#ifndef AURORA_DRV_BOARD_H
+#define AURORA_DRV_BOARD_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -9,7 +9,12 @@
 extern "C" {
 #endif
 
-/* board层向Service提供的硬件无关ADC标定描述。 */
+/* 驱动层向应用层提供的硬件无关ADC标定描述。 */
+/* 线性ADC通道标定类型。 */
+#define DRV_ADC_CALIBRATION_LINEAR                    (0U)
+/* Beta模型NTC通道标定类型。 */
+#define DRV_ADC_CALIBRATION_NTC_BETA                  (1U)
+
 typedef struct
 {
     int32_t gain_num;                                /* 物理量/码的比例分子。 */
@@ -18,7 +23,7 @@ typedef struct
     int16_t zero_code;                               /* 双向电流通道零点码。 */
     int8_t polarity;                                 /* +1同向，-1反向。 */
     bool valid;                                      /* true表示已完成标定。 */
-    uint8_t kind;                                    /* AURORA_ADC_CALIBRATION_*类型。 */
+    uint8_t kind;                                    /* DRV_ADC_CALIBRATION_*类型。 */
     uint8_t layout_reserved;                         /* 显式补齐标定类型字段。 */
     uint16_t ntc_layout_reserved;                    /* 显式补齐NTC参数起始对齐。 */
     int32_t ntc_pullup_ohm;                          /* NTC上拉电阻，单位ohm。 */
@@ -29,13 +34,13 @@ typedef struct
     int16_t ntc_min_temp_dc;                          /* 有效换算最低温度，0.1°C。 */
     int16_t ntc_max_temp_dc;                          /* 有效换算最高温度，0.1°C。 */
     int16_t ntc_value_reserved;                       /* 显式补齐标定对象尾部。 */
-} aurora_board_adc_calibration_t;
+} drv_board_adc_calibration_t;
 
-bool aurora_board_get_adc_calibration(size_t channel,
-                                      aurora_board_adc_calibration_t *calibration);
-bool aurora_board_power_gate_open(void);
-uint32_t aurora_board_flash_page_a(void);
-uint32_t aurora_board_flash_page_b(void);
+bool drv_board_get_adc_calibration(size_t channel,
+                                   drv_board_adc_calibration_t *calibration);
+bool drv_board_power_gate_open(void);
+uint32_t drv_board_flash_page_a(void);
+uint32_t drv_board_flash_page_b(void);
 
 #ifdef __cplusplus
 }

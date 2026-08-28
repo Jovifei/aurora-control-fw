@@ -1,4 +1,4 @@
-#include "driver.h"
+#include "drv_adc.h"
 
 #include "board_config.h"
 #include "g32f031_ddl_bus.h"

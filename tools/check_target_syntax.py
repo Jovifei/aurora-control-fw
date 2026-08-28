@@ -23,10 +23,9 @@ if clang is None:
         sys.exit(0)
 
 sources = sorted((root / "driver/src").glob("*.c")) + [
-    root / "service/main.c",
-    root / "service/interrupts.c",
-    root / "service/debug.c",
-    root / "service/service.c",
+    root / "app/src/main.c",
+    root / "app/src/interrupts.c",
+    root / "app/src/debug.c",
 ]
 target = "arm-arm-none-eabi" if runtime_include is not None else "arm-none-eabi"
 common = [
@@ -40,9 +39,7 @@ common = [
     "-DUSE_FULL_DDL_DRIVER",
     "-DG32F031xx",
     "-Iapp/inc",
-    "-Iservice",
     "-Idriver/inc",
-    "-Iboard",
     "-Ivendor/cmsis/Include",
     "-Ivendor/device/Include",
     "-Ivendor/ddl/Include",

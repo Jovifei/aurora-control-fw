@@ -36,9 +36,9 @@ static const uint32_t k_ntc_100k_3950_resistance_ohm[] =
     5291U, 4633U, 4071U, 3588U
 };
 
-/* 查表对应的R25，单位ohm；必须与board层提供的参数一致。 */
+/* 查表对应的R25，单位ohm；必须与driver层提供的参数一致。 */
 #define MEASUREMENT_NTC_R25_OHM                     (100000L)
-/* 查表对应的Beta参数，单位K；必须与board层提供的参数一致。 */
+/* 查表对应的Beta参数，单位K；必须与driver层提供的参数一致。 */
 #define MEASUREMENT_NTC_BETA_KELVIN                 (3950L)
 /* 查表对应的Beta参考温度，单位0.1°C。 */
 #define MEASUREMENT_NTC_REFERENCE_TEMP_DC           (250)

@@ -1,9 +1,8 @@
-#include "app.h"
+#include "main.h"
 #include "app_config.h"
-#include "board.h"
+#include "drv_board.h"
 #include "debug.h"
 #include "mock_driver.h"
-#include "service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,18 +15,18 @@ static unsigned g_assertions;
 
 
 /*---------------------------------------------------------------------------*
- * Name        : static void run_service_ticks(aurora_service_t *service, uint32_t count)
- * Input       : service - Service上下文；count - 推进节拍数量
+ * Name        : static void run_app_ticks(aurora_app_runtime_t *runtime, uint32_t count)
+ * Input       : runtime - 应用运行时上下文；count - 推进节拍数量
  * Output      : 无
- * Description : 推进指定数量的模拟1 ms节拍并调用Service主循环，用于Host回归。
+ * Description : 推进指定数量的模拟1 ms节拍并调用应用主循环，用于Host回归。
  *---------------------------------------------------------------------------*/
-static void run_service_ticks(aurora_service_t *service, uint32_t count)
+static void run_app_ticks(aurora_app_runtime_t *runtime, uint32_t count)
 {
     uint32_t i;
     for (i = 0U; i < count; ++i)
     {
-        aurora_service_isr_tick(service);
-        aurora_service_poll(service);
+        aurora_app_runtime_isr_tick(runtime);
+        aurora_app_runtime_poll(runtime);
     }
 }
 
@@ -55,19 +54,19 @@ static aurora_measurement_calibration_t unit_calibration(void)
 /*---------------------------------------------------------------------------*
  * Name        : static aurora_measurement_calibration_t board_calibration(void)
  * Input       : 无
- * Output      : 由board层复制出的六通道标定结构
- * Description : 复现Service启动时的板级标定复制，确保Host测试覆盖NTC类型和参数传递。
+ * Output      : 由驱动层复制出的六通道标定结构
+ * Description : 复现应用启动时的板级标定复制，确保Host测试覆盖NTC类型和参数传递。
  *---------------------------------------------------------------------------*/
 static aurora_measurement_calibration_t board_calibration(void)
 {
     aurora_measurement_calibration_t c;
-    aurora_board_adc_calibration_t board_cal;
+    drv_board_adc_calibration_t board_cal;
     size_t channel;
 
     memset(&c, 0, sizeof(c));
     for (channel = 0U; channel < AURORA_ADC_CHANNEL_COUNT; ++channel)
     {
-        CHECK(aurora_board_get_adc_calibration(channel, &board_cal));
+        CHECK(drv_board_get_adc_calibration(channel, &board_cal));
         c.channel[channel].gain_num = board_cal.gain_num;
         c.channel[channel].gain_den = board_cal.gain_den;
         c.channel[channel].offset = board_cal.offset;
@@ -286,7 +285,7 @@ static void test_debug_global_switch_is_off(void)
  *---------------------------------------------------------------------------*/
 static void test_debug_prefix_and_mode_exclusion(void)
 {
-    aurora_service_t service;
+    aurora_app_runtime_t service;
     char text[256];
     size_t length;
 
@@ -310,11 +309,11 @@ static void test_debug_prefix_and_mode_exclusion(void)
     CHECK(strstr(text, "[GE_DEBUG][BLE]") != NULL);
 
     mock_reset();
-    CHECK(aurora_service_init(&service));
+    CHECK(aurora_app_runtime_init(&service));
     mock_uart_clear_tx();
     mock_advance_ms(AURORA_TELEMETRY_PERIOD_MS);
-    aurora_service_isr_tick(&service);
-    aurora_service_poll(&service);
+    aurora_app_runtime_isr_tick(&service);
+    aurora_app_runtime_poll(&service);
     CHECK(mock_uart_tx_length() == 0U);
 }
 #endif
@@ -476,34 +475,34 @@ static void test_telemetry_legacy_identity(void)
  *---------------------------------------------------------------------------*/
 static void test_watchdog_window_and_adc_overrun(void)
 {
-    aurora_service_t service;
+    aurora_app_runtime_t service;
 
     /* 主循环仍在跑但没有1ms控制心跳时，健康监督不得盲目喂狗。 */
     mock_reset();
-    CHECK(aurora_service_init(&service));
+    CHECK(aurora_app_runtime_init(&service));
     mock_advance_ms(AURORA_WATCHDOG_STARTUP_GRACE_MS +
                     AURORA_WATCHDOG_WINDOW_MS);
-    aurora_service_poll(&service);
+    aurora_app_runtime_poll(&service);
     CHECK(mock_watchdog_feeds() == 0U);
 
     /* 恢复SysTick/控制任务后，一个完整健康窗口才允许喂狗。 */
-    run_service_ticks(&service, AURORA_WATCHDOG_WINDOW_MS);
+    run_app_ticks(&service, AURORA_WATCHDOG_WINDOW_MS);
     CHECK(mock_watchdog_feeds() == 1U);
 
     /* 同一DMA半块在尚未消费前再次完成，必须锁存overrun。 */
     mock_reset();
-    CHECK(aurora_service_init(&service));
-    aurora_service_isr_adc_block(&service, 0U);
-    aurora_service_isr_adc_block(&service, 0U);
+    CHECK(aurora_app_runtime_init(&service));
+    aurora_app_runtime_isr_adc_block(&service, 0U);
+    aurora_app_runtime_isr_adc_block(&service, 0U);
     CHECK(service.adc_overrun_count == 1U);
-    aurora_service_poll(&service);
+    aurora_app_runtime_poll(&service);
     CHECK((service.app.protection.latched_mask & AURORA_FAULT_ADC_OVERRUN) != 0U);
 
     /* 主循环正在读取半块期间，DMA绕回同一半块也必须判定覆盖风险。 */
     mock_reset();
-    CHECK(aurora_service_init(&service));
+    CHECK(aurora_app_runtime_init(&service));
     service.adc_processing_mask = 1U;
-    aurora_service_isr_adc_block(&service, 0U);
+    aurora_app_runtime_isr_adc_block(&service, 0U);
     CHECK(service.adc_overrun_count == 1U);
 }
 
@@ -793,10 +792,10 @@ static void test_fault_rearm_resets_duty_origin(void)
  *---------------------------------------------------------------------------*/
 static void test_pwm_arm_race(void)
 {
-    aurora_service_t service;
+    aurora_app_runtime_t service;
 
     mock_reset();
-    CHECK(aurora_service_init(&service));
+    CHECK(aurora_app_runtime_init(&service));
     service.app.protection.active_mask = 0U;
     service.app.protection.latched_mask = 0U;
     service.app.power_command.pwm_enable = true;
@@ -804,16 +803,16 @@ static void test_pwm_arm_race(void)
     service.app.power_command.relay_enable = false;
 
     /* 第一轮只写0到shadow，不能立即开MOE。 */
-    aurora_service_poll(&service);
+    aurora_app_runtime_poll(&service);
     CHECK(!mock_pwm_active());
     mock_apply_uev();
-    aurora_service_isr_pwm_update(&service);
-    aurora_service_poll(&service);
+    aurora_app_runtime_isr_pwm_update(&service);
+    aurora_app_runtime_poll(&service);
     CHECK(!mock_pwm_active()); /* 板级功率门禁默认关闭。 */
 
-    aurora_service_isr_fast_fault(&service, AURORA_FAULT_FAST_MOS_OCP);
+    aurora_app_runtime_isr_fast_fault(&service, AURORA_FAULT_FAST_MOS_OCP);
     CHECK(!mock_pwm_active());
-    aurora_service_poll(&service);
+    aurora_app_runtime_poll(&service);
     CHECK((service.app.protection.latched_mask & AURORA_FAULT_FAST_MOS_OCP) != 0U);
 }
 

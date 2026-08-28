@@ -22,7 +22,7 @@ static void latch_fault(aurora_protection_ctx_t *ctx,
 
     if ((ctx->latched_mask & mask) != mask)
     {
-        /* epoch变化会使Service中已经取得的旧发波许可立即失效。 */
+        /* epoch变化会使应用运行时中已经取得的旧发波许可立即失效。 */
         ctx->epoch++;
     }
 
@@ -256,7 +256,7 @@ bool aurora_protection_clear(aurora_protection_ctx_t *ctx,
  * Name        : bool aurora_protection_is_safe(const aurora_protection_ctx_t *ctx)
  * Input       : ctx - 保护上下文
  * Output      : true - active与latched均为0；false - 参数无效或存在任一故障
- * Description : 提供给功率状态机和Service的统一软件安全判定，不代表板级硬件门禁已通过。
+ * Description : 提供给功率状态机和应用运行时的统一软件安全判定，不代表板级硬件门禁已通过。
  *---------------------------------------------------------------------------*/
 bool aurora_protection_is_safe(const aurora_protection_ctx_t *ctx)
 {
@@ -269,7 +269,7 @@ bool aurora_protection_is_safe(const aurora_protection_ctx_t *ctx)
  * Name        : uint32_t aurora_protection_epoch(const aurora_protection_ctx_t *ctx)
  * Input       : ctx - 保护上下文
  * Output      : 当前软件安全epoch；参数无效时返回0
- * Description : Service在“检查安全”与“执行发波”之间复核该值，阻止TOCTOU窗口中的旧授权。
+ * Description : 应用运行时在“检查安全”与“执行发波”之间复核该值，阻止TOCTOU窗口中的旧授权。
  *---------------------------------------------------------------------------*/
 uint32_t aurora_protection_epoch(const aurora_protection_ctx_t *ctx)
 {

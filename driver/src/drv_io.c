@@ -1,11 +1,11 @@
-#include "driver.h"
+#include "drv_io.h"
 
 #include "board_config.h"
 #include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_gpio.h"
 #include "g32f031_ddl_rcc.h"
 
-/* 把board层引脚编号转换为DDL GPIO位掩码，避免IO安全态复制PinMap数值。 */
+/* 把板级配置引脚编号转换为DDL GPIO位掩码，避免IO安全态复制PinMap数值。 */
 #define DRV_IO_GPIO_PIN(number)                    (1UL << (number))
 
 /*---------------------------------------------------------------------------*

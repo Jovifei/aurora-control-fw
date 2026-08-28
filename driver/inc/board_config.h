@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 /*
- * 最终原理图基线：2026-08-26，G32F031K8T LQFP32，单路异步Boost。
- * 应用层不得包含本文件；引脚、外设、标定和功率门禁只允许在board/driver使用。
+ * 应用业务模块不得包含本文件；引脚、外设、标定和功率门禁只允许在driver使用，
+ * 应用组合根main.h仅通过驱动契约使用其中的缓冲区和路由配置。
  */
 
 /* PA15 / AF3 / ATMR_CH0：低侧Boost门极控制GLC。 */
@@ -149,11 +149,11 @@
 #define BOARD_UART_BAUDRATE                         (115200UL)
 /* 单次USART ISR最多搬运的RX字节数。 */
 #define BOARD_UART_ISR_RX_BUDGET                    (32U)
-/* Service单次主循环最多消费的RX字节数。 */
-#define BOARD_UART_SERVICE_RX_BUDGET                (64U)
+/* 应用主循环单次最多消费的RX字节数。 */
+#define BOARD_UART_APP_RX_BUDGET                    (64U)
 /* 驱动层TX环形缓冲长度，必须能容纳至少一个最大协议帧。 */
 #define BOARD_UART_TX_BUFFER_SIZE                   (256U)
-/* Service RX环形缓冲长度。 */
+/* 应用运行时RX环形缓冲长度。 */
 #define BOARD_UART_RX_BUFFER_SIZE                   (256U)
 
 /* IWDT名义低速时钟，单位Hz；实板受LSI容差影响。 */

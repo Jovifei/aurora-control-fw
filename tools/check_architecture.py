@@ -15,7 +15,7 @@ def is_project_content(path: Path) -> bool:
 
 
 required_dirs = {
-    "app", "service", "driver", "board", "vendor", "project", "docs", "tests", "tools"
+    "app", "driver", "vendor", "project", "docs", "tests", "tools"
 }
 actual_dirs = {
     item.name for item in root.iterdir()
@@ -44,7 +44,7 @@ for name in ["tests", "tools", "docs"]:
     if nested:
         errors.append(f"重复的{name}目录: {[str(path.relative_to(root)) for path in nested]}")
 
-# app按用户约定拆为inc/src；其余首方模块保持扁平。
+# app和driver都按用户约定拆为inc/src；产品源码不得再出现第三层。
 app_subdirs = {item.name for item in (root / "app").iterdir() if item.is_dir()}
 if app_subdirs != {"inc", "src"}:
     errors.append(f"app必须且只能包含inc/src: {sorted(app_subdirs)}")
@@ -55,10 +55,9 @@ if project_sources:
     errors.append(f"project根目录不得放生产源码: {[path.name for path in project_sources]}")
 if (root / "project/keil").exists():
     errors.append("project下不得保留keil子目录")
-for flat_dir in [root / "service", root / "board"]:
-    nested = [path for path in flat_dir.iterdir() if path.is_dir()]
-    if nested:
-        errors.append(f"{flat_dir.name}不应再分子目录: {[path.name for path in nested]}")
+for removed_dir in [root / "service", root / "board"]:
+    if removed_dir.exists():
+        errors.append(f"旧产品层目录不得存在: {removed_dir.name}")
 
 # 生成JSON和构建输出不得提交。
 for path in root.rglob("*.json"):
@@ -75,10 +74,15 @@ if not (root / "driver/inc/driver.h").is_file():
     errors.append("缺少driver/inc/driver.h")
 if not list((root / "driver/src").glob("*.c")):
     errors.append("driver/src中没有目标驱动源文件")
+for source in [*(root / "app/src").glob("*.c"),
+               *(root / "driver/src").glob("*.c")]:
+    header = source.parent.parent / "inc" / f"{source.stem}.h"
+    if not header.is_file():
+        errors.append(f"源码缺少一一对应头文件: {source.relative_to(root)}")
 for path in app_files:
     text = path.read_text(encoding="utf-8", errors="ignore")
-    if re.search(r'#include\s+"(?:g32|board|driver|service)', text, re.I):
-        errors.append(f"应用层越层依赖: {path.relative_to(root)}")
+    if re.search(r'#include\s+"(?:g32|cmsis|ddl)', text, re.I):
+        errors.append(f"应用层直接依赖芯片库: {path.relative_to(root)}")
     code = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     code = re.sub(r"//.*", "", code)
     if re.search(r'\b(?:GPIO[AB]|ATMR|COMP[0-9]|DMA|NVIC|SysTick|DDL_)\b|->(?:CR|SR|DR|CCR|ARR)', code):
@@ -97,7 +101,7 @@ for path in (root / "docs").iterdir():
 
 all_text = "\n".join(
     path.read_text(encoding="utf-8", errors="ignore")
-    for directory in ["app", "service", "driver", "board", "project"]
+    for directory in ["app", "driver", "project"]
     for path in (root / directory).rglob("*.[ch]")
 )
 for token in ["HT32_Mppt_Solar", "Fun_MPPT_FUNC", "arm_math", "cmsis_os1", "legacy_parity"]:
@@ -107,14 +111,13 @@ for token in ["BAT_S1", "BAT_S2", "drv_io_read_setting"]:
     if token in all_text:
         errors.append(f"生产代码含已删除硬件信号: {token}")
 
-# APP/Service只能经driver契约操作PWM，不得直接出现目标寄存器名。
-for directory in ["app", "service"]:
-    for path in (root / directory).rglob("*.[ch]"):
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if re.search(r'EnableAllOutputs|CHMOE|GenerateEvent_UPDATE|DDL_ATMR_', text):
-            errors.append(f"非驱动层直接操作PWM硬件: {path.relative_to(root)}")
+# APP只能经driver契约操作PWM，不得直接出现目标寄存器名。
+for path in (root / "app").rglob("*.[ch]"):
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if re.search(r'EnableAllOutputs|CHMOE|GenerateEvent_UPDATE|DDL_ATMR_', text):
+        errors.append(f"非驱动层直接操作PWM硬件: {path.relative_to(root)}")
 
-board_cfg = (root / "board/board_config.h").read_text(encoding="utf-8", errors="ignore")
+board_cfg = (root / "driver/inc/board_config.h").read_text(encoding="utf-8", errors="ignore")
 expected_macros = {
     "BOARD_PIN_GLC_NUMBER": "15U",
     "BOARD_PIN_UART_TX_NUMBER": "10U",
@@ -177,7 +180,7 @@ if "drv_pwm_quiesce_break_irq_isr" not in pwm:
     errors.append("Break ISR缺少只屏蔽重复中断、不清锁存的接口")
 
 # ISR桥接保持轻量，不得调用APP重业务。
-isr = (root / "service/interrupts.c").read_text(encoding="utf-8", errors="ignore")
+isr = (root / "app/src/interrupts.c").read_text(encoding="utf-8", errors="ignore")
 for forbidden_call in [
     "aurora_mppt_step", "aurora_charger_step", "aurora_measurement_process_block",
     "aurora_storage_encode_page", "aurora_ui_step"
@@ -193,20 +196,23 @@ for line in isr.splitlines():
 if "debug_printf" in isr or "DEBUG_" in isr:
     errors.append("ISR不得直接输出Debug日志")
 
-app_c_count = len(list((root / "app/src").glob("*.c")))
-if app_c_count > 10:
-    errors.append(f"APP源文件过度碎片化: {app_c_count}个.c")
-
 cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-if "app/src/app.c" not in cmake or "app/inc" not in cmake:
-    errors.append("CMake未切换到app/src和app/inc")
-if "service/debug.c" not in cmake:
-    errors.append("CMake未加入service/debug.c")
+if ("app/src/main.c" not in cmake or "app/src/debug.c" not in cmake or
+        "app/inc" not in cmake or "driver/src/drv_board.c" not in cmake):
+    errors.append("CMake未切换到两层src/inc结构")
+if "service/" in cmake or "board/" in cmake:
+    errors.append("CMake仍引用已移除的service或board目录")
 keil = (root / "project/AuroraControl.uvprojx").read_text(encoding="utf-8", errors="ignore")
-if "app\\src\\app.c" not in keil or "app\\inc" not in keil:
-    errors.append("Keil工程未切换到app/src和app/inc")
-if "..\\service\\debug.c" not in keil:
-    errors.append("Keil工程未加入service/debug.c")
+for expected_path in [
+    "..\\app\\src\\main.c", "..\\app\\src\\interrupts.c",
+    "..\\app\\src\\debug.c", "..\\driver\\src\\drv_board.c",
+]:
+    if expected_path not in keil:
+        errors.append(f"Keil工程缺少文件: {expected_path}")
+if "..\\service\\" in keil or "..\\board\\" in keil:
+    errors.append("Keil工程仍引用已移除的service或board目录")
+if "<GroupName>Service</GroupName>" in keil or "<GroupName>Board</GroupName>" in keil:
+    errors.append("Keil工程仍保留旧Service/Board分组")
 if re.search(r"<FileName>\.\.\\\.\.\\", keil):
     errors.append("Keil外部源码的FileName不得带父目录，避免中间文件落入源码路径")
 

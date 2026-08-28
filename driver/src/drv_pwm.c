@@ -1,4 +1,4 @@
-#include "driver.h"
+#include "drv_pwm.h"
 
 #include "board_config.h"
 #include "g32f031_ddl_atmr.h"
@@ -311,7 +311,7 @@ uint32_t drv_pwm_applied_sequence(void)
  * Name        : uint8_t drv_pwm_irq_pending_isr(void)
  * Input       : 无
  * Output      : DRV_PWM_IRQ_BREAK/DRV_PWM_IRQ_UPDATE组合位
- * Description : 在驱动层快照ATMR共享向量的Break和一次性Update待处理状态，供Service按安全优先级分发。
+ * Description : 在驱动层快照ATMR共享向量的Break和一次性Update待处理状态，供应用运行时按安全优先级分发。
  *---------------------------------------------------------------------------*/
 uint8_t drv_pwm_irq_pending_isr(void)
 {

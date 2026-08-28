@@ -9,17 +9,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = [
     ROOT / "app/src",
-    ROOT / "board",
     ROOT / "driver/src",
-    ROOT / "service",
     ROOT / "project",
     ROOT / "tests",
 ]
 HEADER_ROOTS = [
     ROOT / "app/inc",
-    ROOT / "board",
     ROOT / "driver/inc",
-    ROOT / "service",
     ROOT / "tests",
 ]
 BANNER_END = "*---------------------------------------------------------------------------*/"

@@ -1,18 +1,8 @@
-#include "service.h"
-
-#include "app_types.h"
-#include "board_config.h"
+#include "main.h"
+#include "interrupts.h"
 #include "driver.h"
 
-extern aurora_service_t g_aurora_service;
-
-void SysTick_Handler(void);
-void DMA_CH1_IRQHandler(void);
-void COMP0_IRQHandler(void);
-void COMP1_2_3_IRQHandler(void);
-void ATMR_BRK_UP_TRG_COM_IRQHandler(void);
-void USART_IRQHandler(void);
-__attribute__((noreturn)) void HardFault_Handler(void);
+extern aurora_app_runtime_t g_aurora_app_runtime;
 
 /*---------------------------------------------------------------------------*
  * Name        : static void handle_fast_comparator_fault(void)
@@ -38,8 +28,8 @@ static void handle_fast_comparator_fault(void)
         app_faults = AURORA_FAULT_FAST_BREAK;
     }
 
-    /* service入口第一动作仍是恒定时间强制关波；这里只负责故障原因映射。 */
-    aurora_service_isr_fast_fault(&g_aurora_service, app_faults);
+    /* 应用运行时入口第一动作仍是恒定时间强制关波；这里只负责原因映射。 */
+    aurora_app_runtime_isr_fast_fault(&g_aurora_app_runtime, app_faults);
     drv_comp_irq_ack();
 }
 
@@ -47,33 +37,33 @@ static void handle_fast_comparator_fault(void)
  * Name        : void SysTick_Handler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理1 ms SysTick中断，只更新时间并投递Service节拍事件。
+ * Description : 处理1 ms SysTick中断，只更新时间并投递应用节拍事件。
  *---------------------------------------------------------------------------*/
 void SysTick_Handler(void)
 {
-    aurora_service_isr_tick(&g_aurora_service);
+    aurora_app_runtime_isr_tick(&g_aurora_app_runtime);
 }
 
 /*---------------------------------------------------------------------------*
  * Name        : void DMA_CH1_IRQHandler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理ADC DMA半传输、全传输和错误标志，把完成块或DMA故障发布给Service。
+ * Description : 处理ADC DMA半传输、全传输和错误标志，把完成块或DMA故障发布给应用运行时。
  *---------------------------------------------------------------------------*/
 void DMA_CH1_IRQHandler(void)
 {
     const uint8_t completed = drv_adc_dma_irq_ack();
     if ((completed & DRV_ADC_IRQ_ERROR) != 0U)
     {
-        aurora_service_isr_fast_fault(&g_aurora_service, AURORA_FAULT_ADC_DMA);
+        aurora_app_runtime_isr_fast_fault(&g_aurora_app_runtime, AURORA_FAULT_ADC_DMA);
     }
     if ((completed & DRV_ADC_IRQ_BLOCK0) != 0U)
     {
-        aurora_service_isr_adc_block(&g_aurora_service, 0U);
+        aurora_app_runtime_isr_adc_block(&g_aurora_app_runtime, 0U);
     }
     if ((completed & DRV_ADC_IRQ_BLOCK1) != 0U)
     {
-        aurora_service_isr_adc_block(&g_aurora_service, 1U);
+        aurora_app_runtime_isr_adc_block(&g_aurora_app_runtime, 1U);
     }
 }
 
@@ -121,7 +111,7 @@ void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
     }
     if ((pending & DRV_PWM_IRQ_UPDATE) != 0U)
     {
-        aurora_service_isr_pwm_update(&g_aurora_service);
+        aurora_app_runtime_isr_pwm_update(&g_aurora_app_runtime);
     }
 }
 
@@ -138,7 +128,7 @@ void USART_IRQHandler(void)
     /* 单次ISR只搬运有限字节，避免通信流量长期饿死ADC和控制任务。 */
     while (drv_uart_rx_ready_isr() && (budget > 0U))
     {
-        aurora_service_isr_uart_rx(&g_aurora_service, drv_uart_read_isr());
+        aurora_app_runtime_isr_uart_rx(&g_aurora_app_runtime, drv_uart_read_isr());
         budget--;
     }
     drv_uart_tx_isr();

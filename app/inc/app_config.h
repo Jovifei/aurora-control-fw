@@ -10,7 +10,7 @@
  * 1. 所有量必须使用名称中声明的物理单位；
  * 2. 修改本文件前先阅读 docs/17-参数标定与Codex交接清单.md；
  * 3. 电池档案的逐化学体系参数位于 app/src/charger.c 的 k_profiles；
- * 4. 板级引脚、ADC比例、Flash地址和功率放行门禁位于 board/board_config.h。
+ * 4. 板级引脚、ADC比例、Flash地址和功率放行门禁位于 driver/inc/board_config.h。
  */
 
 /* 功率BOM选择值：高功率版本。 */

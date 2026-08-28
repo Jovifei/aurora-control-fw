@@ -1,4 +1,4 @@
-#include "driver.h"
+#include "drv_system.h"
 
 #include "g32f031xx.h"
 #include "system_g32f031.h"
@@ -90,4 +90,15 @@ void drv_irq_configure_priorities(void)
 DRV_SYSTEM_NORETURN void drv_system_reset(void)
 {
     NVIC_SystemReset();
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void drv_wait_for_interrupt(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 封装目标WFI指令，使应用入口不直接依赖芯片寄存器头文件。
+ *---------------------------------------------------------------------------*/
+void drv_wait_for_interrupt(void)
+{
+    __WFI();
 }

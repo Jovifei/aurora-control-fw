@@ -16,7 +16,7 @@
 |---|---|---|
 | 应用算法 | `app/inc/app_config.h` | 调度、MPPT、充电PI、Duty斜率、预充、温度软件阈值、UI、遥测和WDT健康窗口 |
 | 电池档案 | `app/src/charger.c::k_profiles` | 4种化学体系×48/60/72V的TC/CC/CV/Float/复充参数 |
-| 板级硬件 | `board/board_config.h` | PinMap、ADC分压/零点/极性、PWM时钟、Flash地址、UART、IWDT名义时钟和人工门禁 |
+| 板级硬件 | `driver/inc/board_config.h` | PinMap、ADC分压/零点/极性、PWM时钟、Flash地址、UART、IWDT名义时钟和人工门禁 |
 | 目标驱动 | `driver/*.c` | DDL枚举、寄存器序列、采样时间、Break/COMP/OPA绑定 |
 | 协议格式 | `app/inc/protocol.h`、`app/src/protocol.c` | 帧头、动作码、资源号、字段长度、遥测偏移 |
 | 存储格式 | `app/inc/storage.h`、`app/src/storage.c` | 页头Magic、版本、字段偏移、CRC和Commit Marker |
@@ -35,14 +35,14 @@
 | P1 | MPPT外层 | `AURORA_MPPT_*` | P-V斜率+Vref PI候选 | PV模拟器扫曲线、辐照阶跃、噪声统计、局部阴影场景 | 启动、稳定点、快变光照、外部限功率冻结、恢复 |
 | P1 | 功率到Duty执行器 | `AURORA_POWER_PI_*`、`AURORA_DUTY_STEP_Q15` | Host边界通过 | 功率级小信号响应、采样延迟、电感/BUS动态 | 阶跃、饱和、反积分、故障后从零重新起步 |
 | P1 | 电池档案 | `k_profiles` | 12组候选值 | 电芯/BMS/整车规格、串数、温度补偿、允许电流 | 每档阶段转移、过压保护、尾流、复充；铅酸Float独立验证 |
-| P1 | NTC换算 | `board/board_config.h`、`app/src/measurement.c` | MOS NTC已实现100K/3950查表和开短路拒绝；环境NTC仍无效 | MOS板载网络、ADC参考、两点或多点温箱标定；环境探头型号/B值 | -40～125°C表/公式、开短路检测、降额/跳闸/恢复 |
+| P1 | NTC换算 | `driver/inc/board_config.h`、`app/src/measurement.c` | MOS NTC已实现100K/3950查表和开短路拒绝；环境NTC仍无效 | MOS板载网络、ADC参考、两点或多点温箱标定；环境探头型号/B值 | -40～125°C表/公式、开短路检测、降额/跳闸/恢复 |
 | P2 | UART协议 | `protocol.h/.c` | Host往返和连续帧通过 | 旧设备Golden Vector、字节序、错误帧和超时行为 | Golden Vector、长帧、粘包、丢字节、校验错误、响应资源号 |
 | P2 | UI/遥测周期 | `AURORA_UI_*`、`AURORA_TELEMETRY_PERIOD_MS` | 软件候选 | 产品交互规范 | Host时序断言和实机观察 |
 
 ## 3.1 本轮蓝牙、Debug与MOS NTC实现
 
 - PA10/PA11和PB7/PB8属于同一USART的复用引脚；`BOARD_USART_MODE`默认选择PA10/PA11蓝牙链路，Debug构建选择PB7/PB8。
-- Debug日志集中在`service/debug.c`，全局开关为`DEBUG_ENABLE`，模块开关包含`DEBUG_SYSTEM_ENABLE`、`DEBUG_BLE_ENABLE`、`DEBUG_NTC_ENABLE`、`DEBUG_PROTECTION_ENABLE`、`DEBUG_STORAGE_ENABLE`和`DEBUG_WDG_ENABLE`，日志前缀为`[GE_DEBUG]`。
+- Debug日志集中在`app/src/debug.c`，全局开关为`DEBUG_ENABLE`，模块开关包含`DEBUG_SYSTEM_ENABLE`、`DEBUG_BLE_ENABLE`、`DEBUG_NTC_ENABLE`、`DEBUG_PROTECTION_ENABLE`、`DEBUG_STORAGE_ENABLE`和`DEBUG_WDG_ENABLE`，日志前缀为`[GE_DEBUG]`。
 - Debug模式不运行产品协议解析和主动遥测，避免和日志共用USART；日志通过驱动发送环形缓冲非阻塞发送，ISR不格式化日志。
 - MOS NTC使用原理图R37=5.1K、R42=100K 1% 3950和PB12 ADC CH5，温度查表覆盖-40°C～125°C；开路、短路或超范围时锁存`AURORA_FAULT_MOS_TEMP_INVALID`。
 - 蓝牙设置继续使用已有`RESOURCE_SETTING`帧和`AURORA_PACK_48V/60V/72V`枚举，不新增未确定的BLE协议；现有默认持久化平台72V不变。

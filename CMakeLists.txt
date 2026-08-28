@@ -8,7 +8,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 enable_testing()
 
 set(APP_SOURCES
-    app/src/app.c
+    app/src/main.c
+    app/src/debug.c
     app/src/measurement.c
     app/src/mppt.c
     app/src/charger.c
@@ -19,21 +20,19 @@ set(APP_SOURCES
     app/src/storage.c
 )
 
-set(SERVICE_SOURCES
-    service/service.c
-    service/debug.c
-)
-
 add_executable(aurora_host_tests
     ${APP_SOURCES}
-    ${SERVICE_SOURCES}
-    board/board.c
+    driver/src/drv_board.c
     tests/mock_driver.c
     tests/test_main.c
 )
 
 target_include_directories(aurora_host_tests PRIVATE
-    app/inc service driver/inc board tests
+    app/inc driver/inc tests
+)
+
+target_compile_definitions(aurora_host_tests PRIVATE
+    AURORA_HOST_TEST=1
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -47,17 +46,17 @@ add_test(NAME aurora_host_tests COMMAND aurora_host_tests)
 
 add_executable(aurora_host_debug_tests
     ${APP_SOURCES}
-    ${SERVICE_SOURCES}
-    board/board.c
+    driver/src/drv_board.c
     tests/mock_driver.c
     tests/test_main.c
 )
 
 target_include_directories(aurora_host_debug_tests PRIVATE
-    app/inc service driver/inc board tests
+    app/inc driver/inc tests
 )
 
 target_compile_definitions(aurora_host_debug_tests PRIVATE
+    AURORA_HOST_TEST=1
     AURORA_HOST_DEBUG_TEST=1
     DEBUG_ENABLE=1
     BOARD_USART_MODE=BOARD_USART_MODE_DEBUG

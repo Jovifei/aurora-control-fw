@@ -17,4 +17,4 @@ Debug模式与蓝牙模式独占USART，并关闭产品协议解析和主动遥�
 
 Host 测试通过不能替代本工程的 ARM Compiler 6 链接、下载和台架波形验证。
 
-目标入口和中断桥接位于 `service/main.c` 与 `service/interrupts.c`；本目录只保存 Keil 工程、scatter 和用户工程配置。
+目标入口、应用运行时和中断桥接位于 `app/src/main.c` 与 `app/src/interrupts.c`；本目录只保存 Keil 工程、scatter 和用户工程配置。

@@ -219,7 +219,7 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
 
     if (!protection_safe && (ctx->state != AURORA_POWER_FAULT))
     {
-        /* 软件命令先撤销PWM；Service随后执行硬件关波并延时释放继电器。 */
+        /* 软件命令先撤销PWM；应用运行时随后执行硬件关波并延时释放继电器。 */
         enter_state(ctx, AURORA_POWER_FAULT, now_ms);
     }
 
@@ -350,7 +350,7 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         }
         else
         {
-            /* 普通停充采用斜率下降；真正硬件关波仍由Service统一执行。 */
+        /* 普通停充采用斜率下降；真正硬件关波仍由应用运行时统一执行。 */
             ctx->duty_q15 = slew_duty(ctx->duty_q15, 0U);
         }
         break;

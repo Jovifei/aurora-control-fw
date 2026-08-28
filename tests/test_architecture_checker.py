@@ -30,16 +30,28 @@ class ArchitectureCheckerTests(unittest.TestCase):
             if file_path.startswith("..\\"):
                 self.assertNotIn("..", file_name)
 
-    def test_target_files_are_not_nested_under_project_keil(self):
+    def test_product_layers_are_split_into_app_and_driver(self):
         self.assertFalse((ROOT / "project" / "keil").exists())
-        self.assertTrue((ROOT / "service" / "main.c").is_file())
-        self.assertTrue((ROOT / "service" / "interrupts.c").is_file())
+        self.assertFalse((ROOT / "service").exists())
+        self.assertFalse((ROOT / "board").exists())
+        for name in ["main", "interrupts", "debug"]:
+            self.assertTrue((ROOT / "app" / "src" / f"{name}.c").is_file())
+            self.assertTrue((ROOT / "app" / "inc" / f"{name}.h").is_file())
+        self.assertTrue((ROOT / "driver" / "src" / "drv_board.c").is_file())
+        self.assertTrue((ROOT / "driver" / "inc" / "drv_board.h").is_file())
         self.assertTrue((ROOT / "project" / "AuroraControl.uvprojx").is_file())
         self.assertTrue((ROOT / "project" / "AuroraControl.sct").is_file())
         self.assertTrue((ROOT / "project" / "README.md").is_file())
 
+        for source in [*(ROOT / "app" / "src").glob("*.c"),
+                       *(ROOT / "driver" / "src").glob("*.c")]:
+            self.assertTrue(
+                (source.parent.parent / "inc" / f"{source.stem}.h").is_file(),
+                str(source),
+            )
+
     def test_usart_declares_bluetooth_default_and_debug_route(self):
-        board_config = (ROOT / "board" / "board_config.h").read_text(encoding="utf-8")
+        board_config = (ROOT / "driver" / "inc" / "board_config.h").read_text(encoding="utf-8")
         uart = (ROOT / "driver" / "src" / "drv_uart.c").read_text(encoding="utf-8")
         self.assertIn("BOARD_USART_MODE_BLUETOOTH", board_config)
         self.assertIn("BOARD_USART_MODE_DEBUG", board_config)
@@ -62,8 +74,8 @@ class ArchitectureCheckerTests(unittest.TestCase):
             file_node.findtext("FilePath", default="")
             for file_node in project.findall(".//File")
         }
-        self.assertIn("..\\service\\main.c", paths)
-        self.assertIn("..\\service\\interrupts.c", paths)
+        self.assertIn("..\\app\\src\\main.c", paths)
+        self.assertIn("..\\app\\src\\interrupts.c", paths)
 
 
 if __name__ == "__main__":

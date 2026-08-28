@@ -231,7 +231,7 @@ typedef struct
     uint8_t valid_reserved[3];                       /* 显式补齐有效位后的字节，避免隐式填充。 */
 } aurora_mppt_output_t;
 
-/* 应用层提交给Service的硬件无关功率命令。 */
+/* 应用层提交给应用运行时的硬件无关功率命令。 */
 typedef struct
 {
     uint16_t duty_q15;                               /* Q6物理占空比，Q15。 */

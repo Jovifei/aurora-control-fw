@@ -21,15 +21,15 @@ Cortex-M0+ target syntax: PASS
 
 Host测试通过不等于Keil链接和功率板验收通过。
 
+如果本机缺少GCC、Clang、CMake或CTest，`tools/run_checks.py`会明确输出`CHECKS INCOMPLETE`并返回非0；这表示Host构建证据缺失，不是测试通过。
+
 ## 2. 源码入口
 
 ```text
-app/inc/       应用层公共类型、接口和带单位参数
-app/src/       9个纯业务实现
-service/       ISR事件邮箱、主循环调度、APP与Driver唯一桥接
-board/         PinMap、标定、Flash地址和人工安全门禁
-driver/        G32F031目标外设实现
-service/      ISR桥接、目标入口、主循环调度和APP↔Driver安全桥
+app/inc/       应用层公共类型、接口、带单位参数和运行时接口
+app/src/       应用业务、目标入口、ISR桥接和Debug实现
+driver/inc/    驱动模块头、公共契约、PinMap和板级安全配置
+driver/src/    G32F031目标外设及板级驱动实现
 project/      AC6工程、scatter和用户工程配置
 tests/         Host回归、故障注入和模拟驱动
 tools/         架构、风格、编译、Sanitizer和目标端语法门禁
@@ -40,7 +40,7 @@ tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 - `.h`只能放入 `app/inc/`；
 - `.c`只能放入 `app/src/`；
 - `app/`根目录不得放 `.c/.h`；
-- APP不得包含 `board.h`、`driver.h`、`service.h` 或任何G32/DDL/CMSIS目标头文件。
+- APP可包含Driver契约并调用驱动；不得直接包含任何G32/DDL/CMSIS芯片头文件。
 
 ## 3. 代码注释与布局规范
 
@@ -78,13 +78,13 @@ tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 
 ## 5. 功率安全红线
 
-- 正常发波只能经过 `service/service.c::apply_power_command()`；
+- 正常发波只能经过 `app/src/main.c::apply_power_command()`；
 - 快速故障ISR第一动作必须是 `drv_pwm_force_off_isr()`；
 - 运行期Duty只写CCR preload，不产生软件UPDATE事件；
 - 首次授权必须先装载零CCR，再经过安全epoch、Break源、Break锁存和板级总门复核；
 - 故障后Duty和积分清零，恢复必须重新执行电池识别与预充；
 - 功率运行或继电器闭合时禁止Flash擦写；
-- 只有Service健康监督可喂IWDT；
+- 只有应用健康监督可喂IWDT；
 - `BOARD_POWER_OUTPUT_ALLOWED`未经人工验收不得改为1。
 
 ## 6. 提交前检查
@@ -106,7 +106,7 @@ BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
 DEBUG_ENABLE=1
 ```
 
-该模式把USART切换到PB7/PB8，并关闭产品协议解析和主动遥测；不要在蓝牙模式打开Debug打印，否则会污染蓝牙数据。打印实现位于`service/debug.c`，各模块开关位于`service/debug.h`。
+该模式把USART切换到PB7/PB8，并关闭产品协议解析和主动遥测；不要在蓝牙模式打开Debug打印，否则会污染蓝牙数据。打印实现位于`app/src/debug.c`，各模块开关位于`app/inc/debug.h`。
 
 ## 8. MOS温度状态
 

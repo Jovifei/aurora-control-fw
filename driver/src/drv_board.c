@@ -1,21 +1,20 @@
-#include "board.h"
+#include "drv_board.h"
 
-#include "app_types.h"
 #include "board_config.h"
 
 #include <string.h>
 
 /*---------------------------------------------------------------------------*
- * Name        : static void set_voltage_calibration(aurora_board_adc_calibration_t *calibration, int32_t divider_num, int32_t divider_den)
+ * Name        : static void set_voltage_calibration(drv_board_adc_calibration_t *calibration, int32_t divider_num, int32_t divider_den)
  * Input       : calibration - 标定输出；divider_num/divider_den - 硬件分压比
  * Output      : 无
  * Description : 根据ADC参考电压、满量程码和分压比生成单极性电压通道标定参数。
  *---------------------------------------------------------------------------*/
-static void set_voltage_calibration(aurora_board_adc_calibration_t *calibration,
+static void set_voltage_calibration(drv_board_adc_calibration_t *calibration,
                                     int32_t divider_num,
                                     int32_t divider_den)
 {
-    calibration->kind = AURORA_ADC_CALIBRATION_LINEAR;
+    calibration->kind = DRV_ADC_CALIBRATION_LINEAR;
     calibration->gain_num = BOARD_ADC_REFERENCE_MV * divider_num;
     calibration->gain_den = BOARD_ADC_FULL_SCALE_CODE * divider_den;
     calibration->zero_code = 0;
@@ -24,14 +23,14 @@ static void set_voltage_calibration(aurora_board_adc_calibration_t *calibration,
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static void set_mos_ntc_calibration(aurora_board_adc_calibration_t *calibration)
+ * Name        : static void set_mos_ntc_calibration(drv_board_adc_calibration_t *calibration)
  * Input       : calibration - 标定输出
  * Output      : 无
  * Description : 写入原理图板载MOS NTC的上拉、R25、Beta和有效温度范围参数。
  *---------------------------------------------------------------------------*/
-static void set_mos_ntc_calibration(aurora_board_adc_calibration_t *calibration)
+static void set_mos_ntc_calibration(drv_board_adc_calibration_t *calibration)
 {
-    calibration->kind = AURORA_ADC_CALIBRATION_NTC_BETA;
+    calibration->kind = DRV_ADC_CALIBRATION_NTC_BETA;
     calibration->valid = true;
     calibration->ntc_pullup_ohm = BOARD_NTC_MOS_PULLUP_OHM;
     calibration->ntc_r25_ohm = BOARD_NTC_MOS_R25_OHM;
@@ -43,13 +42,13 @@ static void set_mos_ntc_calibration(aurora_board_adc_calibration_t *calibration)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : bool aurora_board_get_adc_calibration(size_t channel, aurora_board_adc_calibration_t *calibration)
+ * Name        : bool drv_board_get_adc_calibration(size_t channel, drv_board_adc_calibration_t *calibration)
  * Input       : channel - 逻辑通道索引；calibration - 标定输出地址
  * Output      : true表示索引合法；false表示参数错误或索引越界
  * Description : 返回指定ADC逻辑通道的线性或NTC标定参数；环境NTC型号未确认时明确返回valid=false。
  *---------------------------------------------------------------------------*/
-bool aurora_board_get_adc_calibration(size_t channel,
-                                      aurora_board_adc_calibration_t *calibration)
+bool drv_board_get_adc_calibration(size_t channel,
+                                   drv_board_adc_calibration_t *calibration)
 {
     if ((calibration == NULL) || (channel >= 6U))
     {
@@ -101,12 +100,12 @@ bool aurora_board_get_adc_calibration(size_t channel,
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : bool aurora_board_power_gate_open(void)
+ * Name        : bool drv_board_power_gate_open(void)
  * Input       : 无
  * Output      : true表示所有人工门禁均已放行；false表示必须保持PWM关闭
  * Description : 汇总PinMap、比较器、模拟标定、Keil和低压台架证据；代码整理不得绕过任一门禁。
  *---------------------------------------------------------------------------*/
-bool aurora_board_power_gate_open(void)
+bool drv_board_power_gate_open(void)
 {
     return (BOARD_POWER_OUTPUT_ALLOWED != 0U) &&
            (BOARD_GATE_PINMAP_REVIEWED != 0U) &&
@@ -117,23 +116,23 @@ bool aurora_board_power_gate_open(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : uint32_t aurora_board_flash_page_a(void)
+ * Name        : uint32_t drv_board_flash_page_a(void)
  * Input       : 无
  * Output      : Flash Journal A页起始地址
- * Description : 返回链接脚本保留的A页地址，供Service读取和编程。
+ * Description : 返回链接脚本保留的A页地址，供应用层读取和编程。
  *---------------------------------------------------------------------------*/
-uint32_t aurora_board_flash_page_a(void)
+uint32_t drv_board_flash_page_a(void)
 {
     return BOARD_FLASH_PAGE_A_ADDRESS;
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : uint32_t aurora_board_flash_page_b(void)
+ * Name        : uint32_t drv_board_flash_page_b(void)
  * Input       : 无
  * Output      : Flash Journal B页起始地址
- * Description : 返回链接脚本保留的B页地址，供Service读取和编程。
+ * Description : 返回链接脚本保留的B页地址，供应用层读取和编程。
  *---------------------------------------------------------------------------*/
-uint32_t aurora_board_flash_page_b(void)
+uint32_t drv_board_flash_page_b(void)
 {
     return BOARD_FLASH_PAGE_B_ADDRESS;
 }

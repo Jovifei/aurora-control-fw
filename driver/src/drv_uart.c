@@ -1,4 +1,4 @@
-#include "driver.h"
+#include "drv_uart.h"
 
 #include "board_config.h"
 #include "g32f031_ddl_bus.h"
@@ -10,7 +10,7 @@ static uint8_t g_tx[BOARD_UART_TX_BUFFER_SIZE];
 static volatile uint16_t g_tx_head;
 static volatile uint16_t g_tx_tail;
 
-/* 把board层引脚编号转换为DDL GPIO位掩码，避免驱动再次复制PinMap数值。 */
+/* 把板级配置引脚编号转换为DDL GPIO位掩码，避免驱动再次复制PinMap数值。 */
 #define DRV_UART_GPIO_PIN(number)                   (1UL << (number))
 
 /*---------------------------------------------------------------------------*
