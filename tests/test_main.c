@@ -478,13 +478,16 @@ static void test_fault_rearm_resets_duty_origin(void)
     CHECK(!command.pwm_enable);
     CHECK(command.relay_enable);
 
-    /* 满足放能时间后先回WAIT_BATTERY，下一拍再重新进入预充。 */
+    /* ADC块同时失效时，FAULT仍必须完成放能释放，不能被测量早退挡住。 */
+    sample.valid_mask = 0U;
     command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 121U);
     CHECK(command.state == AURORA_POWER_WAIT_BATTERY);
     CHECK(!command.pwm_enable);
     CHECK(!command.relay_enable);
     CHECK(ctx.duty_q15 == 0U);
 
+    /* 测量恢复后才允许从WAIT_BATTERY进入新的预充流程。 */
+    sample.valid_mask = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_POWER | AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V;
     command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 122U);
     CHECK(command.state == AURORA_POWER_PRECHARGE);
     CHECK(!command.pwm_enable);

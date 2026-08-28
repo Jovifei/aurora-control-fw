@@ -1,6 +1,6 @@
 # Codex / Agent 工作约束
 
-1. 先读 `docs/README.md`、`docs/GUIDE.md`、`docs/17-参数标定与Codex交接清单.md`、`docs/07-保护PWM与看门狗安全设计.md` 和 `docs/19-v0.7.0代码规范整改与验证报告.md`、`docs/20-v0.7.1替换发布说明.md`。
+1. 先读 `docs/README.md`、`docs/GUIDE.md`、`docs/17-参数标定与Codex交接清单.md`、`docs/07-保护PWM与看门狗安全设计.md`、`docs/18-v0.7.2目录规范与交接说明.md` 和 `docs/19-编译修复提交2740523审计.md`。
 2. 不得重新引入旧MCU源码、闭源MPPT库、完整SDK示例、`legacy_*`、`tasks/`、`.bootstrap`、重复目录或生成JSON。
 3. APP必须采用 `app/inc/*.h` 与 `app/src/*.c`；`app/`根目录不得放C/H文件，APP `.c` 总数不得无理由超过10个。
 4. `service/`、`driver/`、`board/`保持扁平；APP不得包含Chip/Driver/Board/Service头文件，Driver不得包含业务头文件。

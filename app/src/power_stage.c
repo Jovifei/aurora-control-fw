@@ -223,9 +223,10 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         enter_state(ctx, AURORA_POWER_FAULT, now_ms);
     }
 
-    if ((sample->valid_mask & required_measurements) != required_measurements)
+    // 非FAULT状态缺测时拒绝推进；FAULT必须继续执行定时放能释放，不能被早退挡住。
+    if (((sample->valid_mask & required_measurements) != required_measurements) && (ctx->state != AURORA_POWER_FAULT))
     {
-        /* 缺少任一功率级关键测量时，只保留当前继电器状态并强制Duty为0。 */
+        /* 缺少任一功率级关键测量时，非FAULT状态只保留当前继电器状态并强制Duty为0。 */
         ctx->duty_q15 = 0U;
         command.state = ctx->state;
         command.relay_enable = ctx->relay_closed;

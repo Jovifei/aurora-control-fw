@@ -1,6 +1,6 @@
 # Aurora Control Firmware
 
-> 工程整理发布：**v0.7.1**。本版本用于替换远端仍残留的旧 `app/*.c/.h` 扁平目录。
+> 工程整理发布：**v0.7.2**。本版本继续统一应用层与驱动层目录，并记录编译修复后的安全审计结果。
 
 单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
 
@@ -41,8 +41,8 @@ storage      片内Flash双页Journal、CRC和Commit Marker
 - [文档入口](docs/README.md)
 - [工程接手指南](docs/GUIDE.md)
 - [参数标定与Codex交接清单](docs/17-参数标定与Codex交接清单.md)
-- [v0.6.0遗留问题复核](docs/18-v0.6.0遗留问题在v0.7.0中的复核.md)
-- [v0.7.0整改与验证报告](docs/19-v0.7.0代码规范整改与验证报告.md)
+- [v0.7.2目录规范与交接说明](docs/18-v0.7.2目录规范与交接说明.md)
+- [编译修复提交2740523审计](docs/19-编译修复提交2740523审计.md)
 
 ## 本地验证
 
@@ -61,7 +61,7 @@ Clang AddressSanitizer + UBSan
 Cortex-M0+ target syntax check
 ```
 
-当前Host回归为74个断言，GCC/Clang/CTest/Sanitizer和10个目标端首方文件语法检查均通过。Host通过不等于Keil AC6链接或功率板验收通过。
+当前Host回归包含87个运行时CHECK断言；GCC/Clang/CTest/Sanitizer和10个目标端首方文件语法检查均通过。Host通过不等于Keil AC6链接或功率板验收通过。
 
 ## 当前安全状态
 
@@ -72,6 +72,3 @@ BOARD_POWER_OUTPUT_ALLOWED == 0
 ```
 
 真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流和低压到额定功率验收。
-
-
-- [v0.7.1替换发布说明](docs/20-v0.7.1替换发布说明.md)
