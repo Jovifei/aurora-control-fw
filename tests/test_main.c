@@ -312,6 +312,12 @@ static void test_charger_profiles(void)
     o = aurora_charger_step(&c, &s, false, false, 10U);
     CHECK(o.state == AURORA_CHARGE_CC);
     CHECK(o.allow_charge);
+
+    /* 非法枚举状态必须fail-safe到FAULT，不能因为default被移除而静默悬空。 */
+    c.state = (aurora_charge_state_t)0x7FU;
+    o = aurora_charger_step(&c, &s, false, false, 20U);
+    CHECK(o.state == AURORA_CHARGE_FAULT);
+    CHECK(!o.allow_charge);
 }
 
 /*---------------------------------------------------------------------------*
@@ -466,16 +472,39 @@ static void test_fault_rearm_resets_duty_origin(void)
     CHECK(ctx.duty_q15 == 0U);
     CHECK(ctx.power_integral == 0LL);
 
-    /* 清故障后不得直接回RUN，必须回到电池识别/预充。 */
-    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 200U);
-    CHECK(command.state == AURORA_POWER_PRECHARGE);
+    /* 故障即使很快消失，也必须先满足继电器最短放能时间。 */
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 110U);
+    CHECK(command.state == AURORA_POWER_FAULT);
     CHECK(!command.pwm_enable);
+    CHECK(command.relay_enable);
+
+    /* 满足放能时间后先回WAIT_BATTERY，下一拍再重新进入预充。 */
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 121U);
+    CHECK(command.state == AURORA_POWER_WAIT_BATTERY);
+    CHECK(!command.pwm_enable);
+    CHECK(!command.relay_enable);
     CHECK(ctx.duty_q15 == 0U);
 
-    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 201U);
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 122U);
+    CHECK(command.state == AURORA_POWER_PRECHARGE);
+    CHECK(!command.pwm_enable);
+
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 123U);
     CHECK(command.pwm_enable);
     CHECK(command.duty_q15 > 0U);
     CHECK(command.duty_q15 <= AURORA_DUTY_STEP_Q15);
+
+    /* 状态值损坏时必须立刻关继电器、清Duty并进入FAULT。 */
+    ctx.state = (aurora_power_state_t)0x7FU;
+    ctx.relay_closed = true;
+    ctx.duty_q15 = 12000U;
+    ctx.power_integral = 2048LL;
+    command = aurora_power_stage_step(&ctx, &sample, &mppt, &charger, true, 200U);
+    CHECK(command.state == AURORA_POWER_FAULT);
+    CHECK(!command.pwm_enable);
+    CHECK(!command.relay_enable);
+    CHECK(command.duty_q15 == 0U);
+    CHECK(ctx.power_integral == 0LL);
 }
 
 /*---------------------------------------------------------------------------*

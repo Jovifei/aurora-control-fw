@@ -37,3 +37,7 @@ Thumbs.db
 *.json
 captures/
 logs/
+
+# Python caches
+__pycache__/
+*.py[cod]

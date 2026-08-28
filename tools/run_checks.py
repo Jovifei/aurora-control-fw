@@ -15,6 +15,8 @@ def run(args: list[str]) -> None:
 
 run([sys.executable, "tools/check_architecture.py"])
 run([sys.executable, "tools/check_code_style.py"])
+run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+     "-p", "test_*.py", "-v"])
 
 for compiler, build in [("gcc", "build-gcc"), ("clang", "build-clang")]:
     if shutil.which(compiler) is None:

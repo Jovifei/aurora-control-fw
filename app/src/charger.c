@@ -366,6 +366,15 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         return output;
     }
 
+    /*
+     * 编译器可以证明正常枚举覆盖完整，但运行时上下文仍可能因RAM破坏得到非法值。
+     * 不使用covered-default，而是在进入switch前显式校验并锁入FAULT。
+     */
+    if ((uint32_t)ctx->state > (uint32_t)AURORA_CHARGE_FAULT)
+    {
+        enter_state(ctx, AURORA_CHARGE_FAULT, now_ms);
+    }
+
     /* 电池超过档案保护电压时立即进入软件FAULT，不再推进普通状态。 */
     if ((uint32_t)sample->battery_voltage_mv > ctx->profile.cv_protect_mv)
     {

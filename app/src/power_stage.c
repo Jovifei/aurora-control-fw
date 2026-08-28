@@ -207,15 +207,20 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         return command;
     }
 
+    /*
+     * switch不再依赖default兜底：若上下文状态越界，立即关闭继电器并锁入FAULT。
+     * 这样即使RAM被破坏，也不会沿用故障前的relay/duty状态。
+     */
+    if ((uint32_t)ctx->state > (uint32_t)AURORA_POWER_FAULT)
+    {
+        ctx->relay_closed = false;
+        enter_state(ctx, AURORA_POWER_FAULT, now_ms);
+    }
+
     if (!protection_safe && (ctx->state != AURORA_POWER_FAULT))
     {
         /* 软件命令先撤销PWM；Service随后执行硬件关波并延时释放继电器。 */
         enter_state(ctx, AURORA_POWER_FAULT, now_ms);
-    }
-    else if ((ctx->state == AURORA_POWER_FAULT) && protection_safe)
-    {
-        /* 即使故障已清除，也禁止直接恢复RUN，必须重新识别电池并完成预充。 */
-        enter_state(ctx, AURORA_POWER_WAIT_BATTERY, now_ms);
     }
 
     if ((sample->valid_mask & required_measurements) != required_measurements)
@@ -363,7 +368,15 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
         ctx->duty_q15 = 0U;
         if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_RELAY_FAULT_RELEASE_MS)
         {
+            /*
+             * 无论故障信号多快恢复，都先满足最短放能时间再断继电器；
+             * 只有保护链同时恢复安全后，下一拍才回WAIT_BATTERY重新预充。
+             */
             ctx->relay_closed = false;
+            if (protection_safe)
+            {
+                enter_state(ctx, AURORA_POWER_WAIT_BATTERY, now_ms);
+            }
         }
         break;
 
