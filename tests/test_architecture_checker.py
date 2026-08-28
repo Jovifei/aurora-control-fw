@@ -23,12 +23,20 @@ class ArchitectureCheckerTests(unittest.TestCase):
         self.assertNotIn(".git", result.stdout)
 
     def test_keil_external_sources_keep_intermediate_files_in_output_dir(self):
-        project = ET.parse(ROOT / "project" / "keil" / "AuroraControl.uvprojx")
+        project = ET.parse(ROOT / "project" / "AuroraControl.uvprojx")
         for file_node in project.findall(".//File"):
             file_path = file_node.findtext("FilePath", default="")
             file_name = file_node.findtext("FileName", default="")
-            if file_path.startswith("..\\..\\"):
+            if file_path.startswith("..\\"):
                 self.assertNotIn("..", file_name)
+
+    def test_keil_does_not_reference_removed_layers(self):
+        text = (ROOT / "project" / "AuroraControl.uvprojx").read_text(encoding="utf-8")
+        self.assertNotIn("service\\", text)
+        self.assertNotIn("board\\board.c", text)
+        self.assertNotIn("app\\src\\app.c", text)
+        self.assertIn("app\\src\\main.c", text)
+        self.assertIn("driver\\src\\drv_board.c", text)
 
 
 if __name__ == "__main__":

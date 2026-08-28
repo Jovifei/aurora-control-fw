@@ -4,28 +4,24 @@
 #include <stdint.h>
 
 /*
+ * v0.8.3板级硬件配置全部归属Driver层。
  * 最终原理图基线：2026-08-26，G32F031K8T LQFP32，单路异步Boost。
- * 应用层不得包含本文件；引脚、外设、标定和功率门禁只允许在board/driver使用。
+ * APP不得包含本文件；只有driver/src允许消费PinMap、ADC、PWM、Flash和MCU供电参数。
  */
 
-/*
- * MCU上电供电资格参数（v0.8.1）。
- * 目的：弱光时VDD可能缓慢上升并反复抖动，禁止MCU刚越过POR/PDR就立刻初始化PWM/COMP/ADC/IWDT。
- * PVD这里只作为“允许继续初始化”的门，不作为运行期弱光保护，也不允许触发软件故障或PVD系统复位。
- */
-/* PVD名义门限，mV。当前采用2.8V档；可选2000/2400/2800/3200/3600/4000/4400/4800。 */
+/* MCU启动PVD名义门限，mV；当前2.8V为台架前候选值。 */
 #define BOARD_MCU_PVD_THRESHOLD_MV                  (2800UL)
-/* PVD数字滤波名义时间，us；当前64MHz启动时钟下可选1/2/3/5/10/20/30/50。 */
+/* PVD数字滤波名义时间，us；64MHz下映射到硬件滤波长度。 */
 #define BOARD_MCU_PVD_FILTER_US                     (50UL)
-/* PVD使能后等待PVDRDY的最大时间，us；超时表示PVD模块建立异常，不等同于VDD偏低。 */
+/* PVD使能后等待PVDRDY的最大时间，us；仅判断PVD模块是否正常建立。 */
 #define BOARD_MCU_PVD_READY_TIMEOUT_US              (1000UL)
-/* VDD连续高于PVD门限后必须再稳定保持的时间，ms；中途跌落则计时清零。 */
+/* VDD连续高于VPVD后必须稳定保持的时间，ms。 */
 #define BOARD_MCU_SUPPLY_STABLE_TIME_MS             (100UL)
-/* 供电资格阶段的轮询节拍，ms；由SysTick唤醒，不启动IWDT。 */
+/* 供电资格阶段软件检查周期，ms。 */
 #define BOARD_MCU_SUPPLY_CHECK_PERIOD_MS            (1UL)
-/* 当前项目禁止PVD直接触发系统复位，必须保持0。 */
+/* 禁止PVD直接触发系统复位。 */
 #define BOARD_MCU_PVD_RESET_ENABLE                  (0U)
-/* 当前项目禁止PVD中断参与弱光保护，必须保持0。 */
+/* 禁止PVD中断作为弱光运行保护。 */
 #define BOARD_MCU_PVD_IRQ_ENABLE                    (0U)
 
 /* PA15 / AF3 / ATMR_CH0：低侧Boost门极控制GLC。 */
@@ -38,7 +34,7 @@
 /* PA13：继电器控制。 */
 #define BOARD_PIN_RELAY_PORT                        ('A')
 #define BOARD_PIN_RELAY_NUMBER                      (13U)
-/* PA12：Link控制。 */
+/* PA12：LINK控制。 */
 #define BOARD_PIN_LINK_PORT                         ('A')
 #define BOARD_PIN_LINK_NUMBER                       (12U)
 /* PA10 / PA11：产品UART。 */
@@ -72,12 +68,12 @@
 #define BOARD_ADC_INDEX_NTC_MOS                     (4U)
 #define BOARD_ADC_INDEX_NTC_AMB                     (5U)
 /* G32 ADC物理通道号。 */
-#define BOARD_ADC_CH_PV_I                           (1U)  /* PA8。 */
-#define BOARD_ADC_CH_PV_U                           (2U)  /* PA9。 */
-#define BOARD_ADC_CH_BAT_U                          (3U)  /* PB0。 */
-#define BOARD_ADC_CH_BUS_U                          (4U)  /* PB1。 */
-#define BOARD_ADC_CH_NTC_MOS                        (5U)  /* PB12。 */
-#define BOARD_ADC_CH_NTC_AMB                        (6U)  /* PB5。 */
+#define BOARD_ADC_CH_PV_I                           (1U)
+#define BOARD_ADC_CH_PV_U                           (2U)
+#define BOARD_ADC_CH_BAT_U                          (3U)
+#define BOARD_ADC_CH_BUS_U                          (4U)
+#define BOARD_ADC_CH_NTC_MOS                        (5U)
+#define BOARD_ADC_CH_NTC_AMB                        (6U)
 /* ADC就绪等待循环上限；只用于初始化失败判定。 */
 #define BOARD_ADC_READY_TIMEOUT_LOOPS               (100000UL)
 
@@ -100,41 +96,41 @@
 #define BOARD_ADC_BUS_U_DIVIDER_NUM                 (26L)
 #define BOARD_ADC_BUS_U_DIVIDER_DEN                 (1L)
 
-/* ATMR计数时钟，单位Hz。 */
+/* ATMR计数时钟，Hz。 */
 #define BOARD_PWM_TIMER_CLOCK_HZ                    (64000000UL)
-/* 50kHz对应的周期计数值。 */
+/* 50kHz对应周期计数值。 */
 #define BOARD_PWM_PERIOD_COUNTS                     (1280U)
 /* 使用ATMR通道0输出GLC。 */
 #define BOARD_PWM_CHANNEL                           (0U)
 /* GLC高电平使低侧MOS导通。 */
 #define BOARD_PWM_ACTIVE_HIGH                       (1U)
-/* CCR写入必须经预装载在自然UPDATE边界生效。 */
+/* CCR写入必须经preload在自然UPDATE边界生效。 */
 #define BOARD_PWM_CCR_PRELOAD                       (1U)
-/* ARR同样启用预装载。 */
+/* ARR启用preload。 */
 #define BOARD_PWM_ARR_PRELOAD                       (1U)
-/* Break解除后禁止自动恢复MOE。 */
+/* Break解除后禁止Automatic Output自动恢复。 */
 #define BOARD_PWM_AUTOMATIC_OUTPUT                  (0U)
-/* 物理Q6最大占空比，Q15，约90%；最终以低压台架为准。 */
+/* 最大物理占空比Q15，约90%；最终以低压台架为准。 */
 #define BOARD_PWM_MAX_DUTY_Q15                      (29491U)
 
-/* G32F031内部Flash物理擦除页大小，单位字节。 */
+/* G32F031内部Flash物理擦除页大小，字节。 */
 #define BOARD_FLASH_PAGE_SIZE                       (512UL)
-/* 双页Journal A页地址，位于应用镜像保留区。 */
+/* 双页Journal A页地址。 */
 #define BOARD_FLASH_PAGE_A_ADDRESS                  (0x0000FC00UL)
-/* 双页Journal B页地址，位于应用镜像保留区。 */
+/* 双页Journal B页地址。 */
 #define BOARD_FLASH_PAGE_B_ADDRESS                  (0x0000FE00UL)
 
-/*
- * 软件门禁状态说明：
- * - PinMap已经依据最终原理图人工复核，保持1；
- * - COMP路由、模拟标定、Keil链接和低压台架尚无闭环证据，保持0；
- * - BOARD_POWER_OUTPUT_ALLOWED是最终总门，当前必须为0。
- */
+/* PinMap已经人工复核。 */
 #define BOARD_GATE_PINMAP_REVIEWED                  (1U)
+/* COMP路由/极性尚未完成实板强制触发验收。 */
 #define BOARD_GATE_COMP_ROUTE_VALIDATED             (0U)
+/* ADC/OPA模拟标定尚未闭环。 */
 #define BOARD_GATE_ANALOG_CALIBRATED                (0U)
+/* Keil AC6真实链接/MAP尚未作为当前候选验收证据。 */
 #define BOARD_GATE_KEIL_LINKED                      (0U)
+/* 低压功率台架尚未完成。 */
 #define BOARD_GATE_LOW_VOLTAGE_BENCH                (0U)
+/* 最终人工功率总门，当前必须保持0。 */
 #define BOARD_POWER_OUTPUT_ALLOWED                  (0U)
 
 /* 两路LED均为低电平点亮。 */
@@ -143,16 +139,10 @@
 #define BOARD_RELAY_ACTIVE_HIGH                     (1U)
 /* 产品UART波特率。 */
 #define BOARD_UART_BAUDRATE                         (115200UL)
-/* 单次USART ISR最多搬运的RX字节数。 */
-#define BOARD_UART_ISR_RX_BUDGET                    (32U)
-/* Service单次主循环最多消费的RX字节数。 */
-#define BOARD_UART_SERVICE_RX_BUDGET                (64U)
-/* 驱动层TX环形缓冲长度，必须能容纳至少一个最大协议帧。 */
+/* Driver层TX环形缓冲长度。 */
 #define BOARD_UART_TX_BUFFER_SIZE                   (256U)
-/* Service RX环形缓冲长度。 */
-#define BOARD_UART_RX_BUFFER_SIZE                   (256U)
 
-/* IWDT名义低速时钟，单位Hz；实板受LSI容差影响。 */
+/* IWDT名义低速时钟，Hz；实板受LSI容差影响。 */
 #define BOARD_WATCHDOG_CLOCK_HZ                     (40000UL)
 /* IWDT固定预分频值。 */
 #define BOARD_WATCHDOG_PRESCALER                    (64UL)

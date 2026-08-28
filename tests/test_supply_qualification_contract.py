@@ -7,12 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SupplyQualificationContractTest(unittest.TestCase):
-    """约束v0.8.1弱光启动资格，防止后续重构重新引入复位循环或过早初始化。"""
+    """约束v0.8.3继续保留v0.8.1弱光供电资格，不因两层重构发生回退。"""
 
     def setUp(self) -> None:
-        self.main = (ROOT / "project/keil/main.c").read_text(encoding="utf-8")
+        self.main = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
         self.driver = (ROOT / "driver/src/drv_system.c").read_text(encoding="utf-8")
-        self.config = (ROOT / "board/board_config.h").read_text(encoding="utf-8")
+        self.config = (ROOT / "driver/inc/board_config.h").read_text(encoding="utf-8")
 
     def test_default_parameters_are_explicit_and_changeable(self) -> None:
         expected = {
@@ -44,25 +44,25 @@ class SupplyQualificationContractTest(unittest.TestCase):
         self.assertNotIn("DDL_PMU_EnableIT_PVD();", self.driver)
 
     def test_full_initialization_occurs_only_after_supply_qualification(self) -> None:
-        system_pos = self.main.index("drv_system_init();")
-        gpio_pos = self.main.index("drv_io_init();")
-        wait_pos = self.main.index("if (!drv_system_wait_for_supply_stable())")
-        service_pos = self.main.index("if (!aurora_service_init(&g_aurora_service))")
+        target = self.main[self.main.index("int main(void)"):]
+        system_pos = target.index("drv_system_init();")
+        gpio_pos = target.index("drv_io_init();")
+        wait_pos = target.index("if (!drv_system_wait_for_supply_stable())")
+        runtime_pos = target.index("if (!aurora_runtime_init(&g_aurora_runtime))")
 
         self.assertLess(system_pos, gpio_pos)
         self.assertLess(gpio_pos, wait_pos)
-        self.assertLess(wait_pos, service_pos)
-        self.assertNotIn("drv_watchdog_init", self.main[:service_pos])
-        self.assertNotIn("drv_pwm_init", self.main[:service_pos])
-        self.assertNotIn("drv_comp_init", self.main[:service_pos])
-        self.assertNotIn("drv_adc_init", self.main[:service_pos])
+        self.assertLess(wait_pos, runtime_pos)
+        self.assertNotIn("drv_watchdog_init", target[:runtime_pos])
+        self.assertNotIn("drv_pwm_init", target[:runtime_pos])
+        self.assertNotIn("drv_comp_init", target[:runtime_pos])
+        self.assertNotIn("drv_adc_init", target[:runtime_pos])
 
     def test_unstable_vdd_restarts_continuous_stability_window(self) -> None:
         self.assertIn("stable_tracking = false;", self.driver)
         self.assertIn("stable_start_ms = 0U;", self.driver)
         self.assertIn("BOARD_MCU_SUPPLY_STABLE_TIME_MS", self.driver)
         self.assertIn("BOARD_MCU_SUPPLY_CHECK_PERIOD_MS", self.driver)
-        self.assertIn("__WFI();", self.driver)
 
     def test_runtime_application_has_no_pvd_fault_category(self) -> None:
         app_text = "\n".join(

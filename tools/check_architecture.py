@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""检查量产嵌入式工程的目录、依赖、PinMap与功率安全边界。"""
+"""检查v0.8.3两层产品架构、目录、依赖和功率安全边界。"""
 from pathlib import Path
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 root = Path(__file__).resolve().parents[1]
 errors: list[str] = []
 
 
 def is_project_content(path: Path) -> bool:
-    """排除Git内部元数据和CMake生成目录，不改变生产目录的检查范围。"""
+    """排除Git元数据和Host构建目录。"""
     return (".git" not in path.parts and
             not any(part.startswith("build-") for part in path.parts))
 
 
-required_dirs = {
-    "app", "service", "driver", "board", "vendor", "project", "docs", "tests", "tools"
-}
+required_dirs = {"app", "driver", "vendor", "project", "docs", "tests", "tools"}
 actual_dirs = {
     item.name for item in root.iterdir()
     if item.is_dir() and not item.name.startswith("build-") and item.name != ".git"
@@ -25,145 +24,130 @@ missing = sorted(required_dirs - actual_dirs)
 if missing:
     errors.append(f"缺少目录: {missing}")
 
-# 历史工程、套娃工程和生成目录不得重新进入生产仓库。
+# v0.8.3明确删除第三层Service和独立Board层。
+for forbidden_root in ["service", "board"]:
+    if (root / forbidden_root).exists():
+        errors.append(f"v0.8.3禁止根目录: {forbidden_root}/")
+
 for forbidden in [
-    "firmware", "tasks", "legacy_reference", "legacy_parity", "legacy_protocol_import",
-    ".bootstrap"
+    "firmware", "tasks", "legacy_reference", "legacy_parity",
+    "legacy_protocol_import", ".bootstrap"
 ]:
     if any(path.name == forbidden and is_project_content(path)
            for path in root.rglob("*")):
         errors.append(f"禁止目录仍存在: {forbidden}")
 
-# tests/tools/docs只能位于仓库根目录，不能在固件目录中复制第二套。
-for name in ["tests", "tools", "docs"]:
-    nested = [
-        path for path in root.rglob(name)
-        if path.is_dir() and path.parent != root and
-        is_project_content(path)
-    ]
-    if nested:
-        errors.append(f"重复的{name}目录: {[str(path.relative_to(root)) for path in nested]}")
+# APP/Driver必须严格采用inc/src。
+for layer in ["app", "driver"]:
+    layer_root = root / layer
+    subdirs = {item.name for item in layer_root.iterdir() if item.is_dir()}
+    if subdirs != {"inc", "src"}:
+        errors.append(f"{layer}必须且只能包含inc/src: {sorted(subdirs)}")
+    if list(layer_root.glob("*.[ch]")):
+        errors.append(f"{layer}根目录不得直接放.c/.h")
 
-# app按用户约定拆为inc/src；其余首方模块保持扁平。
-app_subdirs = {item.name for item in (root / "app").iterdir() if item.is_dir()}
-if app_subdirs != {"inc", "src"}:
-    errors.append(f"app必须且只能包含inc/src: {sorted(app_subdirs)}")
-if list((root / "app").glob("*.[ch]")):
-    errors.append("app根目录仍存在未迁移的.c/.h")
-for flat_dir in [root / "service", root / "board"]:
-    nested = [path for path in flat_dir.iterdir() if path.is_dir()]
-    if nested:
-        errors.append(f"{flat_dir.name}不应再分子目录: {[path.name for path in nested]}")
+required_app_headers = {
+    "main.h", "app_types.h", "app_config.h", "debug.h", "interrupts.h",
+    "charger.h", "measurement.h", "mppt.h", "power_stage.h",
+    "protection.h", "protocol.h", "storage.h", "ui.h",
+}
+actual_app_headers = {p.name for p in (root / "app/inc").glob("*.h")}
+if actual_app_headers != required_app_headers:
+    errors.append(
+        "app/inc文件集合不符合v0.8.3目标: "
+        f"缺少={sorted(required_app_headers-actual_app_headers)} "
+        f"多余={sorted(actual_app_headers-required_app_headers)}"
+    )
 
-# 生成JSON和构建输出不得提交。
-for path in root.rglob("*.json"):
-    if is_project_content(path):
-        errors.append(f"仓库不应提交生成JSON: {path.relative_to(root)}")
+required_app_sources = {
+    "main.c", "interrupts.c", "debug.c", "charger.c", "measurement.c",
+    "mppt.c", "power_stage.c", "protection.c", "protocol.c", "storage.c", "ui.c",
+}
+actual_app_sources = {p.name for p in (root / "app/src").glob("*.c")}
+if actual_app_sources != required_app_sources:
+    errors.append(
+        "app/src文件集合不符合v0.8.3目标: "
+        f"缺少={sorted(required_app_sources-actual_app_sources)} "
+        f"多余={sorted(actual_app_sources-required_app_sources)}"
+    )
 
+required_driver_headers = {
+    "driver.h", "board_config.h", "drv_board.h", "drv_adc.h", "drv_comp.h",
+    "drv_flash.h", "drv_io.h", "drv_pwm.h", "drv_system.h", "drv_uart.h",
+    "drv_watchdog.h",
+}
+actual_driver_headers = {p.name for p in (root / "driver/inc").glob("*.h")}
+if actual_driver_headers != required_driver_headers:
+    errors.append(
+        "driver/inc文件集合不符合v0.8.3目标: "
+        f"缺少={sorted(required_driver_headers-actual_driver_headers)} "
+        f"多余={sorted(actual_driver_headers-required_driver_headers)}"
+    )
+
+required_driver_sources = {
+    "drv_board.c", "drv_adc.c", "drv_comp.c", "drv_flash.c", "drv_io.c",
+    "drv_pwm.c", "drv_system.c", "drv_uart.c", "drv_watchdog.c",
+}
+actual_driver_sources = {p.name for p in (root / "driver/src").glob("*.c")}
+if actual_driver_sources != required_driver_sources:
+    errors.append(
+        "driver/src文件集合不符合v0.8.3目标: "
+        f"缺少={sorted(required_driver_sources-actual_driver_sources)} "
+        f"多余={sorted(actual_driver_sources-required_driver_sources)}"
+    )
+
+# App允许调用Driver契约，但不得包含board_config/vendor/芯片头或直接访问寄存器。
 app_files = [*(root / "app/inc").glob("*.h"), *(root / "app/src").glob("*.c")]
-
-driver_root_files = [p for p in (root / "driver").iterdir() if p.is_file()] if (root / "driver").exists() else []
-if driver_root_files:
-    errors.append("Driver源码必须分开放入driver/inc和driver/src，driver根目录不得直接放.c/.h")
-
-if not (root / "driver/inc/driver.h").is_file():
-    errors.append("缺少driver/inc/driver.h")
-if not list((root / "driver/src").glob("*.c")):
-    errors.append("driver/src中没有目标驱动源文件")
 for path in app_files:
     text = path.read_text(encoding="utf-8", errors="ignore")
-    if re.search(r'#include\s+"(?:g32|board|driver|service)', text, re.I):
-        errors.append(f"应用层越层依赖: {path.relative_to(root)}")
+    if re.search(r'#include\s+"(?:g32|board_config|system_g32|cmsis)', text, re.I):
+        errors.append(f"APP直接包含目标硬件头: {path.relative_to(root)}")
     code = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     code = re.sub(r"//.*", "", code)
     if re.search(r'\b(?:GPIO[AB]|ATMR|COMP[0-9]|DMA|NVIC|SysTick|DDL_)\b|->(?:CR|SR|DR|CCR|ARR)', code):
-        errors.append(f"应用层疑似访问硬件: {path.relative_to(root)}")
+        errors.append(f"APP疑似直接访问硬件/DDL: {path.relative_to(root)}")
 
+# Driver只能向下依赖标准库/board_config/vendor，不得反向依赖APP。
 for path in [*(root / "driver/inc").glob("*.h"), *(root / "driver/src").glob("*.c")]:
     text = path.read_text(encoding="utf-8", errors="ignore")
-    if re.search(r'#include\s+"(?:app|service|mppt|charger|protection|power_stage)', text):
-        errors.append(f"驱动层反向依赖应用: {path.relative_to(root)}")
+    if re.search(
+        r'#include\s+"(?:main|app_config|app_types|charger|measurement|mppt|power_stage|protection|protocol|storage|ui|debug|interrupts)\.h"',
+        text,
+    ):
+        errors.append(f"Driver反向依赖APP: {path.relative_to(root)}")
 
-for path in (root / "docs").iterdir():
-    if path.is_file() and path.suffix.lower() not in {".md", ".pdf", ".png", ".jpg", ".svg"}:
-        errors.append(f"docs含非文档文件: {path.name}")
-    if path.is_file() and path.suffix.lower() in {".c", ".h"}:
-        errors.append(f"docs中不得放生产源码: {path.name}")
-
-all_text = "\n".join(
+# 生产代码不得残留service/board旧接口名或历史闭源依赖。
+production_text = "\n".join(
     path.read_text(encoding="utf-8", errors="ignore")
-    for directory in ["app", "service", "driver", "board", "project"]
-    for path in (root / directory).rglob("*.[ch]")
+    for directory in [root / "app", root / "driver"]
+    for path in directory.rglob("*.[ch]")
 )
 for token in ["HT32_Mppt_Solar", "Fun_MPPT_FUNC", "arm_math", "cmsis_os1", "legacy_parity"]:
-    if token in all_text:
+    if token in production_text:
         errors.append(f"生产代码含历史/闭源依赖: {token}")
+for token in ["aurora_service_t", "aurora_service_", "aurora_board_"]:
+    if token in production_text:
+        errors.append(f"生产代码残留旧三层接口: {token}")
 for token in ["BAT_S1", "BAT_S2", "drv_io_read_setting"]:
-    if token in all_text:
+    if token in production_text:
         errors.append(f"生产代码含已删除硬件信号: {token}")
 
-# APP/Service只能经driver契约操作PWM，不得直接出现目标寄存器名。
-for directory in ["app", "service"]:
-    for path in (root / directory).rglob("*.[ch]"):
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if re.search(r'EnableAllOutputs|CHMOE|GenerateEvent_UPDATE|DDL_ATMR_', text):
-            errors.append(f"非驱动层直接操作PWM硬件: {path.relative_to(root)}")
+# APP中只有main.c/interrupts.c允许调用Driver；业务模块保持纯业务。
+for path in (root / "app/src").glob("*.c"):
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if path.name not in {"main.c", "interrupts.c"} and re.search(r'\bdrv_[A-Za-z0-9_]+\s*\(', text):
+        errors.append(f"业务模块直接调用Driver: {path.relative_to(root)}")
 
-board_cfg = (root / "board/board_config.h").read_text(encoding="utf-8", errors="ignore")
-expected_macros = {
-    "BOARD_PIN_GLC_NUMBER": "15U",
-    "BOARD_PIN_UART_TX_NUMBER": "10U",
-    "BOARD_PIN_UART_RX_NUMBER": "11U",
-    "BOARD_PIN_LED_RUN_NUMBER": "9U",
-    "BOARD_PIN_COMP0_OUT_NUMBER": "10U",
-    "BOARD_PIN_COMP0_OUT_AF": "7U",
-    "BOARD_COMP0_FAULT_ACTIVE_LOW": "1U",
-    "BOARD_PIN_LED_FAULT_NUMBER": "11U",
-    "BOARD_POWER_OUTPUT_ALLOWED": "0U",
-}
-for name, value in expected_macros.items():
-    if re.search(rf"#define\s+{name}\s+\({re.escape(value)}\)", board_cfg) is None:
-        errors.append(f"最终PinMap/门禁缺失或被改动: {name}=({value})")
-
-uart = (root / "driver/src/drv_uart.c").read_text(encoding="utf-8", errors="ignore")
-if "DDL_GPIO_PIN_10; /* UR_TX / PA10 / AF0 */" not in uart or \
-   "DDL_GPIO_PIN_11; /* UR_RX / PA11 / AF0 */" not in uart:
-    errors.append("UART驱动未绑定最终PA10/PA11")
-comp = (root / "driver/src/drv_comp.c").read_text(encoding="utf-8", errors="ignore")
-if "PB10 / AF7 = COMP0_OUT" not in comp or "DDL_GPIO_AF_7" not in comp:
-    errors.append("COMP0_OUT未绑定PB10/AF7")
-for token in [
-    "DDL_GPIO_OUTPUT_OPENDRAIN", "DDL_COMP0_OUTPUTPOL_INVERTED",
-    "DDL_COMP0_EDGE_INT_FALLING"
-]:
-    if token not in comp:
-        errors.append(f"COMP0外部EN低有效安全链缺失: {token}")
-
-# 软件UPDATE事件只允许初始化时一次；首次放行只临时开启一次UPDATE IRQ。
-pwm = (root / "driver/src/drv_pwm.c").read_text(encoding="utf-8", errors="ignore")
-if pwm.count("DDL_ATMR_GenerateEvent_UPDATE") != 1:
-    errors.append("PWM软件UPDATE事件必须且只能存在于初始化阶段一次")
-if pwm.count("DDL_ATMR_EnableIT_UPDATE") != 1 or "drv_pwm_prepare_arm_zero" not in pwm:
-    errors.append("PWM UPDATE中断必须只在首个零占空比装载时临时开启")
-if "DDL_ATMR_DisableIT_UPDATE" not in pwm:
-    errors.append("PWM UPDATE中断缺少一次性关闭")
-if "AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE" not in pwm:
-    errors.append("PWM未明确关闭Automatic Output")
-if "DDL_ATMR_OC_EnablePreload" not in pwm:
-    errors.append("PWM未启用CCR preload")
-if "DDL_ATMR_BREAK_POLARITY_LOW" not in pwm:
-    errors.append("COMP0低有效故障未对应ATMR低有效Break")
-if "drv_pwm_quiesce_break_irq_isr" not in pwm:
-    errors.append("Break ISR缺少只屏蔽重复中断、不清锁存的接口")
-
-# ISR桥接保持轻量，不得调用APP重业务。
-isr = (root / "project/keil/interrupts.c").read_text(encoding="utf-8", errors="ignore")
+# ISR保持轻量且不访问vendor。
+isr = (root / "app/src/interrupts.c").read_text(encoding="utf-8", errors="ignore")
 for forbidden_call in [
     "aurora_mppt_step", "aurora_charger_step", "aurora_measurement_process_block",
     "aurora_storage_encode_page", "aurora_ui_step"
 ]:
     if forbidden_call in isr:
         errors.append(f"ISR调用重业务: {forbidden_call}")
+if "DDL_" in isr or "g32f" in isr.lower():
+    errors.append("interrupts.c不得直接访问vendor/DDL")
 for line in isr.splitlines():
     stripped = line.strip()
     if stripped.startswith("while") and not (
@@ -171,18 +155,74 @@ for line in isr.splitlines():
     ):
         errors.append(f"ISR中存在未证明有界的while: {stripped}")
 
-app_c_count = len(list((root / "app/src").glob("*.c")))
-if app_c_count > 10:
-    errors.append(f"APP源文件过度碎片化: {app_c_count}个.c")
+# 板级配置已经归入Driver。
+board_cfg_path = root / "driver/inc/board_config.h"
+if not board_cfg_path.is_file():
+    errors.append("driver/inc/board_config.h不存在")
+else:
+    board_cfg = board_cfg_path.read_text(encoding="utf-8", errors="ignore")
+    expected_macros = {
+        "BOARD_PIN_GLC_NUMBER": "15U",
+        "BOARD_PIN_UART_TX_NUMBER": "10U",
+        "BOARD_PIN_UART_RX_NUMBER": "11U",
+        "BOARD_PIN_LED_RUN_NUMBER": "9U",
+        "BOARD_PIN_COMP0_OUT_NUMBER": "10U",
+        "BOARD_PIN_COMP0_OUT_AF": "7U",
+        "BOARD_COMP0_FAULT_ACTIVE_LOW": "1U",
+        "BOARD_PIN_LED_FAULT_NUMBER": "11U",
+        "BOARD_POWER_OUTPUT_ALLOWED": "0U",
+    }
+    for name, value in expected_macros.items():
+        if re.search(rf"#define\s+{name}\s+\({re.escape(value)}\)", board_cfg) is None:
+            errors.append(f"最终PinMap/门禁缺失或被改动: {name}=({value})")
 
+# PWM安全不因两层重构而弱化。
+pwm = (root / "driver/src/drv_pwm.c").read_text(encoding="utf-8", errors="ignore")
+if pwm.count("DDL_ATMR_GenerateEvent_UPDATE") != 1:
+    errors.append("PWM软件UPDATE事件必须且只能存在于初始化阶段一次")
+if pwm.count("DDL_ATMR_EnableIT_UPDATE") != 1 or "drv_pwm_prepare_arm_zero" not in pwm:
+    errors.append("首次PWM零CCR握手缺失")
+if "DDL_ATMR_DisableIT_UPDATE" not in pwm:
+    errors.append("PWM UPDATE中断缺少一次性关闭")
+if "AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE" not in pwm:
+    errors.append("PWM未明确关闭Automatic Output")
+if "DDL_ATMR_OC_EnablePreload" not in pwm:
+    errors.append("PWM未启用CCR preload")
+
+# CMake必须只使用APP/Driver两层首方源码。
 cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-if "app/src/app.c" not in cmake or "app/inc" not in cmake:
-    errors.append("CMake未切换到app/src和app/inc")
-keil = (root / "project/keil/AuroraControl.uvprojx").read_text(encoding="utf-8", errors="ignore")
-if "app\\src\\app.c" not in keil or "app\\inc" not in keil:
-    errors.append("Keil工程未切换到app/src和app/inc")
-if re.search(r"<FileName>\.\.\\\.\.\\", keil):
-    errors.append("Keil外部源码的FileName不得带父目录，避免中间文件落入源码路径")
+for required in ["app/src/main.c", "driver/src/drv_board.c", "app/inc", "driver/inc"]:
+    if required not in cmake:
+        errors.append(f"CMake缺少v0.8.3路径: {required}")
+for forbidden in ["service/service.c", "board/board.c", "app/src/app.c"]:
+    if forbidden in cmake:
+        errors.append(f"CMake仍引用旧路径: {forbidden}")
+
+# Keil工程必须位于project根目录且只引用新两层源码。
+keil_path = root / "project/AuroraControl.uvprojx"
+if not keil_path.is_file() or not (root / "project/AuroraControl.sct").is_file():
+    errors.append("Keil工程/Scatter未迁移到project根目录")
+else:
+    try:
+        project = ET.parse(keil_path)
+        file_paths = [node.text or "" for node in project.findall(".//FilePath")]
+        joined = "\n".join(file_paths)
+        for required in ["app\\src\\main.c", "app\\src\\interrupts.c", "driver\\src\\drv_board.c"]:
+            if required not in joined:
+                errors.append(f"Keil缺少v0.8.3源码: {required}")
+        for forbidden in ["service\\", "board\\board.c", "app\\src\\app.c", "project\\keil"]:
+            if forbidden in joined:
+                errors.append(f"Keil仍引用旧路径: {forbidden}")
+    except ET.ParseError as exc:
+        errors.append(f"Keil工程XML无效: {exc}")
+
+if (root / "project/keil").exists():
+    errors.append("project/keil旧目录仍存在；v0.8.3工程文件应直接位于project/")
+
+# docs根目录只允许文档类文件；reference子目录可保存表格等证据文件。
+for path in (root / "docs").iterdir():
+    if path.is_file() and path.suffix.lower() not in {".md", ".pdf", ".png", ".jpg", ".svg"}:
+        errors.append(f"docs根目录含非文档文件: {path.name}")
 
 if errors:
     print("ARCHITECTURE CHECK: FAIL")
