@@ -49,6 +49,16 @@ void drv_irq_restore(aurora_irq_state_t state);
 void drv_irq_configure_priorities(void);
 DRV_SYSTEM_NORETURN void drv_system_reset(void);
 
+/*
+ * MCU上电供电资格。
+ * PVD只用于“是否允许继续完整初始化”，不作为运行期弱光保护、故障锁存或系统复位源。
+ */
+bool drv_system_supply_qualifier_init(void);
+bool drv_system_supply_monitor_ready(void);
+bool drv_system_supply_is_good(void);
+bool drv_system_wait_for_supply_stable(void);
+void drv_system_supply_qualifier_stop(void);
+
 /* ADC定时触发、DMA双半缓冲与中断应答。 */
 bool drv_adc_init(void);
 bool drv_adc_start(void);

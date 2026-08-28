@@ -8,6 +8,26 @@
  * 应用层不得包含本文件；引脚、外设、标定和功率门禁只允许在board/driver使用。
  */
 
+/*
+ * MCU上电供电资格参数（v0.8.1）。
+ * 目的：弱光时VDD可能缓慢上升并反复抖动，禁止MCU刚越过POR/PDR就立刻初始化PWM/COMP/ADC/IWDT。
+ * PVD这里只作为“允许继续初始化”的门，不作为运行期弱光保护，也不允许触发软件故障或PVD系统复位。
+ */
+/* PVD名义门限，mV。当前采用2.8V档；可选2000/2400/2800/3200/3600/4000/4400/4800。 */
+#define BOARD_MCU_PVD_THRESHOLD_MV                  (2800UL)
+/* PVD数字滤波名义时间，us；当前64MHz启动时钟下可选1/2/3/5/10/20/30/50。 */
+#define BOARD_MCU_PVD_FILTER_US                     (50UL)
+/* PVD使能后等待PVDRDY的最大时间，us；超时表示PVD模块建立异常，不等同于VDD偏低。 */
+#define BOARD_MCU_PVD_READY_TIMEOUT_US              (1000UL)
+/* VDD连续高于PVD门限后必须再稳定保持的时间，ms；中途跌落则计时清零。 */
+#define BOARD_MCU_SUPPLY_STABLE_TIME_MS             (100UL)
+/* 供电资格阶段的轮询节拍，ms；由SysTick唤醒，不启动IWDT。 */
+#define BOARD_MCU_SUPPLY_CHECK_PERIOD_MS            (1UL)
+/* 当前项目禁止PVD直接触发系统复位，必须保持0。 */
+#define BOARD_MCU_PVD_RESET_ENABLE                  (0U)
+/* 当前项目禁止PVD中断参与弱光保护，必须保持0。 */
+#define BOARD_MCU_PVD_IRQ_ENABLE                    (0U)
+
 /* PA15 / AF3 / ATMR_CH0：低侧Boost门极控制GLC。 */
 #define BOARD_PIN_GLC_PORT                          ('A')
 #define BOARD_PIN_GLC_NUMBER                        (15U)

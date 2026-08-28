@@ -73,12 +73,13 @@ tools/            架构、风格、编译、Sanitizer和目标端语法门禁
 
 1. 先查 [17-参数标定与Codex交接清单](17-参数标定与Codex交接清单.md)。
 2. 涉及120W成熟行为时，同时核对 [22-REF-120W-V2.7行为与参数基线](22-REF-120W-V2.7行为与参数基线.md) 和 `reference/README.md` 指向的原始V2.7来源。
-3. 明确参数属于：产品公共行为、300/120功率BOM、板级标定、目标外设或人工门禁。
-4. 记录单位、旧值、新值、依据、测试方法和回退值。
-5. 修改对应集中定义，不在函数体内追加魔法数。
-6. 增加或修改Host测试。
-7. 运行完整门禁。
-8. 若涉及PWM、COMP、ADC、Flash、Relay或IWDT，再完成Keil与板级测试；不能只凭Host结果解锁。
+3. 涉及MCU供电、PVD、弱光启动时，同时查 [28-REF-G32F031-MCU供电稳定启动与PVD设计依据](28-REF-G32F031-MCU供电稳定启动与PVD设计依据.md)。
+4. 明确参数属于：产品公共行为、300/120功率BOM、板级标定、目标外设或人工门禁。
+5. 记录单位、旧值、新值、依据、测试方法和回退值。
+6. 修改对应集中定义，不在函数体内追加魔法数。
+7. 增加或修改Host测试。
+8. 运行完整门禁。
+9. 若涉及PWM、COMP、ADC、Flash、Relay、IWDT或PVD，再完成Keil与板级测试；不能只凭Host结果解锁。
 
 ## 5. 功率安全红线
 
@@ -147,3 +148,34 @@ Keil/台架证据未完成时，提交说明必须明确写“Host验证通过�
 4. 在BST_U尚未接近BAT_U时吸合继电器；
 5. 绕过Service直接开启PWM/MOE；
 6. 在`BOARD_POWER_OUTPUT_ALLOWED == 0`时声称已具备额定功率运行条件。
+
+## 9. v0.8.1 MCU供电资格与弱光启动
+
+v0.8.1新增的不是“MCU弱光保护”，而是完整初始化之前的供电资格门。先读：
+
+- `28-REF-G32F031-MCU供电稳定启动与PVD设计依据.md`
+- `29-v0.8.1-MCU供电资格修改与验证报告.md`
+
+启动顺序必须保持：
+
+```text
+Reset / POR-PDR
+→ SystemCoreClock + 1ms SysTick
+→ drv_io_init()建立GLC/GHC/Relay/Link安全态
+→ PVD配置并等待PVDRDY
+→ VDD连续高于VPVD达到BOARD_MCU_SUPPLY_STABLE_TIME_MS
+→ 关闭PVD
+→ aurora_service_init()
+→ IWDT / PWM / COMP / ADC / UART / APP / Flash
+```
+
+规则：
+
+1. `PVDSTS=LOW`表示继续等待，不产生`AURORA_FAULT_*`；
+2. VDD中途跌破VPVD，连续稳定时间必须清零，不能累计多个不连续时间片；
+3. PVD资格阶段不启动IWDT，弱光等待多久都不是看门狗故障；
+4. 禁止`PVDRSTEN`和PVD中断参与本项目弱光逻辑；
+5. PVD模块`PVDRDY`自身超时才属于启动硬件异常；
+6. 供电资格通过后关闭PVD，正常运行弱光仍由PV_U、PV功率和原v0.8.0状态机处理；
+7. VPVD、PVD滤波、PVD Ready超时、连续稳定时间必须只改`board/board_config.h`中的宏；
+8. 默认2.8V/100ms只是当前工程候选，最终必须用VDD/NRST/GLC/Relay实测冻结。
