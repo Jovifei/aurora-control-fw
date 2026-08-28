@@ -207,7 +207,7 @@ static uint32_t clamp_power(int64_t power_mw)
  *               uint32_t current_ma)
  * Input       : voltage_mv - 电池电压，mV；current_ma - 目标电流，mA
  * Output      : 电池侧前馈功率，mW
- * Description : 用64位中间量计算Vbat×Ibat，不把该电池侧值直接当成PV输入功率。
+ * Description : 用64位中间量计算Vbat×Itarget，不把该电池侧值直接当成PV输入功率。
  *---------------------------------------------------------------------------*/
 static uint32_t current_feedforward_mw(uint32_t voltage_mv, uint32_t current_ma)
 {
@@ -359,6 +359,19 @@ static void enter_state(aurora_charger_ctx_t *ctx,
         ctx->float_started = false;
         ctx->float_start_ms = 0U;
     }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void request_restart(aurora_charger_ctx_t *ctx,
+ *               uint32_t now_ms)
+ * Input       : ctx - 充电上下文；now_ms - 当前毫秒
+ * Output      : 无
+ * Description : 普通复充/Float维持失败只要求撤PWM并重新做电池稳定准入，不冒充PV_I传感器故障重新校零。
+ *---------------------------------------------------------------------------*/
+static void request_restart(aurora_charger_ctx_t *ctx, uint32_t now_ms)
+{
+    ctx->restart_required = true;
+    ctx->restart_since_ms = now_ms;
 }
 
 /*---------------------------------------------------------------------------*
@@ -530,6 +543,17 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
 
     update_effective_profile(ctx, sample);
 
+    /*
+     * Routine restart与PowerStage的10s BAT_STABILITY窗口对齐：期间Charge保持当前阶段，
+     * 但不继续给MPPT/PowerStage提供能量请求。传感器故障的重新校零由Protection路径负责。
+     */
+    if (ctx->restart_required &&
+        (elapsed_ms(now_ms, ctx->restart_since_ms) >= AURORA_BAT_STABILITY_WINDOW_MS))
+    {
+        ctx->restart_required = false;
+        ctx->restart_since_ms = 0U;
+    }
+
     if ((ctx->state != AURORA_CHARGE_OFF) &&
         (ctx->state != AURORA_CHARGE_COMPLETE) &&
         (ctx->state != AURORA_CHARGE_FAULT) &&
@@ -592,8 +616,9 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
 
     case AURORA_CHARGE_CV:
         if (condition_held(&ctx->transition_since_ms,
-                           ((uint32_t)sample->battery_voltage_mv +
-                            AURORA_CHARGER_CV_RETURN_HYST_MV) < ctx->profile.cv_target_mv,
+                           !weak_light && !thermal_limited && !input_limited &&
+                           (((uint32_t)sample->battery_voltage_mv +
+                             AURORA_CHARGER_CV_RETURN_HYST_MV) < ctx->profile.cv_target_mv),
                            AURORA_CV_TO_CC_HOLD_MS, now_ms))
         {
             ctx->cc_integral_mw = 0LL;
@@ -655,6 +680,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         {
             ctx->charge_start_ms = now_ms;
             ctx->cc_integral_mw = 0LL;
+            request_restart(ctx, now_ms);
             enter_state(ctx, AURORA_CHARGE_CC, now_ms);
         }
         else if (((sample->valid_mask & AURORA_MEAS_VALID_BAT_I_EST) != 0U) &&
@@ -687,7 +713,11 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         {
             ctx->charge_start_ms = now_ms;
             ctx->cc_integral_mw = 0LL;
-            enter_state(ctx, AURORA_CHARGE_CC, now_ms);
+            request_restart(ctx, now_ms);
+            enter_state(ctx,
+                        ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv) ?
+                            AURORA_CHARGE_TRICKLE : AURORA_CHARGE_CC,
+                        now_ms);
         }
         break;
 
@@ -699,6 +729,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     output.weak_light = weak_light;
     output.input_limited = input_limited;
     output.thermal_limited = thermal_limited;
+    output.restart_required = ctx->restart_required;
     output.voltage_target_mv = ctx->profile.cv_target_mv;
 
     switch (ctx->state)
@@ -737,6 +768,14 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         output.allow_charge = false;
         output.battery_power_target_mw = 0U;
         break;
+    }
+
+    /* 重新准入窗口内严格禁止能量传输，同时使MPPT看到0功率许可并回到禁用态。 */
+    if (ctx->restart_required)
+    {
+        output.allow_charge = false;
+        output.battery_power_target_mw = 0U;
+        output.pv_power_limit_mw = 0U;
     }
 
     return output;
