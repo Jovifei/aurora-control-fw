@@ -25,7 +25,7 @@ static void set_voltage_calibration(aurora_board_adc_calibration_t *calibration,
  * Name        : bool aurora_board_get_adc_calibration(size_t channel, aurora_board_adc_calibration_t *calibration)
  * Input       : channel - 逻辑通道索引；calibration - 标定输出地址
  * Output      : true表示索引合法；false表示参数错误或索引越界
- * Description : 返回指定ADC逻辑通道的比例、零点和极性；未完成NTC标定的通道明确返回valid=false。
+ * Description : 返回电压/电流通道线性标定；NTC通道返回valid=false，因为Measurement直接使用原始码走100K/B3950查表。
  *---------------------------------------------------------------------------*/
 bool aurora_board_get_adc_calibration(size_t channel,
                                       aurora_board_adc_calibration_t *calibration)
@@ -69,7 +69,7 @@ bool aurora_board_get_adc_calibration(size_t channel,
     case BOARD_ADC_INDEX_NTC_MOS:
     case BOARD_ADC_INDEX_NTC_AMB:
     default:
-        /* NTC B值、阻值偏差与板级两点标定未完成，禁止参与功率放行。 */
+        /* NTC不使用线性gain；Measurement直接以ADC原码执行120W成熟100K/B3950查表。 */
         calibration->valid = false;
         break;
     }

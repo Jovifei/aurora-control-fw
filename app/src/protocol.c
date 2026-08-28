@@ -75,11 +75,15 @@ static void put_u32_le(uint8_t *destination, uint32_t value)
  *---------------------------------------------------------------------------*/
 static uint8_t legacy_fault_code(uint32_t fault_mask)
 {
-    if ((fault_mask & AURORA_FAULT_AMB_TEMP) != 0U)
+    if ((fault_mask & (AURORA_FAULT_AMB_TEMP |
+                       AURORA_FAULT_AMB_NTC_OPEN |
+                       AURORA_FAULT_AMB_NTC_SHORT)) != 0U)
     {
         return 21U;
     }
-    if ((fault_mask & AURORA_FAULT_MOS_OVERTEMP) != 0U)
+    if ((fault_mask & (AURORA_FAULT_MOS_OVERTEMP |
+                       AURORA_FAULT_MOS_NTC_OPEN |
+                       AURORA_FAULT_MOS_NTC_SHORT)) != 0U)
     {
         return 22U;
     }
@@ -109,7 +113,9 @@ static uint8_t legacy_fault_code(uint32_t fault_mask)
     {
         return 1U;
     }
-    if ((fault_mask & AURORA_FAULT_FAST_PV_OCP) != 0U)
+    if ((fault_mask & (AURORA_FAULT_FAST_PV_OCP |
+                       AURORA_FAULT_PV_OVERCURRENT |
+                       AURORA_FAULT_PV_OVERPOWER)) != 0U)
     {
         return 2U;
     }

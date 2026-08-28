@@ -19,7 +19,7 @@ __attribute__((noreturn)) void HardFault_Handler(void);
  * Name        : static void handle_fast_comparator_fault(void)
  * Input       : 无
  * Output      : 无
- * Description : 把驱动层比较器故障映射为应用故障位；未知原因按FAST_BREAK处理，并在关波事件发布后清比较器中断。
+ * Description : 映射COMP故障原因并交给Service按“PWM是否实际输出”决定诊断或锁存；ISR本身不做恢复。
  *---------------------------------------------------------------------------*/
 static void handle_fast_comparator_fault(void)
 {
@@ -39,8 +39,8 @@ static void handle_fast_comparator_fault(void)
         app_faults = AURORA_FAULT_FAST_BREAK;
     }
 
-    /* service入口第一动作仍是恒定时间强制关波；这里只负责故障原因映射。 */
-    aurora_service_isr_fast_fault(&g_aurora_service, app_faults);
+    /* 硬件关波能力始终保留；PWM未真正输出时不把上电/零点瞬态软件锁存为OCP。 */
+    aurora_service_isr_comparator_fault(&g_aurora_service, app_faults);
     drv_comp_irq_ack();
 }
 
@@ -48,7 +48,7 @@ static void handle_fast_comparator_fault(void)
  * Name        : void SysTick_Handler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理1 ms SysTick中断，只更新时间并投递Service节拍事件。
+ * Description : 处理1ms SysTick，只更新时间并投递Service节拍事件。
  *---------------------------------------------------------------------------*/
 void SysTick_Handler(void)
 {
@@ -82,7 +82,7 @@ void DMA_CH1_IRQHandler(void)
  * Name        : void COMP0_IRQHandler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理MOS快速过流比较器中断；保留Break锁存并投递统一快速故障。
+ * Description : 处理MOS快速过流比较器中断；Break锁存保留到主循环按策略确认。
  *---------------------------------------------------------------------------*/
 void COMP0_IRQHandler(void)
 {
@@ -97,7 +97,7 @@ void COMP0_IRQHandler(void)
  * Name        : void COMP1_2_3_IRQHandler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理PV快速过流比较器组中断并投递统一快速故障。
+ * Description : 处理PV快速过流比较器组中断并交给统一比较器故障桥接。
  *---------------------------------------------------------------------------*/
 void COMP1_2_3_IRQHandler(void)
 {
@@ -108,11 +108,10 @@ void COMP1_2_3_IRQHandler(void)
  * Name        : void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
  * Input       : 无
  * Output      : 无
- * Description : 处理ATMR共享Break/Update向量；始终先处理Break，再确认一次性零CCR Update。
+ * Description : 处理ATMR共享Break/Update向量；始终先处理Break，再确认一次性0 CCR自然Update。
  *---------------------------------------------------------------------------*/
 void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
 {
-    /* Break优先于Update；锁存位不在ISR内清除，只屏蔽重复Break中断。 */
     if (DDL_ATMR_IsActiveFlag_BRK(ATMR) != 0U)
     {
         drv_pwm_quiesce_break_irq_isr();
@@ -129,13 +128,12 @@ void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
  * Name        : void USART_IRQHandler(void)
  * Input       : 无
  * Output      : 无
- * Description : 按固定字节预算搬运RX数据、推进TX并清错误标志，避免通信ISR长期占用CPU。
+ * Description : 按固定字节预算搬运RX、推进TX并清错误标志，避免通信ISR长期占用CPU。
  *---------------------------------------------------------------------------*/
 void USART_IRQHandler(void)
 {
     uint32_t budget = BOARD_UART_ISR_RX_BUDGET;
 
-    /* 单次ISR只搬运有限字节，避免通信流量长期饿死ADC和控制任务。 */
     while (drv_uart_rx_ready_isr() && (budget > 0U))
     {
         aurora_service_isr_uart_rx(&g_aurora_service, drv_uart_read_isr());
@@ -149,7 +147,7 @@ void USART_IRQHandler(void)
  * Name        : void HardFault_Handler(void)
  * Input       : 无
  * Output      : 无
- * Description : HardFault安全收尾：立即关PWM、屏蔽Break风暴、断开继电器并请求系统复位。
+ * Description : HardFault立即关PWM、屏蔽Break风暴、断继电器并请求系统复位。
  *---------------------------------------------------------------------------*/
 __attribute__((noreturn)) void HardFault_Handler(void)
 {

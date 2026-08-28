@@ -34,9 +34,9 @@ extern "C" {
 #define AURORA_MEAS_VALID_BAT_V                     (1UL << 2)
 /* 测量有效位：继电器前母线电压已由ADC直接测得。 */
 #define AURORA_MEAS_VALID_BUS_V                     (1UL << 3)
-/* 测量有效位：MOS温度通道已完成标定并可用。 */
+/* 测量有效位：MOS温度通道换算成功。 */
 #define AURORA_MEAS_VALID_MOS_TEMP                  (1UL << 4)
-/* 测量有效位：环境温度通道已完成标定并可用。 */
+/* 测量有效位：环境温度通道换算成功。 */
 #define AURORA_MEAS_VALID_AMB_TEMP                  (1UL << 5)
 /* 测量有效位：PV功率已由有效的V/I计算得到。 */
 #define AURORA_MEAS_VALID_PV_POWER                  (1UL << 6)
@@ -47,13 +47,13 @@ extern "C" {
 #define AURORA_FAULT_FAST_MOS_OCP                   (1UL << 0)
 /* 故障位：PV输入快速过流比较器触发。 */
 #define AURORA_FAULT_FAST_PV_OCP                    (1UL << 1)
-/* 故障位：PV欠压持续超过软件去抖时间。 */
+/* 故障位：PV软件欠压。 */
 #define AURORA_FAULT_PV_UNDERVOLT                   (1UL << 2)
-/* 故障位：PV过压持续超过软件去抖时间。 */
+/* 故障位：PV软件过压。 */
 #define AURORA_FAULT_PV_OVERVOLT                    (1UL << 3)
 /* 故障位：电池端欠压。 */
 #define AURORA_FAULT_BAT_UNDERVOLT                  (1UL << 4)
-/* 故障位：电池端过压。 */
+/* 故障位：任一级电池软件过压。 */
 #define AURORA_FAULT_BAT_OVERVOLT                   (1UL << 5)
 /* 故障位：继电器前母线过压。 */
 #define AURORA_FAULT_BUS_OVERVOLT                   (1UL << 6)
@@ -63,7 +63,7 @@ extern "C" {
 #define AURORA_FAULT_AMB_TEMP                       (1UL << 8)
 /* 故障位：ADC测量快照超时或尚未建立。 */
 #define AURORA_FAULT_ADC_STALE                      (1UL << 9)
-/* 故障位：预充/继电器压差验证失败。 */
+/* 故障位：预充/继电器/电池稳定验证失败。 */
 #define AURORA_FAULT_RELAY                          (1UL << 10)
 /* 故障位：电池档案或外部设置无效。 */
 #define AURORA_FAULT_SETTINGS                       (1UL << 11)
@@ -73,10 +73,22 @@ extern "C" {
 #define AURORA_FAULT_INTERNAL                       (1UL << 13)
 /* 故障位：ADC DMA硬件报告错误。 */
 #define AURORA_FAULT_ADC_DMA                        (1UL << 14)
-/* 故障位：DMA覆盖了尚未处理的ADC半缓冲。 */
+/* 故障位：DMA覆盖尚未处理的ADC半缓冲。 */
 #define AURORA_FAULT_ADC_OVERRUN                    (1UL << 15)
 /* 故障位：Break已锁存但比较器原因无法细分。 */
 #define AURORA_FAULT_FAST_BREAK                     (1UL << 16)
+/* 故障位：PV软件分级过流。 */
+#define AURORA_FAULT_PV_OVERCURRENT                 (1UL << 17)
+/* 故障位：PV持续过功率。 */
+#define AURORA_FAULT_PV_OVERPOWER                   (1UL << 18)
+/* 故障位：MOS NTC开路判据。 */
+#define AURORA_FAULT_MOS_NTC_OPEN                   (1UL << 19)
+/* 故障位：MOS NTC短路判据。 */
+#define AURORA_FAULT_MOS_NTC_SHORT                  (1UL << 20)
+/* 故障位：环境NTC开路判据。 */
+#define AURORA_FAULT_AMB_NTC_OPEN                   (1UL << 21)
+/* 故障位：环境NTC短路判据。 */
+#define AURORA_FAULT_AMB_NTC_SHORT                  (1UL << 22)
 
 /* 通用函数返回状态。 */
 typedef enum
@@ -129,7 +141,7 @@ typedef struct
     int32_t bus_voltage_mv;                          /* 继电器前Boost母线电压，mV。 */
     int32_t battery_current_est_ma;                  /* 电池电流估算值，mA。 */
     aurora_measurement_quality_t battery_current_quality; /* 电池电流来源质量。 */
-    uint8_t battery_current_quality_reserved[3];     /* 显式补齐质量枚举后的字节，避免隐式ABI填充。 */
+    uint8_t battery_current_quality_reserved[3];     /* 显式补齐质量枚举后的字节。 */
     int16_t mos_temp_dC;                             /* MOS温度，0.1°C。 */
     int16_t ambient_temp_dC;                         /* 环境温度，0.1°C。 */
 } aurora_measurement_t;
@@ -163,45 +175,61 @@ typedef enum
     AURORA_CHARGE_FAULT                              /* 充电状态机故障停止。 */
 } aurora_charge_state_t;
 
-/* 功率级连接与发波状态。 */
+/* 功率级启动、连接与发波状态。 */
 typedef enum
 {
     AURORA_POWER_OFF = 0,                            /* PWM与继电器均关闭。 */
+    AURORA_POWER_WAIT_PV,                            /* 等待PV进入启动窗口。 */
+    AURORA_POWER_START_DELAY,                        /* V2.7动态/固定启动延时。 */
+    AURORA_POWER_ZERO_CAL,                           /* PWM关闭状态下校准PV_I零点。 */
     AURORA_POWER_WAIT_BATTERY,                       /* 等待有效电池端电压。 */
-    AURORA_POWER_PRECHARGE,                          /* 小功率建立母线。 */
-    AURORA_POWER_RELAY_SETTLE,                       /* 继电器吸合机械稳定。 */
+    AURORA_POWER_PRECHARGE,                          /* 继电器断开，小功率Boost建立BST_U。 */
+    AURORA_POWER_RELAY_SETTLE,                       /* 压差满足后吸合继电器并机械稳定。 */
+    AURORA_POWER_BAT_STABILITY,                      /* 继电器闭合、PWM关闭，验证BAT_U 10s稳定性。 */
     AURORA_POWER_RUN,                                /* 正常MPPT充电。 */
-    AURORA_POWER_NO_SUN,                             /* 弱光等待并延迟断继电器。 */
+    AURORA_POWER_NO_SUN,                             /* 真正无PV后断开继电器。 */
     AURORA_POWER_FAULT                               /* 故障关断与放能。 */
 } aurora_power_state_t;
 
-/* 由化学体系和电压平台选择的完整充电档案。 */
+/* 由化学体系和电压平台选择的充电及电池软件保护档案。 */
 typedef struct
 {
     uint32_t battery_uv_mv;                          /* 电池欠压保护，mV。 */
+    uint32_t battery_uv_recover_mv;                  /* 电池欠压恢复，mV。 */
     uint32_t trickle_exit_mv;                        /* 涓流转恒流阈值，mV。 */
-    uint32_t cv_target_mv;                           /* 恒压目标，mV。 */
-    uint32_t cv_protect_mv;                          /* 电池绝对过压保护，mV。 */
+    uint32_t cv_target_mv;                           /* 恒压控制目标，mV。 */
+    uint32_t cv_min_mv;                              /* 恒压验收下限，mV。 */
+    uint32_t cv_max_mv;                              /* 恒压验收上限，mV。 */
+    uint32_t ov_slow_mv;                             /* 电池软件一级过压阈值，mV。 */
+    uint32_t ov_medium_mv;                           /* 一级阈值+0.7V的1s过压阈值，mV。 */
+    uint32_t ov_fast_mv;                             /* 3ms快速软件过压阈值，mV。 */
+    uint32_t ov_absolute_mv;                         /* 统一绝对软件过压阈值，mV。 */
     uint32_t float_target_mv;                        /* 铅酸浮充目标，mV；其他体系为0。 */
+    uint32_t float_min_mv;                           /* 铅酸浮充验收下限，mV。 */
+    uint32_t float_max_mv;                           /* 铅酸浮充验收上限，mV。 */
+    uint32_t full_voltage_mv;                        /* 产品表定义的满充电压，mV。 */
     uint32_t recharge_mv;                            /* 充满后重新允许充电的电压，mV。 */
     uint32_t trickle_current_ma;                     /* 涓流阶段电流上限，mA。 */
-    uint32_t cc_current_ma;                          /* 恒流阶段电流上限，mA。 */
+    uint32_t cc_current_ma;                          /* 恒流阶段电流目标，mA。 */
     uint32_t tail_current_ma;                        /* CV判满尾流阈值，mA。 */
-    uint32_t float_current_ma;                       /* 浮充阶段电流上限，mA。 */
+    uint32_t float_end_current_ma;                   /* 铅酸浮充结束电流，mA。 */
     aurora_battery_chem_t chemistry;                 /* 化学体系。 */
     aurora_battery_pack_t pack;                      /* 标称电压平台。 */
-    uint16_t layout_reserved;                        /* 显式补齐枚举字段，保持无隐式填充布局。 */
 } aurora_charge_profile_t;
 
-/* 充电状态机对下游功率链给出的限制。 */
+/* 充电状态机给上层的“电池侧目标”，不直接冒充PV输入功率。 */
 typedef struct
 {
-    uint32_t power_limit_mw;                         /* 允许的最大充电输入功率，mW。 */
-    uint32_t voltage_target_mv;                      /* 当前电池电压目标，mV。 */
+    uint32_t battery_power_target_mw;                /* 当前电池侧目标功率，mW。 */
+    uint32_t pv_power_limit_mw;                      /* 经估算/包络换算后的PV侧允许功率，mW。 */
+    uint32_t current_target_ma;                      /* 当前电池侧目标电流，mA。 */
+    uint32_t voltage_target_mv;                      /* 当前电池侧目标电压，mV。 */
     aurora_charge_state_t state;                     /* 当前充电阶段。 */
     bool allow_charge;                               /* true表示当前阶段允许能量传输。 */
-    bool weak_light;                                 /* true表示PV功率不足，进入弱光策略。 */
-    bool power_limited;                              /* true表示电池/温度限制低于MPPT请求。 */
+    bool weak_light;                                 /* true表示PV功率不足。 */
+    bool input_limited;                              /* true表示PV电流/电压/功率包络正在限幅。 */
+    bool thermal_limited;                            /* true表示温度包络正在限幅。 */
+    uint8_t output_reserved[3];                      /* 显式补齐布尔字段。 */
 } aurora_charge_output_t;
 
 /* MPPT外环和PV电压PI输出。 */
@@ -210,17 +238,17 @@ typedef struct
     uint32_t target_voltage_mv;                      /* PV参考电压，mV。 */
     uint32_t theoretical_power_mw;                   /* 未经电池/硬件裁决的功率请求，mW。 */
     bool valid;                                      /* true表示当前样本足以形成控制请求。 */
-    uint8_t valid_reserved[3];                       /* 显式补齐有效位后的字节，避免隐式填充。 */
+    uint8_t valid_reserved[3];                       /* 显式补齐有效位后的字节。 */
 } aurora_mppt_output_t;
 
 /* 应用层提交给Service的硬件无关功率命令。 */
 typedef struct
 {
-    uint16_t duty_q15;                               /* Q6物理占空比，Q15。 */
+    uint16_t duty_q15;                               /* 低侧MOS物理占空比，Q15。 */
     aurora_power_state_t state;                      /* 命令对应的功率级状态。 */
     bool pwm_enable;                                 /* true表示请求发波。 */
     bool relay_enable;                               /* true表示请求闭合继电器。 */
-    uint8_t state_reserved[3];                       /* 显式补齐功率状态枚举后的字节，避免隐式填充。 */
+    uint8_t state_reserved[3];                       /* 显式补齐功率状态字段。 */
 } aurora_power_command_t;
 
 /* LED逻辑输出。 */
@@ -238,7 +266,7 @@ typedef struct
     uint32_t settings_revision;                      /* 每次有效设置变更递增。 */
     aurora_battery_chem_t chemistry;                 /* 用户选择的电池化学体系。 */
     aurora_battery_pack_t pack;                      /* 用户选择的电压平台。 */
-    uint16_t layout_reserved;                        /* 显式补齐枚举字段，保持存储对象无隐式填充。 */
+    uint16_t layout_reserved;                        /* 显式补齐存储布局。 */
 } aurora_persistent_settings_t;
 
 #ifdef __cplusplus

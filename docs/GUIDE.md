@@ -13,6 +13,7 @@ python tools/run_checks.py
 ```text
 ARCHITECTURE CHECK: PASS
 CODE STYLE CHECK: PASS
+Python contract tests: PASS
 GCC strict build + CTest: PASS
 Clang strict build + CTest: PASS
 Clang ASan/UBSan: PASS
@@ -24,14 +25,15 @@ Host测试通过不等于Keil链接和功率板验收通过。
 ## 2. 源码入口
 
 ```text
-app/inc/       应用层公共类型、接口和带单位参数
-app/src/       9个纯业务实现
-service/       ISR事件邮箱、主循环调度、APP与Driver唯一桥接
-board/         PinMap、标定、Flash地址和人工安全门禁
-driver/        G32F031目标外设实现
-project/keil/  AC6工程、main、中断和scatter
-tests/         Host回归、故障注入和模拟驱动
-tools/         架构、风格、编译、Sanitizer和目标端语法门禁
+app/inc/          应用层公共类型、接口和带单位参数
+app/src/          measurement / charger / protection / mppt / power_stage等业务实现
+service/          ISR事件邮箱、主循环调度、APP与Driver唯一桥接
+driver/inc/       目标驱动统一接口
+driver/src/       G32F031目标外设实现
+board/            PinMap、标定、Flash地址和人工安全门禁
+project/keil/     AC6工程、main、中断和scatter
+tests/            Host回归、故障注入和模拟驱动
+tools/            架构、风格、编译、Sanitizer和目标端语法门禁
 ```
 
 应用层文件约定：
@@ -40,6 +42,8 @@ tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 - `.c`只能放入 `app/src/`；
 - `app/`根目录不得放 `.c/.h`；
 - APP不得包含 `board.h`、`driver.h`、`service.h` 或任何G32/DDL/CMSIS目标头文件。
+
+驱动层同样采用 `driver/inc/*.h` 与 `driver/src/*.c`，不得反向包含APP业务头文件。
 
 ## 3. 代码注释与布局规范
 
@@ -68,12 +72,13 @@ tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 ## 4. 参数修改流程
 
 1. 先查 [17-参数标定与Codex交接清单](17-参数标定与Codex交接清单.md)。
-2. 明确参数属于：应用算法、板级标定、目标外设或人工门禁。
-3. 记录单位、旧值、新值、依据、测试方法和回退值。
-4. 修改对应集中定义，不在函数体内追加魔法数。
-5. 增加或修改Host测试。
-6. 运行完整门禁。
-7. 若涉及PWM、COMP、ADC、Flash或IWDT，再完成Keil与板级测试；不能只凭Host结果解锁。
+2. 涉及120W成熟行为时，同时核对 [22-REF-120W-V2.7行为与参数基线](22-REF-120W-V2.7行为与参数基线.md) 和 `reference/README.md` 指向的原始V2.7来源。
+3. 明确参数属于：产品公共行为、300/120功率BOM、板级标定、目标外设或人工门禁。
+4. 记录单位、旧值、新值、依据、测试方法和回退值。
+5. 修改对应集中定义，不在函数体内追加魔法数。
+6. 增加或修改Host测试。
+7. 运行完整门禁。
+8. 若涉及PWM、COMP、ADC、Flash、Relay或IWDT，再完成Keil与板级测试；不能只凭Host结果解锁。
 
 ## 5. 功率安全红线
 
@@ -81,10 +86,28 @@ tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 - 快速故障ISR第一动作必须是 `drv_pwm_force_off_isr()`；
 - 运行期Duty只写CCR preload，不产生软件UPDATE事件；
 - 首次授权必须先装载零CCR，再经过安全epoch、Break源、Break锁存和板级总门复核；
-- 故障后Duty和积分清零，恢复必须重新执行电池识别与预充；
+- 故障后Duty和积分清零，恢复必须重新执行启动与预充；
 - 功率运行或继电器闭合时禁止Flash擦写；
 - 只有Service健康监督可喂IWDT；
 - `BOARD_POWER_OUTPUT_ALLOWED`未经人工验收不得改为1。
+
+### Relay硬约束
+
+必须严格按下面顺序：
+
+```text
+Relay OFF
+→ 受限Boost先给BST_U充电
+→ |BST_U-BAT_U| <= 1.5V连续1s
+→ Duty归0，Service确认物理PWM关闭
+→ Service用最新BST_U/BAT_U、故障和PWM状态再次复核
+→ Relay ON
+→ 100ms机械稳定并复核压差<=2.5V
+→ PWM继续OFF，观察BAT_U完整10s且max-min<=2V
+→ RUN / MPPT
+```
+
+任何“先吸合继电器，再让Boost把BST_U抬到BAT_U”的实现都禁止进入评审。
 
 ## 6. 提交前检查
 
@@ -96,7 +119,31 @@ git status --short
 
 Keil/台架证据未完成时，提交说明必须明确写“Host验证通过，Keil链接/板级验证未执行”，不得使用“量产通过”“硬件安全闭环”等表述。
 
+## 7. 当前基线与历史审计
 
-## 当前接手与审计
+接手当前工程先读：
 
-首次接手或从旧远端覆盖时，先阅读 [18-v0.7.2目录规范与交接说明](18-v0.7.2目录规范与交接说明.md) 和 [19-编译修复提交2740523审计](19-编译修复提交2740523审计.md)。
+- [18-v0.7.2目录规范与交接说明](18-v0.7.2目录规范与交接说明.md)
+- [19-编译修复提交2740523审计](19-编译修复提交2740523审计.md)
+
+旧v0.7.0/v0.7.1一次性替换文档不再作为当前操作入口。
+
+## 8. v0.8.0 接手必读
+
+开始修改充电、保护、启动、Relay或MPPT前，必须先读：
+
+- `22-REF-120W-V2.7行为与参数基线.md`
+- `23-120W到300W行为迁移矩阵.md`
+- `24-300W重构工程介绍.md`
+- `25-REF-300W重构录音工程摘要.md`
+- `26-v0.8.0参数待确认与台架清单.md`
+- `27-v0.8.0实现与验证报告.md`
+
+特别禁止：
+
+1. 把120W功率/电流阈值按300/120机械放大；
+2. 把BAT_I_EST写成真实测量；
+3. 重新引入同步MOS、互补PWM或旧HT32闭源MPPT库；
+4. 在BST_U尚未接近BAT_U时吸合继电器；
+5. 绕过Service直接开启PWM/MOE；
+6. 在`BOARD_POWER_OUTPUT_ALLOWED == 0`时声称已具备额定功率运行条件。

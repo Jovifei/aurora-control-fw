@@ -1,74 +1,67 @@
 # Aurora Control Firmware
 
-> 工程整理发布：**v0.7.2**。本版本继续统一应用层与驱动层目录，并记录编译修复后的安全审计结果。
+> 当前开发候选：**v0.8.0 — Protection & Charge Behavior Parity**。
+> 功率输出人工总门仍保持关闭，Host/CI通过不代表Keil AC6与300W台架已经完成。
 
-单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
+单路异步 Boost 光伏充电控制器固件。v0.8.0以120W V2.7成熟产品行为为基线，适配300W新硬件：默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池。
 
 ## 目录
 
 ```text
 app/
-├─ inc/      应用层公共.h、类型和集中参数
-└─ src/      9个纯业务.c实现
-service/     ISR事件邮箱、主循环调度和APP↔Driver唯一桥接
+├─ inc/      应用层.h、类型和集中参数
+└─ src/      measurement / charger / protection / mppt / power_stage 等业务实现
+service/     ISR事件、回调与APP↔Driver唯一桥接；最终PWM/继电器安全复核
+driver/
+├─ inc/      芯片驱动统一接口
+└─ src/      目标MCU驱动实现
 board/       PinMap、ADC标定、Flash地址和人工功率门禁
-driver/      G32F031目标外设驱动，保持扁平
-vendor/      目标构建实际需要的CMSIS / Device / DDL
-project/     Keil ARM Compiler 6工程、入口、中断和scatter
-docs/        文档入口、00～19编号文档和最终原理图
-tests/       Host回归与故障注入，不进入目标镜像
-tools/       架构、代码规范、GCC/Clang、Sanitizer和目标语法门禁
+vendor/      CMSIS / Device / DDL
+project/     Keil ARM Compiler 6工程
+docs/        工程、120W基线、迁移矩阵、300W说明和台架清单
+tests/       Host回归与故障注入
+tools/       架构、格式、GCC/Clang/Sanitizer/目标语法门禁
 ```
 
-`app/src/`中的9个业务模块：
+## v0.8.0安全顺序
 
 ```text
-app          应用编排、参数切换和协议命令落地
-measurement  ADC完整块滤波、标定、物理量快照和电池电流估算
-mppt         P-V斜率搜索、PV参考电压和PI功率请求
-charger      电池档案与TC/CC/CV/Float状态机
-protection   软件保护、去抖、锁存与恢复许可
-power_stage  预充、继电器、功率命令和物理Duty执行器
-ui           RUN/FAULT指示逻辑
-protocol     旧产品UART帧兼容层
-storage      片内Flash双页Journal、CRC和Commit Marker
+Relay OFF
+→ 受限Boost先给BST_U充电
+→ |BST_U-BAT_U| <= 1.5V连续1s
+→ Duty归0，Service物理关PWM
+→ Service再次用最新BST_U/BAT_U和故障状态复核
+→ 才允许Relay ON
+→ 100ms机械稳定并复核压差<=2.5V
+→ PWM继续OFF，观察BAT_U完整10s，max-min<=2V
+→ 才进入RUN/MPPT
 ```
 
-仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。
+任何“先吸合继电器，再慢慢升BST_U”的实现都属于安全回归。
 
-## 阅读入口
+## v0.8.0阅读入口
 
-- [文档入口](docs/README.md)
-- [工程接手指南](docs/GUIDE.md)
-- [参数标定与Codex交接清单](docs/17-参数标定与Codex交接清单.md)
-- [v0.7.2目录规范与交接说明](docs/18-v0.7.2目录规范与交接说明.md)
-- [编译修复提交2740523审计](docs/19-编译修复提交2740523审计.md)
+- [文档索引](docs/00-文档索引.md)
+- [120W V2.7行为与参数基线](docs/22-REF-120W-V2.7行为与参数基线.md)
+- [120W→300W行为迁移矩阵](docs/23-120W到300W行为迁移矩阵.md)
+- [300W重构工程介绍](docs/24-300W重构工程介绍.md)
+- [300W重构录音工程摘要](docs/25-REF-300W重构录音工程摘要.md)
+- [v0.8.0参数待确认与台架清单](docs/26-v0.8.0参数待确认与台架清单.md)
+- [v0.8.0实现与验证报告](docs/27-v0.8.0实现与验证报告.md)
+- [原始/派生表格说明](docs/reference/README.md)
 
-## 本地验证
+## 软件验证
 
 ```bash
 python tools/run_checks.py
 ```
 
-该命令依次执行：
+会执行架构/代码规范、Python契约测试、GCC/Clang CTest、ASan/UBSan与Cortex-M0+目标语法检查。
 
-```text
-Architecture gate
-Code style/comment/layout gate
-GCC strict build + CTest
-Clang strict build + CTest
-Clang AddressSanitizer + UBSan
-Cortex-M0+ target syntax check
-```
-
-当前Host回归包含87个运行时CHECK断言；GCC/Clang/CTest/Sanitizer和10个目标端首方文件语法检查均通过。Host通过不等于Keil AC6链接或功率板验收通过。
-
-## 当前安全状态
-
-所有功率放行门保持关闭：
+## 当前硬件门禁
 
 ```c
 BOARD_POWER_OUTPUT_ALLOWED == 0
 ```
 
-真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流和低压到额定功率验收。
+真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 和 `docs/26-v0.8.0参数待确认与台架清单.md` 的全部P0项目。

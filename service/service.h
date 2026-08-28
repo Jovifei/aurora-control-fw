@@ -21,15 +21,19 @@ typedef struct
     uint32_t watchdog_window_start_ms;               /* 当前健康窗口起点。 */
     uint32_t watchdog_started_ms;                    /* IWDT启动时间。 */
     uint32_t last_telemetry_ms;                      /* 上次主动遥测时间。 */
+    uint32_t fast_ocp_recover_since_ms;              /* 快速OCP硬件源消失后的30s恢复计时。 */
     volatile uint32_t adc_overrun_count;             /* ADC半缓冲覆盖计数。 */
     volatile uint32_t uart_rx_overrun_count;         /* RX环形缓冲溢出计数。 */
+    volatile uint32_t startup_comp_ignored_count;    /* PWM未输出阶段CMP诊断次数，不作为OCP锁存。 */
     volatile uint16_t uart_head;                     /* RX写索引。 */
     volatile uint16_t uart_tail;                     /* RX读索引。 */
     volatile uint8_t adc_completed_mask;             /* ISR已发布的DMA半块。 */
     volatile uint8_t adc_processing_mask;            /* 主循环正在读取的DMA半块。 */
     uint8_t pwm_arm_state;                           /* PWM零CCR/放行握手状态。 */
     uint8_t uart_rx[BOARD_UART_RX_BUFFER_SIZE];      /* ISR写、主循环读的RX环形缓冲。 */
+    bool relay_applied;                              /* 物理继电器最近一次实际输出状态。 */
     bool initialized;                                /* 全部关键模块初始化完成。 */
+    uint8_t layout_reserved[2];                      /* 显式补齐。 */
 } aurora_service_t;
 
 bool aurora_service_init(aurora_service_t *service);
@@ -39,6 +43,7 @@ void aurora_service_poll(aurora_service_t *service);
 void aurora_service_isr_tick(aurora_service_t *service);
 void aurora_service_isr_adc_block(aurora_service_t *service, uint8_t block_index);
 void aurora_service_isr_fast_fault(aurora_service_t *service, uint32_t fault_mask);
+void aurora_service_isr_comparator_fault(aurora_service_t *service, uint32_t fault_mask);
 void aurora_service_isr_pwm_update(aurora_service_t *service);
 void aurora_service_isr_uart_rx(aurora_service_t *service, uint8_t byte);
 
