@@ -21,11 +21,13 @@ typedef struct
     uint32_t transition_since_ms;                    /* TC→CC、CV→CC、Float入口等连续条件起点。 */
     uint32_t float_low_voltage_since_ms;             /* Float低于下限的连续时间。 */
     uint32_t recharge_since_ms;                      /* Complete后低于复充阈值的连续时间。 */
+    uint32_t restart_since_ms;                       /* 复充/Float维持失败后重新做电池稳定准入的起点。 */
     uint16_t cc_to_cv_score;                         /* 继承120W的加权CC→CV证据积分。 */
     aurora_charge_state_t state;                     /* 当前TC/CC/CV/Float阶段。 */
     bool initialized;                                /* 档案有效且状态机已初始化。 */
     bool float_started;                              /* true表示电池已自然下降到Float窗口并重新开始浮充。 */
-    uint8_t state_reserved[2];                       /* 显式补齐布尔字段。 */
+    bool restart_required;                           /* true表示当前必须暂停充电并重新完成PowerStage电池稳定准入。 */
+    uint8_t state_reserved[1];                       /* 显式补齐布尔字段。 */
 } aurora_charger_ctx_t;
 
 bool aurora_charge_profile_get(aurora_battery_chem_t chemistry,
