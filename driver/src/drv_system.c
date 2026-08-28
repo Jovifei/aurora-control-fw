@@ -243,17 +243,18 @@ bool drv_system_wait_for_supply_stable(void)
             continue;
         }
 
-        if ((BOARD_MCU_SUPPLY_STABLE_TIME_MS == 0U) ||
-            (stable_tracking &&
-             ((now_ms - stable_start_ms) >= BOARD_MCU_SUPPLY_STABLE_TIME_MS)))
+        if (BOARD_MCU_SUPPLY_STABLE_TIME_MS == 0U)
         {
-            /* VDD已合格：零稳定窗口立即放行；否则必须已连续稳定到配置时长。 */
             break;
         }
         if (!stable_tracking)
         {
             stable_tracking = true;
             stable_start_ms = now_ms;
+        }
+        else if ((now_ms - stable_start_ms) >= BOARD_MCU_SUPPLY_STABLE_TIME_MS)
+        {
+            break;
         }
 
         __WFI();
@@ -313,15 +314,4 @@ void drv_irq_configure_priorities(void)
 DRV_SYSTEM_NORETURN void drv_system_reset(void)
 {
     NVIC_SystemReset();
-}
-
-/*---------------------------------------------------------------------------*
- * Name        : void drv_wait_for_interrupt(void)
- * Input       : 无
- * Output      : 无
- * Description : 封装WFI，使应用运行层不直接依赖CMSIS指令接口。
- *---------------------------------------------------------------------------*/
-void drv_wait_for_interrupt(void)
-{
-    __WFI();
 }

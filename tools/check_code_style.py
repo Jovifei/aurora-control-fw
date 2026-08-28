@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""检查首方C代码的目录、函数头注释、缩进和文件级定义顺序。"""
+"""检查v0.8.3首方C代码的函数头、缩进、文件级定义顺序和inc/src布局。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,17 +7,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOTS = [
-    ROOT / "app/src",
-    ROOT / "driver/src",
-    ROOT / "project",
-    ROOT / "tests",
-]
-HEADER_ROOTS = [
-    ROOT / "app/inc",
-    ROOT / "driver/inc",
-    ROOT / "tests",
-]
+SOURCE_ROOTS = [ROOT / "app/src", ROOT / "driver/src", ROOT / "tests"]
+HEADER_ROOTS = [ROOT / "app/inc", ROOT / "driver/inc", ROOT / "tests"]
 BANNER_END = "*---------------------------------------------------------------------------*/"
 errors: list[str] = []
 
@@ -34,7 +25,7 @@ def previous_nonblank(lines: list[str], index: int) -> int | None:
 
 
 def looks_like_function_start(lines: list[str], index: int) -> bool:
-    """识别签名末行后紧跟左花括号的函数定义，避免把控制语句当函数。"""
+    """识别函数定义签名，避免把if/for/while/switch误判为函数。"""
     if not lines[index].strip().endswith(")"):
         return False
     next_index = index + 1
@@ -50,7 +41,7 @@ def looks_like_function_start(lines: list[str], index: int) -> bool:
                 prior.endswith("*/") or prior.startswith("//")):
             break
         start -= 1
-    signature = " ".join(line.strip() for line in lines[start : index + 1])
+    signature = " ".join(line.strip() for line in lines[start:index + 1])
     if re.match(r"^(?:else\s+)?(if|for|while|switch)\s*\(", signature):
         return False
     return re.search(r"\b[A-Za-z_]\w*\s*\([^;]*\)$", signature) is not None
@@ -77,10 +68,10 @@ def check_banner(lines: list[str], signature_end: int, path: Path) -> None:
         errors.append(f"{rel(path)}:{signature_end + 1}: 函数头注释起始格式错误")
         return
 
-    banner = "\n".join(lines[start_index : end_index + 1])
+    banner = "\n".join(lines[start_index:end_index + 1])
     for label in ["* Name        :", "* Input       :", "* Output      :", "* Description :"]:
         if label not in banner:
-            errors.append(f"{rel(path)}:{signature_end + 1}: 函数头注释缺少字段 {label.strip()}")
+            errors.append(f"{rel(path)}:{signature_end + 1}: 函数头缺少字段 {label.strip()}")
 
 
 def strip_comments_for_braces(line: str, in_block: bool) -> tuple[str, bool]:
@@ -135,13 +126,12 @@ def check_source(path: Path) -> None:
     first_public_line: int | None = None
     depth = 0
     in_block = False
-    function_signature_lines: set[int] = set(function_ends)
+    function_signature_lines = set(function_ends)
     for index, line in enumerate(lines):
         code, in_block = strip_comments_for_braces(line, in_block)
         stripped = code.strip()
 
         if depth == 0 and index in function_signature_lines:
-            # 向上拼接签名，判断是否以static开头。
             start = index
             while start > 0:
                 prior = lines[start - 1].strip()
@@ -150,19 +140,15 @@ def check_source(path: Path) -> None:
                 if prior.endswith(BANNER_END):
                     break
                 start -= 1
-            signature = " ".join(item.strip() for item in lines[start : index + 1])
+            signature = " ".join(item.strip() for item in lines[start:index + 1])
             if not signature.startswith("static ") and first_public_line is None:
                 first_public_line = index + 1
 
         if depth == 0 and first_public_line is not None:
             if stripped.startswith("#define "):
-                errors.append(
-                    f"{rel(path)}:{index + 1}: 宏定义必须位于首个公开函数之前"
-                )
+                errors.append(f"{rel(path)}:{index + 1}: 宏必须位于首个公开函数之前")
             if stripped.startswith("static "):
-                errors.append(
-                    f"{rel(path)}:{index + 1}: static定义/声明必须集中在文件头"
-                )
+                errors.append(f"{rel(path)}:{index + 1}: static定义/声明必须集中在文件头")
 
         depth += code.count("{") - code.count("}")
         if depth < 0:
@@ -191,27 +177,33 @@ def check_header(path: Path) -> None:
         if "/*" in line or "//" in line:
             continue
         prior = previous_nonblank(lines, line_number - 1)
-        # 允许一个说明性注释覆盖紧随其后的同组宏定义。
         while prior is not None and lines[prior].lstrip().startswith("#define "):
             prior = previous_nonblank(lines, prior)
         if prior is None or ("*/" not in lines[prior] and "//" not in lines[prior]):
             errors.append(f"{rel(path)}:{line_number}: 宏 {name} 缺少用途注释")
 
 
-# app必须只有inc与src两个子目录，根目录不得再放.c/.h。
-app_root = ROOT / "app"
-actual_subdirs = {item.name for item in app_root.iterdir() if item.is_dir()}
-if actual_subdirs != {"inc", "src"}:
-    errors.append(f"app目录只能包含inc/src，当前为: {sorted(actual_subdirs)}")
-for stray in [*app_root.glob("*.c"), *app_root.glob("*.h")]:
-    errors.append(f"APP源码未迁移到inc/src: {rel(stray)}")
+# 生产层必须只有app/driver两组inc/src，不再允许service/board。
+for layer in ["app", "driver"]:
+    layer_root = ROOT / layer
+    actual_subdirs = {item.name for item in layer_root.iterdir() if item.is_dir()}
+    if actual_subdirs != {"inc", "src"}:
+        errors.append(f"{layer}目录只能包含inc/src，当前为: {sorted(actual_subdirs)}")
+    for stray in [*layer_root.glob("*.c"), *layer_root.glob("*.h")]:
+        errors.append(f"{layer}源码未迁移到inc/src: {rel(stray)}")
+
+for forbidden in [ROOT / "service", ROOT / "board", ROOT / "project/keil"]:
+    if forbidden.exists():
+        errors.append(f"v0.8.3禁止目录仍存在: {rel(forbidden)}")
 
 for source_root in SOURCE_ROOTS:
-    for source in sorted(source_root.glob("*.c")):
-        check_source(source)
+    if source_root.exists():
+        for source in sorted(source_root.glob("*.c")):
+            check_source(source)
 for header_root in HEADER_ROOTS:
-    for header in sorted(header_root.glob("*.h")):
-        check_header(header)
+    if header_root.exists():
+        for header in sorted(header_root.glob("*.h")):
+            check_header(header)
 
 if errors:
     print("CODE STYLE CHECK: FAIL")

@@ -27,6 +27,5 @@ bool drv_system_supply_is_good(void);
 bool drv_system_wait_for_supply_stable(void);
 void drv_system_supply_qualifier_stop(void);
 DRV_SYSTEM_NORETURN void drv_system_reset(void);
-void drv_wait_for_interrupt(void);
 
 #endif

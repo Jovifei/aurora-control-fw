@@ -47,7 +47,7 @@ typedef struct
     aurora_ui_ctx_t ui;                              /* LED相位状态。 */
     aurora_ui_output_t ui_output;                    /* 待运行层落实的LED命令。 */
     bool link_request;                               /* V2.7 Link逻辑请求。 */
-    uint8_t layout_reserved[9];                      /* 显式补齐应用组合根，避免AC6隐式尾部填充。 */
+    uint8_t layout_reserved[7];                      /* 显式补齐应用组合根。 */
 } aurora_app_t;
 
 /*
@@ -67,6 +67,7 @@ typedef struct
     uint32_t watchdog_window_start_ms;               /* 看门狗健康窗口起点。 */
     uint32_t watchdog_started_ms;                    /* IWDT启动时间。 */
     uint32_t last_telemetry_ms;                      /* 上次主动遥测时间。 */
+    uint32_t fast_ocp_recover_since_ms;              /* 快速OCP硬件源消失后的恢复计时。 */
     volatile uint32_t adc_overrun_count;             /* ADC半缓冲覆盖计数。 */
     volatile uint32_t uart_rx_overrun_count;         /* RX环形缓冲溢出计数。 */
     volatile uint32_t startup_comp_ignored_count;    /* PWM未输出阶段CMP诊断次数。 */
@@ -78,7 +79,7 @@ typedef struct
     uint8_t uart_rx[AURORA_RUNTIME_UART_RX_BUFFER_SIZE]; /* ISR写、主循环读的RX缓冲。 */
     bool relay_applied;                              /* 物理继电器最近实际状态。 */
     bool initialized;                                /* 完整运行初始化完成。 */
-    uint8_t layout_reserved[3];                      /* 显式补齐到32位边界，避免AC6隐式尾部填充。 */
+    uint8_t layout_reserved[2];                      /* 显式补齐。 */
 } aurora_runtime_t;
 
 /* 目标中断桥接使用的唯一应用运行实例。 */
@@ -115,9 +116,6 @@ void aurora_runtime_isr_adc_block(aurora_runtime_t *runtime, uint8_t block_index
 void aurora_runtime_isr_fast_fault(aurora_runtime_t *runtime, uint32_t fault_mask);
 void aurora_runtime_isr_comparator_fault(aurora_runtime_t *runtime, uint32_t fault_mask);
 void aurora_runtime_isr_uart_rx(aurora_runtime_t *runtime, uint8_t byte);
-
-/* 目标启动入口；Host测试由tests/test_main.c提供入口。 */
-int main(void);
 
 #ifdef __cplusplus
 }

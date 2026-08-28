@@ -1,6 +1,5 @@
 #include "main.h"
 
-#include "board_config.h"
 #include "debug.h"
 #include "driver.h"
 
@@ -27,6 +26,11 @@
 #define RUNTIME_PWM_ARM_OFF                         (0U)
 #define RUNTIME_PWM_ARM_WAIT_ZERO                   (1U)
 #define RUNTIME_PWM_ARM_ACTIVE                      (2U)
+
+/* 可在硬件源消失30s后重新启动的快速比较器故障集合。 */
+#define RUNTIME_FAST_OCP_MASK                       (AURORA_FAULT_FAST_MOS_OCP | \
+                                                     AURORA_FAULT_FAST_PV_OCP | \
+                                                     AURORA_FAULT_FAST_BREAK)
 
 /* 目标中断桥接与主循环共享的唯一运行实例。 */
 aurora_runtime_t g_aurora_runtime;
@@ -241,22 +245,63 @@ static bool safety_still_clear(const aurora_runtime_t *runtime, uint32_t token)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static bool clear_startup_break_if_confirmed(aurora_runtime_t *runtime)
+ * Name        : static void clear_startup_break_if_safe(aurora_runtime_t *runtime)
  * Input       : runtime - 应用运行上下文
- * Output      : true表示仅清除了PWM未输出期间的遗留Break，本轮不得重新arm
- * Description : 比较器在PWM关闭时的瞬态不软件锁存为运行OCP；仅在硬件源已消失、
- *               无待处理故障且软件保护安全时清Break，并强制留到下一主循环再申请arm。
+ * Output      : 无
+ * Description : PWM从未输出时CMP只保留诊断；实时源已消失且无快速OCP锁存时显式清理遗留Break。
  *---------------------------------------------------------------------------*/
-static bool clear_startup_break_if_confirmed(aurora_runtime_t *runtime)
+static void clear_startup_break_if_safe(aurora_runtime_t *runtime)
 {
+    const uint32_t faults = aurora_protection_fault_mask(&runtime->app.protection);
+
     if (!drv_pwm_output_active() && drv_pwm_break_latched() &&
         !drv_pwm_break_source_active() &&
-        (runtime->pending_fault_mask == 0U) &&
-        aurora_protection_is_safe(&runtime->app.protection))
+        ((faults & RUNTIME_FAST_OCP_MASK) == 0U))
     {
-        return drv_pwm_clear_break_latch();
+        (void)drv_pwm_clear_break_latch();
     }
-    return false;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void runtime_fast_ocp_recovery(aurora_runtime_t *runtime,
+ *               uint32_t now_ms)
+ * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
+ * Output      : 无
+ * Description : 运行阶段CMP OCP需硬件源连续消失30s，PWM保持关闭后才清Break和软件锁存。
+ *---------------------------------------------------------------------------*/
+static void runtime_fast_ocp_recovery(aurora_runtime_t *runtime, uint32_t now_ms)
+{
+    const uint32_t fault_mask = aurora_protection_fault_mask(&runtime->app.protection);
+
+    if ((fault_mask & RUNTIME_FAST_OCP_MASK) == 0U)
+    {
+        runtime->fast_ocp_recover_since_ms = 0U;
+        return;
+    }
+    if (drv_pwm_break_source_active())
+    {
+        runtime->fast_ocp_recover_since_ms = 0U;
+        return;
+    }
+    if (runtime->fast_ocp_recover_since_ms == 0U)
+    {
+        runtime->fast_ocp_recover_since_ms = now_ms;
+        return;
+    }
+    if ((now_ms - runtime->fast_ocp_recover_since_ms) < AURORA_FAST_OCP_RECOVER_DELAY_MS)
+    {
+        return;
+    }
+
+    force_safe_off(runtime);
+    if (drv_pwm_clear_break_latch() &&
+        aurora_protection_clear_verified_fast_fault(&runtime->app.protection,
+                                                     (uint32_t)RUNTIME_FAST_OCP_MASK,
+                                                     true))
+    {
+        runtime->safety_epoch++;
+        runtime->fast_ocp_recover_since_ms = 0U;
+    }
 }
 
 /*---------------------------------------------------------------------------*
@@ -294,11 +339,7 @@ static void apply_power_command(aurora_runtime_t *runtime)
         return;
     }
 
-    /* Break确认与重新arm必须跨主循环分离，禁止同一调用路径立即恢复MOE。 */
-    if (clear_startup_break_if_confirmed(runtime))
-    {
-        return;
-    }
+    clear_startup_break_if_safe(runtime);
 
     if (runtime->pwm_arm_state == RUNTIME_PWM_ARM_OFF)
     {
@@ -400,12 +441,6 @@ static void process_adc(aurora_runtime_t *runtime)
  *---------------------------------------------------------------------------*/
 static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
 {
-#if (BOARD_USART_MODE == BOARD_USART_MODE_DEBUG)
-    (void)runtime;
-    (void)now_ms;
-    /* PB7/PB8独占GE_DEBUG时，不解析产品协议，避免日志与蓝牙帧混发。 */
-    return;
-#else
     aurora_protocol_frame_t request;
     aurora_protocol_frame_t response;
     bool has_response;
@@ -451,7 +486,6 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
     {
         atomic_or_u32(&runtime->event_flags, RUNTIME_EVENT_UART_RX);
     }
-#endif
 }
 
 /*---------------------------------------------------------------------------*
@@ -750,6 +784,7 @@ void aurora_app_step_1ms(aurora_app_t *app,
     aurora_protection_step(&app->protection,
                            &app->sample,
                            &app->charger.profile,
+                           aurora_measurement_zero_cal_ready(&app->measurement),
                            boost_output_active,
                            now_ms);
 
@@ -961,26 +996,12 @@ bool aurora_runtime_init(aurora_runtime_t *runtime)
             calibration.channel[channel].zero_code = board_cal.zero_code;
             calibration.channel[channel].polarity = board_cal.polarity;
             calibration.channel[channel].valid = board_cal.valid;
-            calibration.channel[channel].kind =
-                (board_cal.kind == DRV_ADC_CALIBRATION_NTC_BETA) ?
-                    AURORA_ADC_CALIBRATION_NTC_BETA :
-                    AURORA_ADC_CALIBRATION_LINEAR;
-            calibration.channel[channel].ntc_pullup_ohm = board_cal.ntc_pullup_ohm;
-            calibration.channel[channel].ntc_r25_ohm = board_cal.ntc_r25_ohm;
-            calibration.channel[channel].ntc_beta_kelvin = board_cal.ntc_beta_kelvin;
-            calibration.channel[channel].ntc_full_scale_code =
-                board_cal.ntc_full_scale_code;
-            calibration.channel[channel].ntc_reference_temp_dc =
-                board_cal.ntc_reference_temp_dc;
-            calibration.channel[channel].ntc_min_temp_dc = board_cal.ntc_min_temp_dc;
-            calibration.channel[channel].ntc_max_temp_dc = board_cal.ntc_max_temp_dc;
         }
     }
 
     aurora_app_init(&runtime->app, &calibration, now_ms);
     load_storage(runtime);
-    debug_init();
-    DEBUG_SYSTEM_PRINTF("USART mode=%u", (unsigned)BOARD_USART_MODE);
+    aurora_debug_init();
     runtime->safety_epoch = 1U;
     runtime->last_telemetry_ms = now_ms;
 
@@ -1035,9 +1056,9 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
         runtime->watchdog_seen |= RUNTIME_WDG_TICKET_CONTROL;
     }
 
+    runtime_fast_ocp_recovery(runtime, now_ms);
     apply_power_command(runtime);
 
-#if (BOARD_USART_MODE == BOARD_USART_MODE_BLUETOOTH)
     if ((now_ms - runtime->last_telemetry_ms) >= AURORA_TELEMETRY_PERIOD_MS)
     {
         aurora_protocol_frame_t telemetry;
@@ -1057,7 +1078,6 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
         }
         runtime->last_telemetry_ms = now_ms;
     }
-#endif
 
     runtime_storage(runtime, now_ms);
     runtime_watchdog(runtime, now_ms);
@@ -1213,7 +1233,6 @@ int main(void)
         for (;;)
         {
             /* PVD/时钟模块自身建立异常：保持最小安全态，等待调试或外部硬件复位。 */
-            drv_wait_for_interrupt();
         }
     }
 
@@ -1222,14 +1241,12 @@ int main(void)
         for (;;)
         {
             /* 完整初始化失败后不继续控制；若IWDT已启动，将由硬件复位。 */
-            drv_wait_for_interrupt();
         }
     }
 
     for (;;)
     {
         aurora_runtime_poll(&g_aurora_runtime);
-        drv_wait_for_interrupt();
     }
 }
 #endif

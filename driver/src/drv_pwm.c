@@ -1,9 +1,6 @@
-#include "drv_pwm.h"
-
-#include <stddef.h>
+#include "driver.h"
 
 #include "board_config.h"
-#include "drv_system.h"
 #include "g32f031_ddl_atmr.h"
 #include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_comp0.h"
@@ -308,28 +305,6 @@ bool drv_pwm_clear_break_latch(void)
 uint32_t drv_pwm_applied_sequence(void)
 {
     return g_applied_sequence;
-}
-
-/*---------------------------------------------------------------------------*
- * Name        : uint8_t drv_pwm_irq_pending_isr(void)
- * Input       : 无
- * Output      : DRV_PWM_IRQ_BREAK/DRV_PWM_IRQ_UPDATE组合位
- * Description : 在驱动层快照ATMR共享向量的Break和一次性Update待处理状态，供应用运行时按安全优先级分发。
- *---------------------------------------------------------------------------*/
-uint8_t drv_pwm_irq_pending_isr(void)
-{
-    uint8_t pending = 0U;
-
-    if (DDL_ATMR_IsActiveFlag_BRK(ATMR) != 0U)
-    {
-        pending |= DRV_PWM_IRQ_BREAK;
-    }
-    if ((DDL_ATMR_IsEnabledIT_UPDATE(ATMR) != 0U) &&
-        (DDL_ATMR_IsActiveFlag_UPDATE(ATMR) != 0U))
-    {
-        pending |= DRV_PWM_IRQ_UPDATE;
-    }
-    return pending;
 }
 
 /*---------------------------------------------------------------------------*

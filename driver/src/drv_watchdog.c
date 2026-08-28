@@ -1,4 +1,4 @@
-#include "drv_watchdog.h"
+#include "driver.h"
 
 #include "board_config.h"
 #include "g32f031_ddl_iwdt.h"
@@ -48,7 +48,7 @@ bool drv_watchdog_init(uint32_t timeout_ms)
  * Name        : void drv_watchdog_feed(void)
  * Input       : 无
  * Output      : 无
- * Description : 重装IWDT计数器；生产代码只允许应用健康监督调用。
+ * Description : 重装IWDT计数器；生产代码只允许Service健康监督调用。
  *---------------------------------------------------------------------------*/
 void drv_watchdog_feed(void)
 {

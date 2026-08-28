@@ -1,20 +1,32 @@
-# Keil 工程
+# Keil ARM Compiler 6 工程
 
-1. 安装 `Geehy.G32F031_DFP.1.0.1` 或兼容的新版本设备包。
-2. 用 Keil MDK 打开 `project/AuroraControl.uvprojx`。
-3. 工具链选择 ARM Compiler 6，执行 `Rebuild All`。
-4. 必须检查 `.map`：代码区不能进入 `0x0000FC00～0x0000FFFF`，该区由内部 Flash 双页参数存储使用。
-5. 当前 `BOARD_POWER_OUTPUT_ALLOWED=0`，不得为了消除“无PWM”而改为1。
+v0.8.3 后 Keil 工程直接位于 `project/`，不再额外套 `project/keil/`。
 
-默认构建使用PA10/PA11连接蓝牙。需要PB7/PB8输出`[GE_DEBUG]`日志时，使用ARM Compiler 6编译宏：
+## 文件
 
 ```text
-BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
-DEBUG_ENABLE=1
+project/
+├─ AuroraControl.uvprojx
+├─ AuroraControl.sct
+└─ README.md
 ```
 
-Debug模式与蓝牙模式独占USART，并关闭产品协议解析和主动遥测。
+打开 `AuroraControl.uvprojx` 后使用 Geehy G32F031 DFP 和 ARM Compiler 6 构建。
 
-Host 测试通过不能替代本工程的 ARM Compiler 6 链接、下载和台架波形验证。
+## 两层源码关系
 
-目标入口、应用运行时和中断桥接位于 `app/src/main.c` 与 `app/src/interrupts.c`；本目录只保存 Keil 工程、scatter 和用户工程配置。
+```text
+app/src/*.c
+    ↓ 只调用
+app/inc/*.h + driver/inc/*.h
+    ↓
+driver/src/*.c
+    ↓
+vendor CMSIS / Device / DDL
+```
+
+`app/src/main.c`包含系统入口、应用调度、旧Service职责和业务组合；`app/src/interrupts.c`只做Driver应答、快速关波和事件投递。APP不得直接包含G32/DDL寄存器头。
+
+## 当前安全状态
+
+`BOARD_POWER_OUTPUT_ALLOWED`继续保持0。Host/Clang语法检查通过不能替代Keil AC6真实链接、MAP检查、弱光PVD启动波形、继电器预充和300W功率台架。

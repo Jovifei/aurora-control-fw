@@ -47,18 +47,6 @@
 #define BOARD_PIN_DEBUG_TX_NUMBER                   (7U)
 #define BOARD_PIN_DEBUG_RX_PORT                     ('B')
 #define BOARD_PIN_DEBUG_RX_NUMBER                   (8U)
-/* USART路由模式：默认使用PA10/PA11承载蓝牙产品协议。 */
-#define BOARD_USART_MODE_BLUETOOTH                  (0U)
-/* USART路由模式：切换到PB7/PB8承载GE_DEBUG日志。 */
-#define BOARD_USART_MODE_DEBUG                      (1U)
-/* 当前构建路由；仅允许蓝牙和Debug二选一。 */
-#ifndef BOARD_USART_MODE
-#define BOARD_USART_MODE                            BOARD_USART_MODE_BLUETOOTH
-#endif
-#if (BOARD_USART_MODE != BOARD_USART_MODE_BLUETOOTH) && \
-    (BOARD_USART_MODE != BOARD_USART_MODE_DEBUG)
-#error "BOARD_USART_MODE must select Bluetooth or Debug route"
-#endif
 /* PB9：运行指示灯。 */
 #define BOARD_PIN_LED_RUN_PORT                      ('B')
 #define BOARD_PIN_LED_RUN_NUMBER                    (9U)
@@ -80,12 +68,12 @@
 #define BOARD_ADC_INDEX_NTC_MOS                     (4U)
 #define BOARD_ADC_INDEX_NTC_AMB                     (5U)
 /* G32 ADC物理通道号。 */
-#define BOARD_ADC_CH_PV_I                           (1U)  /* PA8。 */
-#define BOARD_ADC_CH_PV_U                           (2U)  /* PA9。 */
-#define BOARD_ADC_CH_BAT_U                          (3U)  /* PB0。 */
-#define BOARD_ADC_CH_BUS_U                          (4U)  /* PB1。 */
-#define BOARD_ADC_CH_NTC_MOS                        (5U)  /* PB12。 */
-#define BOARD_ADC_CH_NTC_AMB                        (6U)  /* PB5。 */
+#define BOARD_ADC_CH_PV_I                           (1U)
+#define BOARD_ADC_CH_PV_U                           (2U)
+#define BOARD_ADC_CH_BAT_U                          (3U)
+#define BOARD_ADC_CH_BUS_U                          (4U)
+#define BOARD_ADC_CH_NTC_MOS                        (5U)
+#define BOARD_ADC_CH_NTC_AMB                        (6U)
 /* ADC就绪等待循环上限；只用于初始化失败判定。 */
 #define BOARD_ADC_READY_TIMEOUT_LOOPS               (100000UL)
 
@@ -93,27 +81,30 @@
 #define BOARD_ADC_FULL_SCALE_CODE                   (4095L)
 /* 模拟参考电压名义值，mV；实板标定前不得改为已验证。 */
 #define BOARD_ADC_REFERENCE_MV                      (3300L)
-/* PV_I：3mΩ分流器×内部16倍OPA，约16.79mA/码。 */
+/*
+ * PV_I：3mΩ分流器×内部16倍OPA，3.3V/12bit下理论约16.79mA/码。
+ * 300W新板没有旧120W的VDDA/2电流偏置，零电流理论码接近0；实际零点必须在PWM/Relay关闭时运行时校准。
+ * 正向电流使内部OPA输出升高，因此极性候选为+1；BOARD_GATE_ANALOG_CALIBRATED保持0直到实板方向和比例校准完成。
+ */
 #define BOARD_ADC_PV_I_GAIN_NUM                     (16790L)
 #define BOARD_ADC_PV_I_GAIN_DEN                     (1000L)
-#define BOARD_ADC_PV_I_ZERO_CODE                    (2048)
-#define BOARD_ADC_PV_I_POLARITY                     (-1)
+#define BOARD_ADC_PV_I_ZERO_CODE                    (0)
+#define BOARD_ADC_PV_I_POLARITY                     (1)
+/* 12bit ADC接近满量程判据；BST_U达到该区间时视为量程不可信，不允许据此吸合Relay。 */
+#define BOARD_ADC_NEAR_FULL_SCALE_CODE              (4080U)
 /* PV_U：75k/3k分压，比例26。 */
 #define BOARD_ADC_PV_U_DIVIDER_NUM                  (26L)
 #define BOARD_ADC_PV_U_DIVIDER_DEN                  (1L)
 /* BAT_U：15M/510k分压，比例15510/510。 */
 #define BOARD_ADC_BAT_U_DIVIDER_NUM                 (15510L)
 #define BOARD_ADC_BAT_U_DIVIDER_DEN                 (510L)
-/* BST_U：125k/5k分压，比例26。 */
+/*
+ * BST_U：125k/5k分压，比例26。3.3V ADC理论满量程仅约85.8V。
+ * 对72V高SOC档位存在量程风险：87.2V/93V均会超过ADC参考。软件必须把近满量程标记为不可信，
+ * 硬件分压是否调整列为v0.9.0 P0台架/硬件整改项，不能靠软件系数掩盖。
+ */
 #define BOARD_ADC_BUS_U_DIVIDER_NUM                 (26L)
 #define BOARD_ADC_BUS_U_DIVIDER_DEN                 (1L)
-/* 板载MOS NTC：R37=5.1K上拉、R42=100K 1%、B=3950。 */
-#define BOARD_NTC_MOS_PULLUP_OHM                    (5100L)
-#define BOARD_NTC_MOS_R25_OHM                       (100000L)
-#define BOARD_NTC_MOS_BETA_KELVIN                   (3950L)
-#define BOARD_NTC_MOS_REFERENCE_TEMP_DC             (250)
-#define BOARD_NTC_MOS_MIN_TEMP_DC                   (-400)
-#define BOARD_NTC_MOS_MAX_TEMP_DC                   (1250)
 
 /* ATMR计数时钟，Hz。 */
 #define BOARD_PWM_TIMER_CLOCK_HZ                    (64000000UL)
@@ -158,14 +149,8 @@
 #define BOARD_RELAY_ACTIVE_HIGH                     (1U)
 /* 产品UART波特率。 */
 #define BOARD_UART_BAUDRATE                         (115200UL)
-/* USART ISR单次最多搬运的RX字节数。 */
-#define BOARD_UART_ISR_RX_BUDGET                    (32U)
-/* 应用运行层单次最多消费的RX字节数。 */
-#define BOARD_UART_APP_RX_BUDGET                    (64U)
 /* Driver层TX环形缓冲长度。 */
 #define BOARD_UART_TX_BUFFER_SIZE                   (256U)
-/* 应用运行层RX环形缓冲长度。 */
-#define BOARD_UART_RX_BUFFER_SIZE                   (256U)
 
 /* IWDT名义低速时钟，Hz；实板受LSI容差影响。 */
 #define BOARD_WATCHDOG_CLOCK_HZ                     (40000UL)

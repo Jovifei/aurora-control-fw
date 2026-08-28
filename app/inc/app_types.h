@@ -26,11 +26,6 @@ extern "C" {
 /* 旧产品协议允许的最大数据载荷长度。 */
 #define AURORA_PROTOCOL_MAX_DATA                    (127U)
 
-/* ADC标定类型：线性通道使用零点/增益。 */
-#define AURORA_ADC_CALIBRATION_LINEAR               (0U)
-/* ADC标定类型：NTC通道使用板级Beta参数换算温度。 */
-#define AURORA_ADC_CALIBRATION_NTC_BETA             (1U)
-
 /* 测量有效位：PV电压已由ADC直接测得。 */
 #define AURORA_MEAS_VALID_PV_V                      (1UL << 0)
 /* 测量有效位：PV电流已由ADC直接测得。 */
@@ -47,6 +42,8 @@ extern "C" {
 #define AURORA_MEAS_VALID_PV_POWER                  (1UL << 6)
 /* 测量有效位：电池电流为功率换算估算值，不是独立ADC实测。 */
 #define AURORA_MEAS_VALID_BAT_I_EST                 (1UL << 7)
+/* 测量诊断位：BST_U原始码接近3.3V ADC满量程，当前分压下该电压不可用于Relay压差判断。 */
+#define AURORA_MEAS_DIAG_BUS_ADC_SATURATED          (1UL << 0)
 
 /* 故障位：MOS支路快速过流比较器触发。 */
 #define AURORA_FAULT_FAST_MOS_OCP                   (1UL << 0)
@@ -94,8 +91,10 @@ extern "C" {
 #define AURORA_FAULT_AMB_NTC_OPEN                   (1UL << 21)
 /* 故障位：环境NTC短路判据。 */
 #define AURORA_FAULT_AMB_NTC_SHORT                  (1UL << 22)
-/* 故障位：MOS NTC开路、短路或换算范围非法，必须立即停止功率输出。 */
-#define AURORA_FAULT_MOS_TEMP_INVALID               (1UL << 23)
+/* 故障位：PV_I在PWM开/关状态下与物理行为不一致，提示零点/OPA/极性/采样链异常。 */
+#define AURORA_FAULT_PV_CURRENT_PLAUSIBILITY       (1UL << 23)
+/* 故障位：BST_U ADC进入近满量程，当前26:1分压下不允许据此闭合继电器。 */
+#define AURORA_FAULT_BUS_ADC_SATURATION             (1UL << 24)
 
 /* 通用函数返回状态。 */
 typedef enum
@@ -135,12 +134,22 @@ typedef enum
     AURORA_MEAS_QUALITY_ESTIMATED                    /* 由其他物理量和效率估算。 */
 } aurora_measurement_quality_t;
 
+/* NTC物理状态；使用uint8_t避免目标编译器枚举宽度影响测量快照布局。 */
+typedef uint8_t aurora_ntc_status_t;
+/* NTC采样正常，可参与温度计算与保护。 */
+#define AURORA_NTC_STATUS_OK                        ((aurora_ntc_status_t)0U)
+/* NTC下拉支路开路，ADC节点被5.1K上拉至接近VDD。 */
+#define AURORA_NTC_STATUS_OPEN                      ((aurora_ntc_status_t)1U)
+/* NTC或采样节点近似短接GND，ADC码接近0。 */
+#define AURORA_NTC_STATUS_SHORT                     ((aurora_ntc_status_t)2U)
+
 /* 经过滤波、标定和单位换算后的原子测量快照。 */
 typedef struct
 {
     uint32_t sequence;                               /* 每发布一次完整快照递增。 */
     uint32_t timestamp_ms;                           /* 该快照对应的采样时间。 */
     uint32_t valid_mask;                             /* AURORA_MEAS_VALID_*有效位。 */
+    uint32_t diagnostic_mask;                        /* AURORA_MEAS_DIAG_*诊断位。 */
     int32_t pv_voltage_mv;                           /* PV输入电压，mV。 */
     int32_t pv_current_ma;                           /* PV输入电流，mA。 */
     int32_t pv_power_mw;                             /* PV输入功率，mW。 */
@@ -149,11 +158,18 @@ typedef struct
     int32_t battery_current_est_ma;                  /* 电池电流估算值，mA。 */
     aurora_measurement_quality_t battery_current_quality; /* 电池电流来源质量。 */
     uint8_t battery_current_quality_reserved[3];     /* 显式补齐质量枚举后的字节。 */
-    int16_t mos_temp_dC;                             /* MOS温度，0.1°C。 */
-    int16_t ambient_temp_dC;                         /* 环境温度，0.1°C。 */
+    uint16_t pv_current_raw;                         /* PV_I去极值平均后的ADC码。 */
+    uint16_t bus_voltage_raw;                        /* BST_U去极值平均后的ADC码。 */
+    uint16_t mos_ntc_raw;                            /* MOS NTC去极值平均ADC码。 */
+    uint16_t ambient_ntc_raw;                        /* 环境NTC去极值平均ADC码。 */
+    int16_t mos_temp_dC;                             /* MOS滤波温度，0.1°C。 */
+    int16_t ambient_temp_dC;                         /* 环境滤波温度，0.1°C。 */
+    aurora_ntc_status_t mos_ntc_status;              /* MOS NTC物理开/短/正常状态。 */
+    aurora_ntc_status_t ambient_ntc_status;          /* 环境NTC物理开/短/正常状态。 */
+    uint8_t ntc_status_reserved[2];                  /* 显式补齐。 */
 } aurora_measurement_t;
 
-/* 单个ADC逻辑通道的线性或NTC标定参数。 */
+/* 单个ADC逻辑通道的线性标定参数。 */
 typedef struct
 {
     int32_t gain_num;                                /* 增益分子，输出物理单位/码。 */
@@ -162,17 +178,6 @@ typedef struct
     int16_t zero_code;                               /* 双向电流通道的零电流码值。 */
     int8_t polarity;                                 /* +1正向，-1反向。 */
     bool valid;                                      /* 完成标定且允许参与控制。 */
-    uint8_t kind;                                    /* AURORA_ADC_CALIBRATION_*类型。 */
-    uint8_t layout_reserved;                         /* 显式补齐标定类型字段。 */
-    uint16_t ntc_layout_reserved;                    /* 显式补齐NTC参数起始对齐。 */
-    int32_t ntc_pullup_ohm;                          /* NTC上拉电阻，单位ohm。 */
-    int32_t ntc_r25_ohm;                             /* NTC在25°C的标称阻值，单位ohm。 */
-    int32_t ntc_beta_kelvin;                         /* NTC Beta参数，单位K。 */
-    int32_t ntc_full_scale_code;                     /* ADC满量程码值，单位code。 */
-    int16_t ntc_reference_temp_dc;                   /* Beta参考温度，0.1°C。 */
-    int16_t ntc_min_temp_dc;                         /* 有效换算最低温度，0.1°C。 */
-    int16_t ntc_max_temp_dc;                         /* 有效换算最高温度，0.1°C。 */
-    int16_t ntc_value_reserved;                      /* 显式补齐标定对象尾部。 */
 } aurora_adc_calibration_t;
 
 /* 全部ADC逻辑通道的标定集合。 */
@@ -233,7 +238,6 @@ typedef struct
     uint32_t float_end_current_ma;                   /* 铅酸浮充结束电流，mA。 */
     aurora_battery_chem_t chemistry;                 /* 化学体系。 */
     aurora_battery_pack_t pack;                      /* 标称电压平台。 */
-    uint8_t profile_reserved[2];                     /* 显式补齐到32位边界，避免AC6隐式尾部填充。 */
 } aurora_charge_profile_t;
 
 /* 充电状态机给上层的“电池侧目标”，不直接冒充PV输入功率。 */
@@ -248,7 +252,8 @@ typedef struct
     bool weak_light;                                 /* true表示PV功率不足。 */
     bool input_limited;                              /* true表示PV电流/电压/功率包络正在限幅。 */
     bool thermal_limited;                            /* true表示温度包络正在限幅。 */
-    uint8_t output_reserved[3];                      /* 显式补齐布尔字段。 */
+    bool restart_required;                           /* true表示本轮阶段转换必须先退出RUN并重新做电池稳定准入。 */
+    uint8_t output_reserved[2];                      /* 显式补齐布尔字段。 */
 } aurora_charge_output_t;
 
 /* MPPT外环和PV电压PI输出。 */

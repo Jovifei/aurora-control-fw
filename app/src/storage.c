@@ -134,7 +134,7 @@ void aurora_storage_mark_dirty(aurora_storage_ctx_t *ctx, uint32_t now_ms)
  * Name        : size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx, uint8_t *page, size_t page_size, bool committed)
  * Input       : ctx - 存储上下文；page - 页缓冲区；page_size - 缓冲区大小；committed - 是否写入提交标记
  * Output      : 有效记录长度；参数无效或缓冲区过小时返回0
- * Description : 序列化页头与设置载荷并计算CRC；Commit Marker可留在擦除态，供应用运行时最后单独编程。
+ * Description : 序列化页头与设置载荷并计算CRC；Commit Marker可留在擦除态，供Service最后单独编程。
  *---------------------------------------------------------------------------*/
 size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
                                   uint8_t *page,

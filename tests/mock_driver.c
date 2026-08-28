@@ -164,28 +164,6 @@ size_t mock_uart_tx_length(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : const uint8_t *mock_uart_tx_data(void)
- * Input       : 无
- * Output      : Host模拟UART累计发送缓存首地址
- * Description : 返回当前发送缓存，供Debug日志测试检查前缀和模块标签。
- *---------------------------------------------------------------------------*/
-const uint8_t *mock_uart_tx_data(void)
-{
-    return g_uart_tx;
-}
-
-/*---------------------------------------------------------------------------*
- * Name        : void mock_uart_clear_tx(void)
- * Input       : 无
- * Output      : 无
- * Description : 清空Host模拟UART发送缓存，不改变其他模拟外设状态。
- *---------------------------------------------------------------------------*/
-void mock_uart_clear_tx(void)
-{
-    g_uart_tx_length = 0U;
-}
-
-/*---------------------------------------------------------------------------*
  * Name        : bool mock_relay(void)
  * Input       : 无
  * Output      : true表示继电器控制命令为闭合；false表示命令为断开
@@ -200,7 +178,7 @@ bool mock_relay(void)
  * Name        : uint16_t *mock_adc_block(uint8_t index)
  * Input       : index - 模拟DMA半缓冲索引，只允许0或1
  * Output      : 有效索引返回可写采样块指针；无效索引返回NULL
- * Description : 向测试代码暴露指定ADC完成块，以便构造完整扫描数据后再触发应用运行时发布。
+ * Description : 向测试代码暴露指定ADC完成块，以便构造完整扫描数据后再触发Service发布。
  *---------------------------------------------------------------------------*/
 uint16_t *mock_adc_block(uint8_t index)
 {
@@ -270,7 +248,7 @@ void drv_irq_restore(aurora_irq_state_t state)
  * Name        : void drv_irq_configure_priorities(void)
  * Input       : 无
  * Output      : 无
- * Description : Host无需配置NVIC；保留空实现以验证应用初始化调用链完整。
+ * Description : Host无需配置NVIC；保留空实现以验证Service初始化调用链完整。
  *---------------------------------------------------------------------------*/
 void drv_irq_configure_priorities(void)
 {
@@ -338,7 +316,7 @@ size_t drv_adc_block_words(void)
  * Name        : uint8_t drv_adc_dma_irq_ack(void)
  * Input       : 无
  * Output      : Host默认返回0，表示没有待确认的DMA完成或错误事件
- * Description : 保留目标端HT/TC/TE中断应答接口；测试通过应用运行时回调直接发布完成块。
+ * Description : 保留目标端HT/TC/TE中断应答接口；测试通过Service回调直接发布完成块。
  *---------------------------------------------------------------------------*/
 uint8_t drv_adc_dma_irq_ack(void)
 {
@@ -445,7 +423,7 @@ bool drv_pwm_arm(void)
  * Name        : bool drv_pwm_output_active(void)
  * Input       : 无
  * Output      : true表示Host模拟主输出已使能；false表示输出关闭
- * Description : 返回当前PWM放行状态，供Flash门禁和应用健康检查使用。
+ * Description : 返回当前PWM放行状态，供Flash门禁和Service健康检查使用。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_output_active(void)
 {
@@ -494,7 +472,7 @@ bool drv_pwm_clear_break_latch(void)
  * Name        : uint32_t drv_pwm_applied_sequence(void)
  * Input       : 无
  * Output      : 最近一次已由模拟自然UEV确认生效的提交序号
- * Description : 返回active CCR对应的提交代次，供应用判断首次零Duty是否真正生效。
+ * Description : 返回active CCR对应的提交代次，供Service判断首次零Duty是否真正生效。
  *---------------------------------------------------------------------------*/
 uint32_t drv_pwm_applied_sequence(void)
 {
@@ -631,7 +609,7 @@ bool drv_uart_tx_busy(void)
  * Name        : bool drv_uart_rx_ready_isr(void)
  * Input       : 无
  * Output      : Host固定返回false，表示没有模拟RX字节待取
- * Description : 当前Host测试通过应用运行时接口直接注入接收字节，不使用真实USART状态寄存器。
+ * Description : 当前Host测试通过Service接口直接注入接收字节，不使用真实USART状态寄存器。
  *---------------------------------------------------------------------------*/
 bool drv_uart_rx_ready_isr(void)
 {
@@ -744,7 +722,7 @@ bool drv_watchdog_init(uint32_t timeout_ms)
  * Name        : void drv_watchdog_feed(void)
  * Input       : 无
  * Output      : 无
- * Description : 累加Host喂狗次数，用于断言只有应用健康监督能够刷新看门狗。
+ * Description : 累加Host喂狗次数，用于断言只有Service健康监督能够刷新看门狗。
  *---------------------------------------------------------------------------*/
 void drv_watchdog_feed(void)
 {

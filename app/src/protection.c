@@ -2,6 +2,7 @@
 
 #include "app_config.h"
 
+#include <limits.h>
 #include <string.h>
 
 /* Protection定时器语义索引；每项保护拥有独立真实毫秒计时。 */
@@ -36,7 +37,11 @@ typedef enum
     TIMER_AMB_NTC_OPEN_TRIP,
     TIMER_AMB_NTC_OPEN_RECOVER,
     TIMER_AMB_NTC_SHORT_TRIP,
-    TIMER_AMB_NTC_SHORT_RECOVER
+    TIMER_AMB_NTC_SHORT_RECOVER,
+    TIMER_BUS_ADC_SAT_RECOVER,
+    TIMER_PV_I_RUN_NEG_TRIP,
+    TIMER_PV_I_OFF_ABS_TRIP,
+    TIMER_PV_I_PLAUS_RECOVER
 } protection_timer_index_t;
 
 /*---------------------------------------------------------------------------*
@@ -133,6 +138,21 @@ static int32_t current_threshold_ma(int32_t base_ma, int32_t numerator)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static int32_t abs_current_ma(int32_t current_ma)
+ * Input       : current_ma - 有符号PV电流
+ * Output      : 饱和绝对值
+ * Description : PV_I合理性诊断避免INT32_MIN取反溢出。
+ *---------------------------------------------------------------------------*/
+static int32_t abs_current_ma(int32_t current_ma)
+{
+    if (current_ma == INT32_MIN)
+    {
+        return INT32_MAX;
+    }
+    return (current_ma < 0) ? -current_ma : current_ma;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : void aurora_protection_init(aurora_protection_ctx_t *ctx,
  *               uint32_t now_ms)
  * Input       : ctx - 保护上下文；now_ms - 当前毫秒
@@ -173,9 +193,10 @@ void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
  * Name        : void aurora_protection_step(aurora_protection_ctx_t *ctx,
  *               const aurora_measurement_t *sample,
  *               const aurora_charge_profile_t *profile,
- *               bool boost_output_active, uint32_t now_ms)
+ *               bool pv_current_calibrated, bool boost_output_active, uint32_t now_ms)
  * Input       : ctx - 保护上下文；sample - 最新测量；profile - 当前电池档案；
- *               boost_output_active - 物理Boost PWM当前是否真正输出；now_ms - 当前毫秒
+ *               pv_current_calibrated - PV_I运行时零点已经完成；boost_output_active - 物理Boost PWM当前是否真正输出；
+ *               now_ms - 当前毫秒
  * Output      : 无
  * Description : 按V2.7逐项执行PV/BAT/OCP/过功率/温度/NTC真实毫秒保护；
  *               软件PV OCP/过功率仅在物理PWM真正输出后计时，避免启动前零点瞬态误报。
@@ -183,6 +204,7 @@ void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
 void aurora_protection_step(aurora_protection_ctx_t *ctx,
                             const aurora_measurement_t *sample,
                             const aurora_charge_profile_t *profile,
+                            bool pv_current_calibrated,
                             bool boost_output_active,
                             uint32_t now_ms)
 {
@@ -197,6 +219,21 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
     if ((ctx == NULL) || (sample == NULL) || (profile == NULL))
     {
         return;
+    }
+
+    /* BST_U近满量程时立即进入独立故障；Measurement同时撤销BUS有效位，Relay二次复核必然拒绝闭合。 */
+    if ((sample->diagnostic_mask & AURORA_MEAS_DIAG_BUS_ADC_SATURATED) != 0U)
+    {
+        set_fault(ctx, AURORA_FAULT_BUS_ADC_SATURATION, true, now_ms);
+        (void)timer_elapsed(ctx, TIMER_BUS_ADC_SAT_RECOVER, false,
+                            AURORA_BUS_ADC_SAT_RECOVER_DELAY_MS, now_ms);
+        return;
+    }
+    if (timer_elapsed(ctx, TIMER_BUS_ADC_SAT_RECOVER,
+                      (sample->diagnostic_mask & AURORA_MEAS_DIAG_BUS_ADC_SATURATED) == 0U,
+                      AURORA_BUS_ADC_SAT_RECOVER_DELAY_MS, now_ms))
+    {
+        clear_auto_fault(ctx, AURORA_FAULT_BUS_ADC_SATURATION);
     }
 
     if ((sample->sequence != 0U) &&
@@ -337,6 +374,32 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         clear_auto_fault(ctx, AURORA_FAULT_PV_OVERCURRENT);
     }
 
+    /*
+     * PV_I物理合理性：运行时明显反向电流持续10ms，或PWM关闭时仍出现>=3A持续1.5s，
+     * 都提示零点/OPA/极性/采样链异常。恢复必须PWM关闭且|PV_I|<=0.5A持续30s。
+     */
+    trip = timer_elapsed(ctx, TIMER_PV_I_RUN_NEG_TRIP,
+                         pv_current_calibrated && boost_output_active &&
+                         sample->pv_current_ma <= AURORA_PV_I_RUN_NEGATIVE_TRIP_MA,
+                         AURORA_PV_I_RUN_NEGATIVE_DELAY_MS, now_ms) ||
+           timer_elapsed(ctx, TIMER_PV_I_OFF_ABS_TRIP,
+                         pv_current_calibrated && !boost_output_active &&
+                         abs_current_ma(sample->pv_current_ma) >= AURORA_PV_I_OFF_ABS_TRIP_MA,
+                         AURORA_PV_I_OFF_ABS_DELAY_MS, now_ms);
+    recover = timer_elapsed(ctx, TIMER_PV_I_PLAUS_RECOVER,
+                            !boost_output_active &&
+                            abs_current_ma(sample->pv_current_ma) <=
+                                AURORA_PV_I_PLAUS_RECOVER_ABS_MA,
+                            AURORA_PV_I_PLAUS_RECOVER_DELAY_MS, now_ms);
+    if (trip)
+    {
+        set_fault(ctx, AURORA_FAULT_PV_CURRENT_PLAUSIBILITY, true, now_ms);
+    }
+    else if (recover)
+    {
+        clear_auto_fault(ctx, AURORA_FAULT_PV_CURRENT_PLAUSIBILITY);
+    }
+
     /* 过功率：Rated×1.2持续5s，降回Rated并稳定30s后允许重新启动。 */
     {
         const uint32_t trip_power_mw =
@@ -360,21 +423,10 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         }
     }
 
-    /* MOS NTC换算无效必须立即锁存；温度恢复有效只撤销active，不自动清历史锁存。 */
-    if ((sample->valid_mask & AURORA_MEAS_VALID_MOS_TEMP) == 0U)
+    /* MOS NTC：物理状态由Measurement按原始ADC方向判定，正常时才参与温度保护。 */
     {
-        set_fault(ctx, AURORA_FAULT_MOS_TEMP_INVALID, true, now_ms);
-    }
-    else
-    {
-        ctx->active_mask &= (uint32_t)~AURORA_FAULT_MOS_TEMP_INVALID;
-    }
-
-    /* MOS NTC开/短路单独分类；传感器异常时不再叠加普通MOS温度故障。 */
-    if ((sample->valid_mask & AURORA_MEAS_VALID_MOS_TEMP) != 0U)
-    {
-        const bool open = sample->mos_temp_dC >= AURORA_NTC_OPEN_TEMP_DC;
-        const bool shorted = sample->mos_temp_dC <= AURORA_NTC_SHORT_TEMP_DC;
+        const bool open = sample->mos_ntc_status == AURORA_NTC_STATUS_OPEN;
+        const bool shorted = sample->mos_ntc_status == AURORA_NTC_STATUS_SHORT;
 
         if (timer_elapsed(ctx, TIMER_MOS_NTC_OPEN_TRIP, open,
                           AURORA_NTC_FAULT_DELAY_MS, now_ms))
@@ -398,7 +450,8 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             clear_auto_fault(ctx, AURORA_FAULT_MOS_NTC_SHORT);
         }
 
-        if (!open && !shorted)
+        if (!open && !shorted &&
+            ((sample->valid_mask & AURORA_MEAS_VALID_MOS_TEMP) != 0U))
         {
             trip = timer_elapsed(ctx, TIMER_MOS_TEMP_TRIP,
                                  sample->mos_temp_dC > AURORA_MOS_TRIP_TEMP_DC,
@@ -417,11 +470,10 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         }
     }
 
-    /* 环境NTC同样单独分类；普通环境温度只在传感器范围有效时参与保护。 */
-    if ((sample->valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U)
+    /* 环境NTC：开路=ADC靠近VDD，短路=ADC靠近GND；正常状态才参与高低温保护和铅酸温补。 */
     {
-        const bool open = sample->ambient_temp_dC >= AURORA_NTC_OPEN_TEMP_DC;
-        const bool shorted = sample->ambient_temp_dC <= AURORA_NTC_SHORT_TEMP_DC;
+        const bool open = sample->ambient_ntc_status == AURORA_NTC_STATUS_OPEN;
+        const bool shorted = sample->ambient_ntc_status == AURORA_NTC_STATUS_SHORT;
 
         if (timer_elapsed(ctx, TIMER_AMB_NTC_OPEN_TRIP, open,
                           AURORA_NTC_FAULT_DELAY_MS, now_ms))
@@ -445,7 +497,8 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             clear_auto_fault(ctx, AURORA_FAULT_AMB_NTC_SHORT);
         }
 
-        if (!open && !shorted)
+        if (!open && !shorted &&
+            ((sample->valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U))
         {
             trip = timer_elapsed(ctx, TIMER_AMB_HIGH_TRIP,
                                  sample->ambient_temp_dC > AURORA_AMB_HIGH_TRIP_TEMP_DC,
@@ -467,6 +520,7 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             }
         }
     }
+
 }
 
 /*---------------------------------------------------------------------------*

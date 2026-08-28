@@ -207,7 +207,7 @@ static uint32_t clamp_power(int64_t power_mw)
  *               uint32_t current_ma)
  * Input       : voltage_mv - 电池电压，mV；current_ma - 目标电流，mA
  * Output      : 电池侧前馈功率，mW
- * Description : 用64位中间量计算Vbat×Ibat，不把该电池侧值直接当成PV输入功率。
+ * Description : 用64位中间量计算Vbat×Itarget，不把该电池侧值直接当成PV输入功率。
  *---------------------------------------------------------------------------*/
 static uint32_t current_feedforward_mw(uint32_t voltage_mv, uint32_t current_ma)
 {
@@ -215,6 +215,124 @@ static uint32_t current_feedforward_mw(uint32_t voltage_mv, uint32_t current_ma)
         ((uint64_t)voltage_mv * current_ma) / AURORA_MV_MA_PER_MW;
     return (power_mw > AURORA_RATED_POWER_MW) ?
                AURORA_RATED_POWER_MW : (uint32_t)power_mw;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static uint32_t lead_cell_count(aurora_battery_pack_t pack)
+ * Input       : pack - 48/60/72V平台
+ * Output      : 2V铅酸单格数
+ * Description : 旧120W温补按每个2V cell计算；48/60/72V分别按24/30/36格。
+ *---------------------------------------------------------------------------*/
+static uint32_t lead_cell_count(aurora_battery_pack_t pack)
+{
+    switch (pack)
+    {
+    case AURORA_PACK_48V: return 24U;
+    case AURORA_PACK_60V: return 30U;
+    case AURORA_PACK_72V: return 36U;
+    default: return 0U;
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static uint32_t add_mv_clamped(uint32_t base_mv, int64_t delta_mv)
+ * Input       : base_mv - 基础电压；delta_mv - 有符号补偿量
+ * Output      : 非负32位电压
+ * Description : 统一处理铅酸温补，避免负补偿与无符号量混算。
+ *---------------------------------------------------------------------------*/
+static uint32_t add_mv_clamped(uint32_t base_mv, int64_t delta_mv)
+{
+    int64_t value = (int64_t)base_mv + delta_mv;
+    if (value <= 0LL)
+    {
+        return 0U;
+    }
+    return (value > UINT32_MAX) ? UINT32_MAX : (uint32_t)value;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void update_effective_profile(aurora_charger_ctx_t *ctx,
+ *               const aurora_measurement_t *sample)
+ * Input       : ctx - 充电上下文；sample - 最新测量
+ * Output      : 无
+ * Description : 继承120W铅酸25°C/-3mV°C/cell温补；锂/钠保持基础档案。正温补受固定Fast OV安全裕量钳制。
+ *---------------------------------------------------------------------------*/
+static void update_effective_profile(aurora_charger_ctx_t *ctx,
+                                     const aurora_measurement_t *sample)
+{
+    int32_t temp_dC;
+    uint32_t cells;
+    int64_t delta_mv;
+
+    ctx->profile = ctx->base_profile;
+    if ((ctx->base_profile.chemistry != AURORA_CHEM_LEAD) ||
+        ((sample->valid_mask & AURORA_MEAS_VALID_AMB_TEMP) == 0U) ||
+        (sample->ambient_ntc_status != AURORA_NTC_STATUS_OK))
+    {
+        return;
+    }
+
+    temp_dC = sample->ambient_temp_dC;
+    if (temp_dC < AURORA_LEAD_TEMP_COMP_MIN_DC)
+    {
+        temp_dC = AURORA_LEAD_TEMP_COMP_MIN_DC;
+    }
+    if (temp_dC > AURORA_LEAD_TEMP_COMP_MAX_DC)
+    {
+        temp_dC = AURORA_LEAD_TEMP_COMP_MAX_DC;
+    }
+
+    cells = lead_cell_count(ctx->base_profile.pack);
+    delta_mv = ((int64_t)(temp_dC - AURORA_LEAD_TEMP_COMP_REFERENCE_DC) *
+                AURORA_LEAD_TEMP_COMP_MV_PER_C_PER_CELL * cells) / 10LL;
+
+    if (delta_mv > 0LL)
+    {
+        const int64_t fast_safe_max =
+            (int64_t)ctx->base_profile.ov_fast_mv - AURORA_LEAD_TEMP_COMP_FAST_OV_GUARD_MV;
+        const int64_t max_positive = fast_safe_max - ctx->base_profile.cv_max_mv;
+        if (max_positive < 0LL)
+        {
+            delta_mv = 0LL;
+        }
+        else if (delta_mv > max_positive)
+        {
+            delta_mv = max_positive;
+        }
+    }
+
+    ctx->profile.cv_target_mv = add_mv_clamped(ctx->base_profile.cv_target_mv, delta_mv);
+    ctx->profile.cv_min_mv = add_mv_clamped(ctx->base_profile.cv_min_mv, delta_mv);
+    ctx->profile.cv_max_mv = add_mv_clamped(ctx->base_profile.cv_max_mv, delta_mv);
+    ctx->profile.float_target_mv = add_mv_clamped(ctx->base_profile.float_target_mv, delta_mv);
+    ctx->profile.float_min_mv = add_mv_clamped(ctx->base_profile.float_min_mv, delta_mv);
+    ctx->profile.float_max_mv = add_mv_clamped(ctx->base_profile.float_max_mv, delta_mv);
+    ctx->profile.full_voltage_mv = add_mv_clamped(ctx->base_profile.full_voltage_mv, delta_mv);
+    ctx->profile.ov_slow_mv = add_mv_clamped(ctx->base_profile.ov_slow_mv, delta_mv);
+    ctx->profile.ov_medium_mv = add_mv_clamped(ctx->base_profile.ov_medium_mv, delta_mv);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool condition_held(uint32_t *since_ms, bool condition,
+ *               uint32_t hold_ms, uint32_t now_ms)
+ * Input       : since_ms - 连续条件起点；condition - 当前条件；hold_ms - 目标时间；now_ms - 当前时间
+ * Output      : true表示条件已连续成立足够久
+ * Description : 充电状态转移使用真实毫秒而不是一次ADC越阈值就立即切换。
+ *---------------------------------------------------------------------------*/
+static bool condition_held(uint32_t *since_ms, bool condition,
+                           uint32_t hold_ms, uint32_t now_ms)
+{
+    if (!condition)
+    {
+        *since_ms = 0U;
+        return false;
+    }
+    if (*since_ms == 0U)
+    {
+        *since_ms = now_ms;
+        return hold_ms == 0U;
+    }
+    return (now_ms - *since_ms) >= hold_ms;
 }
 
 /*---------------------------------------------------------------------------*
@@ -231,10 +349,29 @@ static void enter_state(aurora_charger_ctx_t *ctx,
     ctx->state = state;
     ctx->state_since_ms = now_ms;
     ctx->tail_since_ms = 0U;
+    ctx->transition_since_ms = 0U;
+    ctx->float_low_voltage_since_ms = 0U;
+    ctx->recharge_since_ms = 0U;
+    ctx->cc_to_cv_score = 0U;
     if (state == AURORA_CHARGE_FLOAT)
     {
-        ctx->float_start_ms = now_ms;
+        /* 120W成熟逻辑：先停止充电，等电池自然降到Float窗口中点，再真正启动Float。 */
+        ctx->float_started = false;
+        ctx->float_start_ms = 0U;
     }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void request_restart(aurora_charger_ctx_t *ctx,
+ *               uint32_t now_ms)
+ * Input       : ctx - 充电上下文；now_ms - 当前毫秒
+ * Output      : 无
+ * Description : 普通复充/Float维持失败只要求撤PWM并重新做电池稳定准入，不冒充PV_I传感器故障重新校零。
+ *---------------------------------------------------------------------------*/
+static void request_restart(aurora_charger_ctx_t *ctx, uint32_t now_ms)
+{
+    ctx->restart_required = true;
+    ctx->restart_since_ms = now_ms;
 }
 
 /*---------------------------------------------------------------------------*
@@ -364,7 +501,8 @@ void aurora_charger_init(aurora_charger_ctx_t *ctx,
     }
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->initialized = aurora_charge_profile_get(chemistry, pack, &ctx->profile);
+    ctx->initialized = aurora_charge_profile_get(chemistry, pack, &ctx->base_profile);
+    ctx->profile = ctx->base_profile;
     ctx->state = ctx->initialized ? AURORA_CHARGE_OFF : AURORA_CHARGE_FAULT;
     ctx->state_since_ms = now_ms;
     ctx->charge_start_ms = now_ms;
@@ -403,6 +541,19 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         enter_state(ctx, AURORA_CHARGE_FAULT, now_ms);
     }
 
+    update_effective_profile(ctx, sample);
+
+    /*
+     * Routine restart与PowerStage的10s BAT_STABILITY窗口对齐：期间Charge保持当前阶段，
+     * 但不继续给MPPT/PowerStage提供能量请求。传感器故障的重新校零由Protection路径负责。
+     */
+    if (ctx->restart_required &&
+        (elapsed_ms(now_ms, ctx->restart_since_ms) >= AURORA_BAT_STABILITY_WINDOW_MS))
+    {
+        ctx->restart_required = false;
+        ctx->restart_since_ms = 0U;
+    }
+
     if ((ctx->state != AURORA_CHARGE_OFF) &&
         (ctx->state != AURORA_CHARGE_COMPLETE) &&
         (ctx->state != AURORA_CHARGE_FAULT) &&
@@ -424,7 +575,9 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         break;
 
     case AURORA_CHARGE_TRICKLE:
-        if ((uint32_t)sample->battery_voltage_mv >= ctx->profile.trickle_exit_mv)
+        if (condition_held(&ctx->transition_since_ms,
+                           (uint32_t)sample->battery_voltage_mv >= ctx->profile.trickle_exit_mv,
+                           AURORA_TRICKLE_TO_CC_HOLD_MS, now_ms))
         {
             ctx->cc_integral_mw = 0LL;
             enter_state(ctx, AURORA_CHARGE_CC, now_ms);
@@ -434,16 +587,39 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     case AURORA_CHARGE_CC:
         if ((uint32_t)sample->battery_voltage_mv >= ctx->profile.cv_target_mv)
         {
-            ctx->cv_integral_mw =
-                current_feedforward_mw((uint32_t)sample->battery_voltage_mv,
-                                       ctx->profile.cc_current_ma);
-            enter_state(ctx, AURORA_CHARGE_CV, now_ms);
+            uint16_t increment = AURORA_CC_TO_CV_BASE_SCORE;
+            if ((uint32_t)sample->battery_voltage_mv >=
+                (ctx->profile.cv_target_mv + AURORA_CC_TO_CV_OVERDRIVE_1_MV))
+            {
+                increment = (uint16_t)(increment + AURORA_CC_TO_CV_OVERDRIVE_1_SCORE);
+            }
+            if ((uint32_t)sample->battery_voltage_mv >=
+                (ctx->profile.cv_target_mv + AURORA_CC_TO_CV_OVERDRIVE_2_MV))
+            {
+                increment = (uint16_t)(increment + AURORA_CC_TO_CV_OVERDRIVE_2_SCORE);
+            }
+            ctx->cc_to_cv_score = (uint16_t)(ctx->cc_to_cv_score + increment);
+            if (ctx->cc_to_cv_score > AURORA_CC_TO_CV_SCORE_THRESHOLD)
+            {
+                ctx->cv_integral_mw =
+                    current_feedforward_mw((uint32_t)sample->battery_voltage_mv,
+                                           ctx->profile.cc_current_ma);
+                enter_state(ctx, AURORA_CHARGE_CV, now_ms);
+            }
+        }
+        else if (((uint32_t)sample->battery_voltage_mv + AURORA_CC_TO_CV_OVERDRIVE_2_MV) <
+                 ctx->profile.cv_target_mv)
+        {
+            ctx->cc_to_cv_score = 0U;
         }
         break;
 
     case AURORA_CHARGE_CV:
-        if (((uint32_t)sample->battery_voltage_mv + AURORA_CHARGER_CV_RETURN_HYST_MV) <
-            ctx->profile.cv_target_mv)
+        if (condition_held(&ctx->transition_since_ms,
+                           !weak_light && !thermal_limited && !input_limited &&
+                           (((uint32_t)sample->battery_voltage_mv +
+                             AURORA_CHARGER_CV_RETURN_HYST_MV) < ctx->profile.cv_target_mv),
+                           AURORA_CV_TO_CC_HOLD_MS, now_ms))
         {
             ctx->cc_integral_mw = 0LL;
             enter_state(ctx, AURORA_CHARGE_CC, now_ms);
@@ -480,9 +656,32 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         break;
 
     case AURORA_CHARGE_FLOAT:
-        if (elapsed_ms(now_ms, ctx->float_start_ms) >= AURORA_FLOAT_TIME_MS)
+        if (!ctx->float_started)
+        {
+            const uint32_t midpoint_mv =
+                (ctx->profile.float_min_mv + ctx->profile.float_max_mv) / 2U;
+            if (condition_held(&ctx->transition_since_ms,
+                               (uint32_t)sample->battery_voltage_mv <= midpoint_mv,
+                               AURORA_FLOAT_ENTRY_HOLD_MS, now_ms))
+            {
+                ctx->float_started = true;
+                ctx->float_start_ms = now_ms;
+                ctx->transition_since_ms = 0U;
+                ctx->cv_integral_mw = 0LL;
+            }
+        }
+        else if (elapsed_ms(now_ms, ctx->float_start_ms) >= AURORA_FLOAT_TIME_MS)
         {
             enter_state(ctx, AURORA_CHARGE_COMPLETE, now_ms);
+        }
+        else if (condition_held(&ctx->float_low_voltage_since_ms,
+                                (uint32_t)sample->battery_voltage_mv < ctx->profile.float_min_mv,
+                                AURORA_FLOAT_LOW_VOLT_HOLD_MS, now_ms))
+        {
+            ctx->charge_start_ms = now_ms;
+            ctx->cc_integral_mw = 0LL;
+            request_restart(ctx, now_ms);
+            enter_state(ctx, AURORA_CHARGE_CC, now_ms);
         }
         else if (((sample->valid_mask & AURORA_MEAS_VALID_BAT_I_EST) != 0U) &&
                  !weak_light && !thermal_limited && !input_limited &&
@@ -496,7 +695,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
             {
                 ctx->tail_since_ms = now_ms;
             }
-            else if (elapsed_ms(now_ms, ctx->tail_since_ms) >= AURORA_TAIL_HOLD_MS)
+            else if (elapsed_ms(now_ms, ctx->tail_since_ms) >= AURORA_FLOAT_END_HOLD_MS)
             {
                 enter_state(ctx, AURORA_CHARGE_COMPLETE, now_ms);
             }
@@ -508,11 +707,17 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         break;
 
     case AURORA_CHARGE_COMPLETE:
-        if ((uint32_t)sample->battery_voltage_mv <= ctx->profile.recharge_mv)
+        if (condition_held(&ctx->recharge_since_ms,
+                           (uint32_t)sample->battery_voltage_mv <= ctx->profile.recharge_mv,
+                           AURORA_RECHARGE_HOLD_MS, now_ms))
         {
             ctx->charge_start_ms = now_ms;
             ctx->cc_integral_mw = 0LL;
-            enter_state(ctx, AURORA_CHARGE_CC, now_ms);
+            request_restart(ctx, now_ms);
+            enter_state(ctx,
+                        ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv) ?
+                            AURORA_CHARGE_TRICKLE : AURORA_CHARGE_CC,
+                        now_ms);
         }
         break;
 
@@ -524,6 +729,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     output.weak_light = weak_light;
     output.input_limited = input_limited;
     output.thermal_limited = thermal_limited;
+    output.restart_required = ctx->restart_required;
     output.voltage_target_mv = ctx->profile.cv_target_mv;
 
     switch (ctx->state)
@@ -550,10 +756,10 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         break;
 
     case AURORA_CHARGE_FLOAT:
-        output.allow_charge = true;
+        output.allow_charge = ctx->float_started;
         output.voltage_target_mv = ctx->profile.float_target_mv;
-        output.battery_power_target_mw =
-            voltage_power_target(ctx, sample, ctx->profile.float_target_mv);
+        output.battery_power_target_mw = ctx->float_started ?
+            voltage_power_target(ctx, sample, ctx->profile.float_target_mv) : 0U;
         break;
 
     case AURORA_CHARGE_OFF:
@@ -562,6 +768,14 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         output.allow_charge = false;
         output.battery_power_target_mw = 0U;
         break;
+    }
+
+    /* 重新准入窗口内严格禁止能量传输，同时使MPPT看到0功率许可并回到禁用态。 */
+    if (ctx->restart_required)
+    {
+        output.allow_charge = false;
+        output.battery_power_target_mw = 0U;
+        output.pv_power_limit_mw = 0U;
     }
 
     return output;

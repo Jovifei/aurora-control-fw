@@ -91,7 +91,6 @@ static uint8_t legacy_fault_code(uint32_t fault_mask)
                        AURORA_FAULT_ADC_DMA |
                        AURORA_FAULT_ADC_OVERRUN |
                        AURORA_FAULT_RELAY |
-                       AURORA_FAULT_MOS_TEMP_INVALID |
                        AURORA_FAULT_STORAGE |
                        AURORA_FAULT_INTERNAL |
                        AURORA_FAULT_FAST_BREAK)) != 0U)

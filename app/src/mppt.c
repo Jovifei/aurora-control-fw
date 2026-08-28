@@ -300,7 +300,7 @@ void aurora_mppt_set_open_circuit_voltage(aurora_mppt_ctx_t *ctx,
  * Input       : ctx - MPPT上下文；sample - 最新PV测量；power_allow_mw - 外部功率上限；
  *               external_limited - 外部限功率标志；now_ms - 当前毫秒时间戳
  * Output      : PV目标电压、理论功率请求和有效标志
- * Description : 按80ms更新P-V搜索、按10ms更新电压PI，输出与芯片PWM实现解耦的物理量命令。
+ * Description : 按80ms更新P-V搜索、按10ms更新电压PI；功率许可为0时清动态状态，避免复充带旧积分重发波。
  *---------------------------------------------------------------------------*/
 aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
                                       const aurora_measurement_t *sample,
@@ -313,9 +313,19 @@ aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
                                            AURORA_MEAS_VALID_PV_I |
                                            AURORA_MEAS_VALID_PV_POWER;
 
-    if ((ctx == NULL) || (sample == NULL) ||
-        ((sample->valid_mask & required_measurements) != required_measurements) ||
-        (power_allow_mw == 0U))
+    if ((ctx == NULL) || (sample == NULL))
+    {
+        return output;
+    }
+
+    /* 无能量传输许可时等价于旧120W init阶段的MPPT_Reset：保留Voc，清搜索和PI动态量。 */
+    if (power_allow_mw == 0U)
+    {
+        aurora_mppt_reset(ctx);
+        return output;
+    }
+
+    if ((sample->valid_mask & required_measurements) != required_measurements)
     {
         return output;
     }

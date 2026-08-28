@@ -12,7 +12,8 @@ typedef struct
 {
     int64_t power_integral;                          /* 功率执行器积分项，Q15。 */
     uint32_t state_since_ms;                         /* 当前状态进入时间。 */
-    uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点。 */
+    uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点，兼作100ms启动资格与2s零点稳定依据。 */
+    uint32_t pv_fast_valid_since_ms;                 /* PV持续>=15V的起点，用于动态1~10s快速启动资格。 */
     uint32_t delta_ok_since_ms;                      /* BST_U/BAT_U压差持续满足起点。 */
     uint32_t no_sun_since_ms;                        /* 真正无PV持续起点。 */
     uint32_t bat_stability_since_ms;                 /* 10s电池稳定窗口起点。 */
@@ -25,7 +26,7 @@ typedef struct
     aurora_power_state_t state;                      /* 当前启动/预充/运行状态。 */
     bool relay_closed;                               /* 软件期望继电器状态。 */
     bool startup_success_recorded;                   /* 本轮成功后只减少一次启动延时。 */
-    uint8_t state_reserved[3];                       /* 显式补齐到32位边界，避免AC6隐式尾部填充。 */
+    uint8_t state_reserved[2];                       /* 显式补齐。 */
 } aurora_power_stage_ctx_t;
 
 void aurora_power_stage_init(aurora_power_stage_ctx_t *ctx, uint32_t now_ms);
