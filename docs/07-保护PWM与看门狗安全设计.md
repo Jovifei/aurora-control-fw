@@ -40,7 +40,7 @@ safety epoch未变化
 
 ## 4. 看门狗健康监督
 
-只有`service_watchdog()`可以喂IWDT：
+只有`app_watchdog()`可以喂IWDT：
 
 - 任何状态都要求主循环和1 ms控制任务取得进展；
 - PRECHARGE、RELAY_SETTLE和RUN还要求ADC完整块被主循环成功消费；

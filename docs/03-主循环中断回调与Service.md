@@ -1,4 +1,4 @@
-# 03 · 主循环、中断回调与Service
+# 03 · 主循环与中断回调
 
 ## 1. 中断只搬运和关断
 
@@ -9,14 +9,14 @@ COMP/Break ISR    → 硬关PWM → fault mask → EVENT_FAST_FAULT
 ATMR Update ISR   → 仅首次arm时确认0占空比已由自然UEV装载
 USART ISR         → 最多搬运32字节 → EVENT_UART_RX
                          ↓
-                    aurora_service_poll()
+                    aurora_app_runtime_poll()
                          ↓
                     APP算法与状态机
 ```
 
 永久运行的50 kHz UPDATE中断已经删除。UPDATE中断只在首次发波前写入0占空比后临时开启一次，确认自然UEV装载完成即关闭。
 
-## 2. 主循环服务预算
+## 2. 应用主循环预算
 
 - UART硬件ISR每次最多搬运32字节；
 - UART主循环每轮最多消费64字节，剩余数据重新投递事件；

@@ -1,129 +1,112 @@
 # Aurora Control Firmware
 
-> 当前开发候选：**v0.8.3 — Two-Layer Product Architecture**  
-> 功率输出人工总门继续保持关闭；Host/CI通过不等于Keil AC6链接和300W实板验收通过。
+> 当前集成基线：**v0.8.3**。在两层 `APP → Driver → Vendor` 目录上保留 v0.8.0 的充电/保护行为、v0.8.1 的PVD供电资格，以及完整蓝牙/Debug与MOS NTC安全机制。
 
-单路异步Boost光伏充电控制器固件。v0.8.3不改变v0.8.0/v0.8.1已经建立的充电、保护、弱光PVD启动和继电器安全行为，只把首方生产代码收敛为更直接的两层产品架构。
+单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
 
 ## 目录
 
 ```text
 app/
-├─ inc/
-│  ├─ main.h          应用组合根 + 原Service运行接口
-│  ├─ app_types.h
-│  ├─ app_config.h
-│  ├─ debug.h
-│  ├─ interrupts.h
-│  └─ charger/measurement/mppt/power_stage/protection/protocol/storage/ui.h
-└─ src/
-   ├─ main.c          原app.c + service.c + target main.c
-   ├─ interrupts.c    目标中断桥接，只调用Driver
-   ├─ debug.c
-   └─ charger/measurement/mppt/power_stage/protection/protocol/storage/ui.c
-
+├─ inc/      应用层公共.h、类型、参数和运行时接口
+└─ src/      应用逻辑、主入口、中断桥接和Debug实现
 driver/
-├─ inc/
-│  ├─ driver.h
-│  ├─ board_config.h
-│  ├─ drv_board.h
-│  └─ drv_adc/drv_comp/drv_flash/drv_io/drv_pwm/drv_system/drv_uart/drv_watchdog.h
-└─ src/
-   ├─ drv_board.c
-   └─ 各目标MCU驱动实现.c
-
-project/
-├─ AuroraControl.uvprojx
-├─ AuroraControl.sct
-└─ README.md
-
-vendor/  docs/  tests/  tools/
+├─ inc/      驱动模块头、板级配置和公共驱动契约
+└─ src/      G32F031外设及板级驱动实现
+vendor/      目标构建实际需要的CMSIS / Device / DDL
+project/     Keil ARM Compiler 6工程、scatter和用户工程配置
+docs/        文档入口、00～19编号文档和最终原理图
+tests/       Host回归与故障注入，不进入目标镜像
+tools/       架构、代码规范、GCC/Clang、Sanitizer和目标语法门禁
 ```
 
-根目录不再存在 `service/`、`board/` 或 `project/keil/`。
-
-## 两层调用方向
+`app/src/`中的应用模块：
 
 ```text
-app/src/main.c
-├─ 调用APP业务模块
-├─ 调用driver/inc/*.h
-└─ 不直接访问寄存器/DDL/CMSIS设备对象
-
-app/src/interrupts.c
-├─ 只调用Driver ISR接口
-├─ 只做搬运、快速关波、事件投递
-└─ 不运行MPPT/充电/Flash等重业务
-
-                 ↓
-
-driver/src/*.c
-├─ 实现GPIO/ADC/PWM/COMP/Flash/UART/WDT/PVD等硬件契约
-├─ 调用vendor CMSIS / Device / DDL
-└─ 禁止包含或调用APP代码
+main         应用入口、运行时调度、事件邮箱和安全功率提交
+interrupts   中断向量与轻量事件桥接
+debug        GE_DEBUG日志及编译期模块开关
+measurement  ADC完整块滤波、标定、物理量快照和电池电流估算
+mppt         P-V斜率搜索、PV参考电压和PI功率请求
+charger      电池档案与TC/CC/CV/Float状态机
+protection   软件保护、去抖、锁存与恢复许可
+power_stage  预充、继电器、功率命令和物理Duty执行器
+ui           RUN/FAULT指示逻辑
+protocol     旧产品UART帧兼容层
+storage      片内Flash双页Journal、CRC和Commit Marker
 ```
 
-## 不因架构重构而改变的安全链
+仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。
 
-### MCU弱光供电资格
+## 阅读入口
 
-```text
-Reset
-→ 最小GPIO安全态
-→ PVD确认VDD高于2.8V候选门限
-→ 连续稳定100ms
-→ 才初始化IWDT/PWM/COMP/ADC/UART/APP
-```
-
-PVD不作为运行期弱光故障，不启用PVD IRQ或PVD系统复位。
-
-### 继电器
-
-```text
-Relay OFF
-→ 受限Boost先充BST_U
-→ |BST_U-BAT_U| <= 1.5V连续1s
-→ Duty归0且PWM物理关闭
-→ app/main.c用最新电压、故障和PWM状态再次复核
-→ Relay ON
-→ 100ms后压差复核 <= 2.5V
-→ PWM继续OFF，BAT_U观察10s且max-min<=2V
-→ RUN/MPPT
-```
-
-任何“先吸合继电器，再给BST_U充电”的实现都属于安全回归。
-
-## 关键产品事实
-
-- 默认高功率BOM为300W，保留120W编译Profile；
-- MOS从95°C开始降额，105°C/1s停机、95°C/1s恢复；
-- 无BAT_I硬件，所有电池电流只能标识为ESTIMATED；
-- 单路异步Boost，仅PA15/GLC PWM，不允许重新引入互补PWM/同步MOS；
-- PWM运行期只写CCR preload，自然UEV生效，禁止软件UG；
-- Flash擦写要求PWM关闭且继电器断开；
-- 只有应用运行健康监督允许喂IWDT。
-
-## 文档入口
-
-- [文档索引](docs/00-文档索引.md)
+- [文档入口](docs/README.md)
 - [工程接手指南](docs/GUIDE.md)
-- [v0.8.3两层产品架构重构说明](docs/30-v0.8.3-两层产品架构重构说明.md)
-- [v0.8.3迁移与验证报告](docs/31-v0.8.3-迁移与验证报告.md)
-- [v0.8.1 MCU供电资格设计依据](docs/28-REF-G32F031-MCU供电稳定启动与PVD设计依据.md)
-- [v0.8.0参数待确认与台架清单](docs/26-v0.8.0参数待确认与台架清单.md)
+- [参数标定与Codex交接清单](docs/17-参数标定与Codex交接清单.md)
+- [v0.7.2目录规范与交接说明](docs/18-v0.7.2目录规范与交接说明.md)
+- [编译修复提交2740523审计](docs/19-编译修复提交2740523审计.md)
+- [v0.8.0行为迁移与台架清单](docs/22-REF-120W-V2.7行为与参数基线.md)
+- [v0.8.1 PVD供电资格](docs/28-REF-G32F031-MCU供电稳定启动与PVD设计依据.md)
+- [v0.8.3两层架构与迁移报告](docs/30-v0.8.3-两层产品架构重构说明.md)
 
-## 软件验证
+## 本地验证
 
 ```bash
 python tools/run_checks.py
 ```
 
-会执行两层架构门禁、代码规范、Python契约测试、GCC/Clang CTest、ASan/UBSan和Cortex-M0+目标语法检查。
+该命令依次执行；缺少GCC/Clang/CMake/CTest时会明确返回不完整，不会把跳过的Host构建伪装为通过：
 
-## 当前硬件门禁
+```text
+Architecture gate
+Code style/comment/layout gate
+GCC strict build + CTest
+Clang strict build + CTest
+Clang AddressSanitizer + UBSan
+Cortex-M0+ target syntax check
+```
+
+Host回归、目标语法检查和Keil链接结果以本次交接报告及最新验证命令输出为准；Host通过不等于功率板验收通过。
+
+MCU弱光启动遵循：最小安全GPIO → PVD Ready → VDD连续稳定 → `aurora_runtime_init()`。PVD Reset/IRQ保持关闭；供电不足时只等待，不创建APP故障或启动IWDT复位循环。
+
+## IDE / clangd 函数跳转
+
+clangd 需要本机生成 `compile_commands.json`（已在 `.gitignore` 中，不进仓库）。
+
+```powershell
+.\.tools\generate-clangd-db.cmd
+```
+
+或在任意平台执行：
+
+```bash
+python tools/generate_clangd_db.py
+```
+
+生成后请在 Cursor 中执行 `Clangd: Restart language server`。
+
+配套文件：
+
+```text
+compile_flags.txt              全工程兜底解析参数（未收录进 Keil 工程的文件也会用到）
+.clangd                        后台索引配置
+.clangd-support/include/       裸机解析用最小 stdio stub
+.tools/generate-clangd-db.cmd  Windows 一键生成 compile_commands.json
+```
+
+要求：
+
+1. 安装 Cursor/VS Code 扩展 `clangd`（LLVM 发布），并禁用或关闭 Microsoft `C/C++` IntelliSense。
+2. 本机 PATH 中有 `clang`，或已安装 Keil `armclang`（脚本会自动附加其系统头路径）。
+3. 修改 Keil 工程源文件列表或 include/define 后，重新运行生成脚本。
+
+## 当前安全状态
+
+所有功率放行门保持关闭：
 
 ```c
 BOARD_POWER_OUTPUT_ALLOWED == 0
 ```
 
-真正解锁前仍必须完成Keil AC6真实链接/MAP、PVD弱光波形、ADC/OPA标定、COMP/Break强制触发、继电器预充波形以及低压到额定功率台架。
+真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流和低压到额定功率验收。

@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - -Wno-unknown-warning-option
+
+Index:
+  Background: Build
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

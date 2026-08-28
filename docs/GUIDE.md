@@ -2,68 +2,49 @@
 
 ## 1. 第一次接手
 
-先运行：
+先执行：
 
 ```bash
 python tools/run_checks.py
 ```
 
-预期至少看到：
+正常结果应包含：
 
 ```text
 ARCHITECTURE CHECK: PASS
 CODE STYLE CHECK: PASS
-Python contract tests: PASS
 GCC strict build + CTest: PASS
 Clang strict build + CTest: PASS
 Clang ASan/UBSan: PASS
 Cortex-M0+ target syntax: PASS
 ```
 
-Host通过不等于Keil链接或实板验收通过。
+Host测试通过不等于Keil链接和功率板验收通过。
 
-## 2. v0.8.3两层架构
+如果本机缺少GCC、Clang、CMake或CTest，`tools/run_checks.py`会明确输出`CHECKS INCOMPLETE`并返回非0；这表示Host构建证据缺失，不是测试通过。
 
-```text
-app/
-├─ inc/
-└─ src/
-
-driver/
-├─ inc/
-└─ src/
-
-vendor/
-project/
-docs/
-tests/
-tools/
-```
-
-生产根目录禁止出现 `service/`、`board/`、`project/keil/`。
-
-调用方向只有：
+## 2. 源码入口
 
 ```text
-app → driver → vendor
+app/inc/       应用层公共类型、接口、带单位参数和运行时接口
+app/src/       应用业务、目标入口、ISR桥接和Debug实现
+driver/inc/    驱动模块头、公共契约、PinMap和板级安全配置
+driver/src/    G32F031目标外设及板级驱动实现
+project/      AC6工程、scatter和用户工程配置
+tests/         Host回归、故障注入和模拟驱动
+tools/         架构、风格、编译、Sanitizer和目标端语法门禁
 ```
 
-### APP
+应用层文件约定：
 
-- `app/src/main.c`：系统入口、事件调度、APP业务组合、PWM/Relay命令落实、Flash和WDT健康监督；只能通过Driver接口碰硬件。
-- `app/src/interrupts.c`：中断桥接；只能做Driver应答、快速关波、搬运和投递事件。
-- 其余业务模块不得调用`drv_*`。
-- APP不得包含`board_config.h`、G32/DDL/CMSIS目标寄存器头。
+- `.h`只能放入 `app/inc/`；
+- `.c`只能放入 `app/src/`；
+- `app/`根目录不得放 `.c/.h`；
+- APP可包含Driver契约并调用驱动；不得直接包含任何G32/DDL/CMSIS芯片头文件。
 
-### Driver
+## 3. 代码注释与布局规范
 
-- `driver/inc/driver.h`是统一入口；`drv_*.h`按硬件功能拆分。
-- `driver/inc/board_config.h`保存PinMap、ADC/PWM/Flash/PVD/WDT和人工门禁。
-- `driver/src/*.c`允许使用Vendor库，禁止包含APP头或调用APP函数。
-
-## 3. 代码规范
-
-函数统一：
+所有函数定义必须使用：
 
 ```c
 /*---------------------------------------------------------------------------*
@@ -74,90 +55,39 @@ app → driver → vendor
  *---------------------------------------------------------------------------*/
 ```
 
-要求：
+此外：
 
-- 4空格缩进；禁止Tab、行尾空白；
-- 文件级`static`变量/函数/声明集中在首个公开函数前；
-- 宏先定义再使用，并写用途和单位；
-- 复杂判断解释原因和安全动作；
-- 禁止动态内存；
-- 不在函数体新增魔法控制参数。
+- 条件判断前解释“为什么判断”，执行分支内解释“安全动作或状态变化”；
+- 不为显而易见的赋值写重复注释；
+- 不使用Tab；采用4空格缩进；
+- 所有文件级 `static` 变量、常量、原型和函数定义集中在首个公开函数之前；
+- 文件级宏必须先定义、再使用，并注明单位和用途；
+- 占空比、ADC码、CCR和物理量不得混用同一命名。
 
-## 4. 修改参数前
+`tools/check_code_style.py`会自动拒绝缺少统一函数头、Tab、行尾空白、迟到的 `static/#define` 和错误APP目录。
 
-充电/保护：读`docs/22`、`docs/23`、`docs/26`。
+## 4. 参数修改流程
 
-PVD/弱光启动：读`docs/28`、`docs/29`。
+1. 先查 [17-参数标定与Codex交接清单](17-参数标定与Codex交接清单.md)。
+2. 明确参数属于：应用算法、板级标定、目标外设或人工门禁。
+3. 记录单位、旧值、新值、依据、测试方法和回退值。
+4. 修改对应集中定义，不在函数体内追加魔法数。
+5. 增加或修改Host测试。
+6. 运行完整门禁。
+7. 若涉及PWM、COMP、ADC、Flash或IWDT，再完成Keil与板级测试；不能只凭Host结果解锁。
 
-架构修改：读`docs/30`、`docs/31`。
+## 5. 功率安全红线
 
-记录：旧值、新值、单位、依据、测试和回退值。
+- 正常发波只能经过 `app/src/main.c::apply_power_command()`；
+- 快速故障ISR第一动作必须是 `drv_pwm_force_off_isr()`；
+- 运行期Duty只写CCR preload，不产生软件UPDATE事件；
+- 首次授权必须先装载零CCR，再经过安全epoch、Break源、Break锁存和板级总门复核；
+- 故障后Duty和积分清零，恢复必须重新执行电池识别与预充；
+- 功率运行或继电器闭合时禁止Flash擦写；
+- 只有应用健康监督可喂IWDT；
+- `BOARD_POWER_OUTPUT_ALLOWED`未经人工验收不得改为1。
 
-## 5. MCU供电资格
-
-必须：
-
-```text
-System时基
-→ GPIO安全态
-→ PVD Ready
-→ VDD高于VPVD并连续稳定100ms候选
-→ 才运行完整初始化
-```
-
-禁止：
-
-- PVD系统复位；
-- PVD IRQ弱光保护；
-- MCU低压软件Fault；
-- PVD通过前启动IWDT/PWM/COMP/ADC/UART。
-
-## 6. Relay硬约束
-
-```text
-Relay OFF
-→ Boost充BST_U
-→ |BST_U-BAT_U|<=1.5V连续1s
-→ PWM OFF
-→ app/main.c实时再次复核
-→ Relay ON
-→ 100ms后压差<=2.5V
-→ PWM仍OFF
-→ BAT_U 10s max-min<=2V
-→ RUN
-```
-
-任何反向顺序都属于安全回归。
-
-## 7. PWM红线
-
-- 业务模块不写PWM；
-- ISR故障第一动作关PWM；
-- CCR preload + 自然UEV；运行期禁止软件UG；
-- 第一次发波前先0CCR握手；
-- epoch、Protection、实时Break、Break锁存、功率总门全部通过后才arm；
-- Automatic Output关闭。
-
-## 8. Debug
-
-`AURORA_DEBUG_ENABLE`默认0。当前`debug.c`只是统一无副作用接口，不绑定产品UART。未来要启用PB7/PB8 Debug UART，应增加对应Driver能力，而不是在业务代码直接操作寄存器。
-
-## 9. Keil
-
-打开：
-
-```text
-project/AuroraControl.uvprojx
-```
-
-使用ARM Compiler 6。构建后必须检查MAP中：
-
-- 应用镜像不越过`0xFC00`；
-- RAM不超过8KB；
-- A/B Flash Journal仍为`0xFC00/0xFE00`；
-- 无意外Service/Board旧对象。
-
-## 10. 提交前
+## 6. 提交前检查
 
 ```bash
 python tools/run_checks.py
@@ -165,4 +95,28 @@ git diff --check
 git status --short
 ```
 
-如果没有真实Keil/台架证据，提交说明必须明确“软件门禁通过，目标硬件未验收”，且 `BOARD_POWER_OUTPUT_ALLOWED`必须保持0。
+Keil/台架证据未完成时，提交说明必须明确写“Host验证通过，Keil链接/板级验证未执行”，不得使用“量产通过”“硬件安全闭环”等表述。
+
+## 7. 蓝牙与Debug路由
+
+工程默认由PA10/PA11承载蓝牙USART。需要观察`[GE_DEBUG]`日志时，在构建宏中选择：
+
+```text
+BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
+DEBUG_ENABLE=1
+```
+
+该模式把USART切换到PB7/PB8，并关闭产品协议解析和主动遥测；不要在蓝牙模式打开Debug打印，否则会污染蓝牙数据。打印实现位于`app/src/debug.c`，各模块开关位于`app/inc/debug.h`。
+
+## 8. MOS温度状态
+
+PB12的板载MOS NTC已按原理图R37=5.1K、R42=100K 1% 3950实现-40°C～125°C查表换算。开路、短路或超出换算范围会锁存MOS温度传感器故障，必须按保护流程显式清除。PB5接CON4外接环境NTC，待实际探头型号和B值确认后再启用。
+
+## 9. MCU弱光供电资格
+
+目标入口必须先建立最小安全GPIO，再调用 `drv_system_wait_for_supply_stable()`；只有PVD Ready、VDD高于2.8V候选门限并连续稳定100ms后，才能进入 `aurora_runtime_init()` 初始化IWDT、PWM、COMP、ADC和UART。`BOARD_MCU_PVD_RESET_ENABLE` 与 `BOARD_MCU_PVD_IRQ_ENABLE` 必须保持0；弱光供电不足只等待。
+
+
+## 当前接手与审计
+
+首次接手或从旧远端覆盖时，先阅读 [18-v0.7.2目录规范与交接说明](18-v0.7.2目录规范与交接说明.md) 和 [19-编译修复提交2740523审计](19-编译修复提交2740523审计.md)。

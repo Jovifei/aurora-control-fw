@@ -28,9 +28,11 @@ add_executable(aurora_host_tests
 )
 
 target_include_directories(aurora_host_tests PRIVATE
-    app/inc
-    driver/inc
-    tests
+    app/inc driver/inc tests
+)
+
+target_compile_definitions(aurora_host_tests PRIVATE
+    AURORA_HOST_TEST=1
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -41,3 +43,30 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 add_test(NAME aurora_host_tests COMMAND aurora_host_tests)
+
+add_executable(aurora_host_debug_tests
+    ${APP_SOURCES}
+    driver/src/drv_board.c
+    tests/mock_driver.c
+    tests/test_main.c
+)
+
+target_include_directories(aurora_host_debug_tests PRIVATE
+    app/inc driver/inc tests
+)
+
+target_compile_definitions(aurora_host_debug_tests PRIVATE
+    AURORA_HOST_TEST=1
+    AURORA_HOST_DEBUG_TEST=1
+    DEBUG_ENABLE=1
+    BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(aurora_host_debug_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
+        -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Werror
+    )
+endif()
+
+add_test(NAME aurora_host_debug_tests COMMAND aurora_host_debug_tests)
