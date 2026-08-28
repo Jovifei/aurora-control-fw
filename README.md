@@ -65,6 +65,37 @@ Cortex-M0+ target syntax check
 
 Host回归、目标语法检查和Keil链接结果以本次交接报告及最新验证命令输出为准；Host通过不等于功率板验收通过。
 
+## IDE / clangd 函数跳转
+
+clangd 需要本机生成 `compile_commands.json`（已在 `.gitignore` 中，不进仓库）。
+
+```powershell
+.\.tools\generate-clangd-db.cmd
+```
+
+或在任意平台执行：
+
+```bash
+python tools/generate_clangd_db.py
+```
+
+生成后请在 Cursor 中执行 `Clangd: Restart language server`。
+
+配套文件：
+
+```text
+compile_flags.txt              全工程兜底解析参数（未收录进 Keil 工程的文件也会用到）
+.clangd                        后台索引配置
+.clangd-support/include/       裸机解析用最小 stdio stub
+.tools/generate-clangd-db.cmd  Windows 一键生成 compile_commands.json
+```
+
+要求：
+
+1. 安装 Cursor/VS Code 扩展 `clangd`（LLVM 发布），并禁用或关闭 Microsoft `C/C++` IntelliSense。
+2. 本机 PATH 中有 `clang`，或已安装 Keil `armclang`（脚本会自动附加其系统头路径）。
+3. 修改 Keil 工程源文件列表或 include/define 后，重新运行生成脚本。
+
 ## 当前安全状态
 
 所有功率放行门保持关闭：

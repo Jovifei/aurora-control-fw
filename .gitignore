@@ -28,7 +28,9 @@ CTestTestfile.cmake
 compile_commands.json
 
 # IDE / OS
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
