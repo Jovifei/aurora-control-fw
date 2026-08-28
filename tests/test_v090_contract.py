@@ -38,6 +38,30 @@ class V090Contracts(unittest.TestCase):
         ]:
             self.assertIn(token, cfg)
 
+    def test_cv_return_requires_control_stability(self):
+        charger = (ROOT / "app/src/charger.c").read_text(encoding="utf-8")
+        marker = "case AURORA_CHARGE_CV:"
+        start = charger.index(marker)
+        window = charger[start:start + 1800]
+        self.assertIn("!weak_light && !thermal_limited && !input_limited", window)
+        self.assertIn("AURORA_CHARGER_CV_RETURN_HYST_MV", window)
+        self.assertIn("AURORA_CV_TO_CC_HOLD_MS", window)
+
+    def test_recharge_and_float_low_voltage_request_requalification(self):
+        types = (ROOT / "app/inc/app_types.h").read_text(encoding="utf-8")
+        charger = (ROOT / "app/src/charger.c").read_text(encoding="utf-8")
+        power = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")
+        mppt = (ROOT / "app/src/mppt.c").read_text(encoding="utf-8")
+
+        self.assertIn("bool restart_required", types)
+        self.assertGreaterEqual(charger.count("request_restart(ctx, now_ms);"), 2)
+        self.assertIn("output.restart_required = ctx->restart_required", charger)
+        self.assertIn("if (ctx->restart_required)", charger)
+        self.assertIn("if (charger->restart_required)", power)
+        self.assertIn("enter_state(ctx, AURORA_POWER_BAT_STABILITY, now_ms);", power)
+        self.assertIn("if (power_allow_mw == 0U)", mppt)
+        self.assertIn("aurora_mppt_reset(ctx);", mppt)
+
     def test_bus_saturation_is_fail_safe(self):
         meas = (ROOT / "app/src/measurement.c").read_text(encoding="utf-8")
         prot = (ROOT / "app/src/protection.c").read_text(encoding="utf-8")
