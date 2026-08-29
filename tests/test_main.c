@@ -1062,6 +1062,46 @@ static void test_v091_mppt_cloud_and_start_failure_vectors(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static void test_v091_energy_reset_clears_rolling_history(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证能量RESET同时清空49点滚动历史、重新起算30min窗口，并保持v2 Flash页可序列化。
+ *---------------------------------------------------------------------------*/
+static void test_v091_energy_reset_clears_rolling_history(void)
+{
+    aurora_app_t app;
+    aurora_measurement_calibration_t calibration = unit_calibration();
+    aurora_protocol_frame_t request;
+    aurora_protocol_frame_t response;
+    bool has_response = false;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+
+    aurora_app_init(&app, &calibration, 100U);
+    app.storage.settings.lifetime_energy_wh = 1000U;
+    app.storage.settings.daily_energy_wh = 500U;
+    app.storage.settings.energy_history_count = 3U;
+    app.storage.settings.energy_history_wh[0] = 500U;
+    app.storage.settings.energy_history_wh[1] = 750U;
+    app.storage.settings.energy_history_wh[2] = 1000U;
+    app.last_energy_history_ms = 100U;
+
+    memset(&request, 0, sizeof(request));
+    request.resource = AURORA_PROTOCOL_RESOURCE_RESET;
+    request.action = AURORA_PROTOCOL_ACTION_WRITE;
+    request.message_id = 77U;
+    aurora_app_on_protocol_frame(&app, &request, &response, &has_response, 1234U);
+
+    CHECK(has_response);
+    CHECK(response.data[0] == AURORA_PROTOCOL_RESULT_OK);
+    CHECK(app.storage.settings.lifetime_energy_wh == 0U);
+    CHECK(app.storage.settings.daily_energy_wh == 0U);
+    CHECK(app.storage.settings.energy_history_count == 1U);
+    CHECK(app.storage.settings.energy_history_wh[0] == 0U);
+    CHECK(app.last_energy_history_ms == 1234U);
+    CHECK(aurora_storage_encode_page(&app.storage, page, sizeof(page), true) != 0U);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
  * Output      : 0表示全部Host回归通过
@@ -1074,6 +1114,7 @@ int main(void)
     test_v090_lead_temp_comp_and_mature_timing();
     test_v090_bus_saturation_and_current_plausibility();
     test_v091_rolling_24h_energy();
+    test_v091_energy_reset_clears_rolling_history();
     test_v091_mppt_cloud_and_start_failure_vectors();
     test_protocol_roundtrip();
     test_telemetry_legacy_identity();

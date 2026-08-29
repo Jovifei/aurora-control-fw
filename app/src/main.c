@@ -1017,7 +1017,12 @@ void aurora_app_on_protocol_frame(aurora_app_t *app,
     {
         app->storage.settings.lifetime_energy_wh = 0U;
         app->storage.settings.daily_energy_wh = 0U;
+        memset(app->storage.settings.energy_history_wh, 0,
+               sizeof(app->storage.settings.energy_history_wh));
+        app->storage.settings.energy_history_count = 1U;
+        app->storage.settings.energy_history_wh[0] = 0U;
         app->energy_accumulator_mw_ms = 0U;
+        app->last_energy_history_ms = now_ms;
         aurora_storage_mark_dirty(&app->storage, now_ms);
 
         memset(response, 0, sizeof(*response));
