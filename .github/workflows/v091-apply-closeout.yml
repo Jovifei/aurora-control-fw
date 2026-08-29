@@ -36,14 +36,36 @@ jobs:
           rm -f tools/.apply_v091_closeout.py
           rm -rf tools/__pycache__
 
-      - name: Show generated closeout layout
+      - name: Normalize generated code style
         run: |
-          echo '--- app/src/main.c 470-670 ---'
-          nl -ba app/src/main.c | sed -n '470,670p'
-          echo '--- app/src/storage.c 105-155 ---'
-          nl -ba app/src/storage.c | sed -n '105,155p'
-          echo '--- app/inc/storage.h 35-65 ---'
-          nl -ba app/inc/storage.h | sed -n '35,65p'
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path.cwd()
+
+          def replace_once(path, old, new):
+              file_path = root / path
+              text = file_path.read_text(encoding="utf-8")
+              if text.count(old) != 1:
+                  raise RuntimeError(f"{path}: expected one style anchor, found {text.count(old)}")
+              file_path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
+
+          replace_once(
+              "app/src/main.c",
+              """/*---------------------------------------------------------------------------*\n * Name        : static void load_storage(aurora_runtime_t *runtime)\n{\n""",
+              """/*---------------------------------------------------------------------------*\n * Name        : static void load_storage(aurora_runtime_t *runtime)\n * Input       : runtime - 应用运行上下文\n * Output      : 无\n * Description : 分类读取Flash A/B页并选择最新可信记录；单页异常安排安全窗口自愈，两页不可恢复时锁存存储故障。\n *---------------------------------------------------------------------------*/\nstatic void load_storage(aurora_runtime_t *runtime)\n{\n""",
+          )
+          replace_once(
+              "app/src/storage.c",
+              """/*---------------------------------------------------------------------------*\n * Name        : void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n{\n""",
+              """/*---------------------------------------------------------------------------*\n * Name        : void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n * Input       : ctx - 存储上下文\n * Output      : 无\n * Description : 初始化默认电池档案、24h滚动能量基准和双页Journal状态，不执行Flash写入。\n *---------------------------------------------------------------------------*/\nvoid aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n{\n""",
+          )
+          replace_once(
+              "app/inc/storage.h",
+              """typedef uint8_t aurora_storage_page_status_t;\n#define AURORA_STORAGE_PAGE_VALID                   ((aurora_storage_page_status_t)0U)\n""",
+              """typedef uint8_t aurora_storage_page_status_t;\n/* 页状态编码供启动分类、自愈策略和诊断使用。 */\n#define AURORA_STORAGE_PAGE_VALID                   ((aurora_storage_page_status_t)0U)\n""",
+          )
+          PY
 
       - name: Run all firmware checks
         run: python tools/run_checks.py
