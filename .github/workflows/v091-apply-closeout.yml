@@ -1,0 +1,45 @@
+name: Apply v0.9.1 closeout
+
+on:
+  push:
+    branches:
+      - codex/v0.9.1-ntc-parity-closeout
+    paths:
+      - tools/.v091_patch_08
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Reassemble reviewed patch
+        run: |
+          cat tools/.v091_patch_0* | base64 -d > /tmp/apply_v091_closeout.py
+          python -m py_compile /tmp/apply_v091_closeout.py
+
+      - name: Apply v0.9.1 closeout
+        run: python /tmp/apply_v091_closeout.py
+
+      - name: Run all firmware checks
+        run: python tools/run_checks.py
+
+      - name: Commit generated closeout
+        run: |
+          git config user.name "Jovifei"
+          git config user.email "110970864+Jovifei@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: v0.9.1 close NTC and remaining parity gaps"
+          git push origin HEAD:${GITHUB_REF_NAME}
