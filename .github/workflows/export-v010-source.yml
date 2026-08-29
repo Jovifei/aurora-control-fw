@@ -1,0 +1,26 @@
+name: Export v0.10 working source
+
+on:
+  push:
+    branches:
+      - codex/v0.10.0-mature-demo-parity
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload working tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-v010-source
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
