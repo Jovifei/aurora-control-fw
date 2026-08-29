@@ -27,11 +27,14 @@ jobs:
 
       - name: Reassemble reviewed patch
         run: |
-          cat tools/.v091_patch_0* | base64 -d > /tmp/apply_v091_closeout.py
-          python -m py_compile /tmp/apply_v091_closeout.py
+          cat tools/.v091_patch_0* | base64 -d > tools/.apply_v091_closeout.py
+          python -m py_compile tools/.apply_v091_closeout.py
 
       - name: Apply v0.9.1 closeout
-        run: python /tmp/apply_v091_closeout.py
+        run: |
+          python tools/.apply_v091_closeout.py
+          rm -f tools/.apply_v091_closeout.py
+          rm -rf tools/__pycache__
 
       - name: Run all firmware checks
         run: python tools/run_checks.py
