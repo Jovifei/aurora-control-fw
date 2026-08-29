@@ -170,6 +170,12 @@ else:
         "BOARD_PIN_COMP0_OUT_AF": "7U",
         "BOARD_COMP0_FAULT_ACTIVE_LOW": "1U",
         "BOARD_PIN_LED_FAULT_NUMBER": "11U",
+        "BOARD_NTC_MOS_PULLUP_OHM": "5100L",
+        "BOARD_NTC_MOS_R25_OHM": "100000L",
+        "BOARD_NTC_MOS_BETA_KELVIN": "3950L",
+        "BOARD_NTC_AMB_PULLUP_OHM": "5100L",
+        "BOARD_NTC_AMB_R25_OHM": "100000L",
+        "BOARD_NTC_AMB_BETA_KELVIN": "3950L",
         "BOARD_POWER_OUTPUT_ALLOWED": "0U",
     }
     for name, value in expected_macros.items():
