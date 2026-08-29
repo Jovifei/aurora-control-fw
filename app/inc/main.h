@@ -40,6 +40,7 @@ typedef struct
     aurora_measurement_t sample;                     /* 最近一次可供控制使用的测量快照。 */
     uint32_t last_step_ms;                           /* 上一次1ms应用调度时间。 */
     uint32_t last_10ms;                              /* 上一次10ms控制链运行时间。 */
+    uint32_t last_energy_history_ms;                 /* 上一次30min滚动能量快照时间。 */
     uint32_t telemetry_message_id;                   /* 主动遥测消息序号。 */
     aurora_mppt_output_t mppt_output;                /* 最近一次MPPT输出。 */
     aurora_charge_output_t charge_output;            /* 最近一次充电目标与PV包络。 */

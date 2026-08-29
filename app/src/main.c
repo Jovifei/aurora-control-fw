@@ -492,7 +492,7 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
  * Name        : static void load_storage(aurora_runtime_t *runtime)
  * Input       : runtime - 应用运行上下文
  * Output      : 无
- * Description : 读取Flash A/B页，按回绕安全序号选择最新有效记录并重新初始化充电启动链。
+ * Description : 分类读取Flash A/B页并选择最新可信记录；单页异常安排安全窗口自愈，两页不可恢复时锁存存储故障。
  *---------------------------------------------------------------------------*/
 static void load_storage(aurora_runtime_t *runtime)
 {
@@ -500,19 +500,46 @@ static void load_storage(aurora_runtime_t *runtime)
     uint8_t page_b[AURORA_STORAGE_PAGE_SIZE];
     aurora_persistent_settings_t settings_a = {0};
     aurora_persistent_settings_t settings_b = {0};
+    aurora_storage_page_status_t status_a;
+    aurora_storage_page_status_t status_b;
     uint32_t seq_a = 0U;
     uint32_t seq_b = 0U;
     bool valid_a;
     bool valid_b;
+    const uint32_t now_ms = drv_time_now_ms();
 
-    valid_a = drv_flash_read(drv_board_flash_page_a(), page_a, sizeof(page_a)) &&
-              aurora_storage_decode_page(page_a, sizeof(page_a), &settings_a, &seq_a);
-    valid_b = drv_flash_read(drv_board_flash_page_b(), page_b, sizeof(page_b)) &&
-              aurora_storage_decode_page(page_b, sizeof(page_b), &settings_b, &seq_b);
+    if (drv_flash_read(drv_board_flash_page_a(), page_a, sizeof(page_a)))
+    {
+        status_a = aurora_storage_classify_page(page_a, sizeof(page_a),
+                                                &settings_a, &seq_a);
+    }
+    else
+    {
+        status_a = AURORA_STORAGE_PAGE_IO_ERROR;
+    }
+    if (drv_flash_read(drv_board_flash_page_b(), page_b, sizeof(page_b)))
+    {
+        status_b = aurora_storage_classify_page(page_b, sizeof(page_b),
+                                                &settings_b, &seq_b);
+    }
+    else
+    {
+        status_b = AURORA_STORAGE_PAGE_IO_ERROR;
+    }
+
+    runtime->app.storage.page_a_status = status_a;
+    runtime->app.storage.page_b_status = status_b;
+    valid_a = (status_a == AURORA_STORAGE_PAGE_VALID) ||
+              (status_a == AURORA_STORAGE_PAGE_VALID_LEGACY);
+    valid_b = (status_b == AURORA_STORAGE_PAGE_VALID) ||
+              (status_b == AURORA_STORAGE_PAGE_VALID_LEGACY);
 
     if (valid_a || valid_b)
     {
-        if (valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0)))
+        const bool choose_b =
+            valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0));
+
+        if (choose_b)
         {
             runtime->app.storage.settings = settings_b;
             runtime->app.storage.sequence = seq_b;
@@ -524,9 +551,39 @@ static void load_storage(aurora_runtime_t *runtime)
         }
         aurora_app_apply_settings(&runtime->app,
                                   &runtime->app.storage.settings,
-                                  drv_time_now_ms());
+                                  now_ms);
+
+        /*
+         * 单页有效、另一页损坏/擦除，或选中的记录仍是v1时，在PWM/Relay安全窗口
+         * 通过现有双页Journal重写另一页；绝不在功率运行时为“自愈”强行擦Flash。
+         */
+        runtime->app.storage.repair_pending =
+            !valid_a || !valid_b ||
+            status_a == AURORA_STORAGE_PAGE_VALID_LEGACY ||
+            status_b == AURORA_STORAGE_PAGE_VALID_LEGACY;
+        if (runtime->app.storage.repair_pending)
+        {
+            aurora_storage_mark_dirty(&runtime->app.storage, now_ms);
+        }
+        return;
     }
+
+    if ((status_a == AURORA_STORAGE_PAGE_ERASED) &&
+        (status_b == AURORA_STORAGE_PAGE_ERASED))
+    {
+        /* 工厂空白页使用显式默认设置，并在首次安全窗口建立第一份Journal。 */
+        aurora_storage_mark_dirty(&runtime->app.storage, now_ms);
+        return;
+    }
+
+    /*
+     * 两页都无可信配置且至少一页不是工厂擦除态：不能静默回退到72V铅酸默认档，
+     * 否则存储损坏可能改变电池化学体系/电压平台。锁存STORAGE故障等待人工重配。
+     */
+    aurora_protection_latch_fast_fault(&runtime->app.protection,
+                                       AURORA_FAULT_STORAGE, now_ms);
 }
+
 
 /*---------------------------------------------------------------------------*
  * Name        : static void runtime_storage(aurora_runtime_t *runtime,
@@ -572,6 +629,15 @@ static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
         return;
     }
     runtime->app.storage.dirty = false;
+    runtime->app.storage.repair_pending = false;
+    if (target == drv_board_flash_page_a())
+    {
+        runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
+    }
+    else
+    {
+        runtime->app.storage.page_b_status = AURORA_STORAGE_PAGE_VALID;
+    }
 }
 
 /*---------------------------------------------------------------------------*
@@ -643,6 +709,7 @@ void aurora_app_init(aurora_app_t *app,
                         now_ms);
     app->last_step_ms = now_ms;
     app->last_10ms = now_ms;
+    app->last_energy_history_ms = now_ms;
 }
 
 /*---------------------------------------------------------------------------*
@@ -665,6 +732,8 @@ void aurora_app_apply_settings(aurora_app_t *app,
     }
 
     app->storage.settings = *settings;
+    aurora_storage_energy_history_update(&app->storage.settings);
+    app->last_energy_history_ms = now_ms;
     aurora_charger_init(&app->charger, settings->chemistry, settings->pack, now_ms);
     aurora_mppt_reset(&app->mppt);
     aurora_power_stage_init(&app->power_stage, now_ms);
@@ -769,9 +838,28 @@ void aurora_app_step_1ms(aurora_app_t *app,
         {
             app->energy_accumulator_mw_ms -= AURORA_ONE_WH_MW_MS;
             app->storage.settings.lifetime_energy_wh++;
-            app->storage.settings.daily_energy_wh++;
+            aurora_storage_energy_history_update(&app->storage.settings);
             aurora_storage_mark_dirty(&app->storage, now_ms);
         }
+    }
+
+    /*
+     * 旧120W以49个累计能量点、每30min一个点实现24h=latest-oldest。
+     * 这里保持同样的30min时间分辨率，但Flash只在既有安全窗口落盘；
+     * RAM窗口在功率运行期间持续更新，不为统计功能破坏“运行/Relay闭合禁止擦写”红线。
+     */
+    if ((now_ms - app->last_energy_history_ms) >= AURORA_ENERGY_HISTORY_INTERVAL_MS)
+    {
+        uint32_t checkpoints = 0U;
+        do
+        {
+            aurora_storage_energy_history_checkpoint(&app->storage.settings);
+            app->last_energy_history_ms += AURORA_ENERGY_HISTORY_INTERVAL_MS;
+            checkpoints++;
+        } while (((now_ms - app->last_energy_history_ms) >=
+                  AURORA_ENERGY_HISTORY_INTERVAL_MS) &&
+                 (checkpoints < AURORA_ENERGY_HISTORY_POINT_COUNT));
+        aurora_storage_mark_dirty(&app->storage, now_ms);
     }
 
     aurora_measurement_estimate_battery_current(
@@ -929,7 +1017,12 @@ void aurora_app_on_protocol_frame(aurora_app_t *app,
     {
         app->storage.settings.lifetime_energy_wh = 0U;
         app->storage.settings.daily_energy_wh = 0U;
+        memset(app->storage.settings.energy_history_wh, 0,
+               sizeof(app->storage.settings.energy_history_wh));
+        app->storage.settings.energy_history_count = 1U;
+        app->storage.settings.energy_history_wh[0] = 0U;
         app->energy_accumulator_mw_ms = 0U;
+        app->last_energy_history_ms = now_ms;
         aurora_storage_mark_dirty(&app->storage, now_ms);
 
         memset(response, 0, sizeof(*response));

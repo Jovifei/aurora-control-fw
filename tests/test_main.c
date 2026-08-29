@@ -256,15 +256,23 @@ static void test_storage_atomic_format(void)
 
     aurora_storage_init_defaults(&ctx);
     ctx.sequence = 42U;
-    ctx.settings.daily_energy_wh = 123U;
+    ctx.settings.lifetime_energy_wh = 123U;
+    ctx.settings.energy_history_count = 1U;
+    ctx.settings.energy_history_wh[0] = 0U;
+    aurora_storage_energy_history_update(&ctx.settings);
     CHECK(aurora_storage_encode_page(&ctx, page, sizeof(page), false) != 0U);
     CHECK(!aurora_storage_decode_page(page, sizeof(page), &restored, &sequence));
     CHECK(aurora_storage_encode_page(&ctx, page, sizeof(page), true) != 0U);
     CHECK(aurora_storage_decode_page(page, sizeof(page), &restored, &sequence));
     CHECK(sequence == 42U);
     CHECK(restored.daily_energy_wh == 123U);
+    CHECK(restored.energy_history_count == 1U);
     page[AURORA_STORAGE_HEADER_SIZE] ^= 1U;
-    CHECK(!aurora_storage_decode_page(page, sizeof(page), &restored, &sequence));
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &restored, &sequence) ==
+          AURORA_STORAGE_PAGE_CRC_ERROR);
+    memset(page, 0xFF, sizeof(page));
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &restored, &sequence) ==
+          AURORA_STORAGE_PAGE_ERASED);
 }
 
 /*---------------------------------------------------------------------------*
@@ -826,6 +834,7 @@ static void test_v090_ntc_and_zero_quality(void)
     CHECK(out.mos_ntc_status == AURORA_NTC_STATUS_OK);
     CHECK(out.ambient_ntc_status == AURORA_NTC_STATUS_OK);
     CHECK(out.mos_temp_dC >= 240 && out.mos_temp_dC <= 260);
+    CHECK(out.ambient_temp_dC >= 240 && out.ambient_temp_dC <= 260);
 
     aurora_measurement_zero_cal_reset(&ctx);
     for (i = 0U; i < AURORA_ZERO_CAL_MAX_ATTEMPT_BLOCKS; ++i)
@@ -976,6 +985,123 @@ static void test_v090_bus_saturation_and_current_plausibility(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static void test_v091_rolling_24h_energy(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证49点累计量窗口形成48个30min间隔，并始终以总累计差值计算最近24h能量。
+ *---------------------------------------------------------------------------*/
+static void test_v091_rolling_24h_energy(void)
+{
+    aurora_persistent_settings_t settings;
+    uint32_t interval;
+
+    memset(&settings, 0, sizeof(settings));
+    settings.energy_history_count = 1U;
+    settings.energy_history_wh[0] = 1000U;
+    settings.lifetime_energy_wh = 1000U;
+
+    for (interval = 1U; interval <= 48U; ++interval)
+    {
+        settings.lifetime_energy_wh = 1000U + (interval * 10U);
+        aurora_storage_energy_history_checkpoint(&settings);
+    }
+    CHECK(settings.energy_history_count == AURORA_ENERGY_HISTORY_POINT_COUNT);
+    CHECK(settings.daily_energy_wh == 480U);
+
+    settings.lifetime_energy_wh += 20U;
+    aurora_storage_energy_history_checkpoint(&settings);
+    CHECK(settings.energy_history_count == AURORA_ENERGY_HISTORY_POINT_COUNT);
+    CHECK(settings.energy_history_wh[0] == 1010U);
+    CHECK(settings.daily_energy_wh == 490U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_v091_mppt_cloud_and_start_failure_vectors(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证云遮/外部限功率不被误当P-V斜率，并验证启动失败会增加下一次>15V动态延时。
+ *---------------------------------------------------------------------------*/
+static void test_v091_mppt_cloud_and_start_failure_vectors(void)
+{
+    aurora_mppt_ctx_t mppt_ctx;
+    aurora_mppt_output_t mppt_out;
+    aurora_measurement_t sample;
+    uint32_t reference_before_cloud;
+    aurora_power_stage_ctx_t power_ctx;
+    aurora_charge_output_t charger;
+    aurora_power_command_t command;
+
+    sample = valid_sample(30000, 2000, 48000, 47000, 0U);
+    aurora_mppt_init(&mppt_ctx);
+    aurora_mppt_set_open_circuit_voltage(&mppt_ctx, 40000U);
+    mppt_out = aurora_mppt_step(&mppt_ctx, &sample, 100000U, false, 10U);
+    CHECK(mppt_out.valid);
+    reference_before_cloud = mppt_ctx.target_voltage_mv;
+
+    /* 云遮导致可用功率包络下降时，以上层limited信号冻结搜索，不把跌功率误判为曲线方向。 */
+    sample.pv_current_ma = 500;
+    sample.pv_power_mw = 15000;
+    mppt_out = aurora_mppt_step(&mppt_ctx, &sample, 20000U, true, 90U);
+    CHECK(mppt_ctx.target_voltage_mv == reference_before_cloud);
+    CHECK(mppt_out.theoretical_power_mw <= 20000U);
+
+    memset(&charger, 0, sizeof(charger));
+    aurora_power_stage_init(&power_ctx, 0U);
+    power_ctx.state = AURORA_POWER_ZERO_CAL;
+    power_ctx.state_since_ms = 100U;
+    command = aurora_power_stage_step(&power_ctx, &sample, &mppt_out, &charger,
+                                      true, false, true, 101U);
+    CHECK(command.state == AURORA_POWER_FAULT);
+    CHECK(power_ctx.dynamic_start_delay_ms ==
+          AURORA_START_DELAY_MIN_MS + AURORA_START_DELAY_STEP_MS);
+
+    command = aurora_power_stage_step(&power_ctx, &sample, &mppt_out, &charger,
+                                      true, false, false,
+                                      101U + AURORA_RELAY_FAULT_RELEASE_MS);
+    CHECK(command.state == AURORA_POWER_WAIT_PV);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_v091_energy_reset_clears_rolling_history(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证能量RESET同时清空49点滚动历史、重新起算30min窗口，并保持v2 Flash页可序列化。
+ *---------------------------------------------------------------------------*/
+static void test_v091_energy_reset_clears_rolling_history(void)
+{
+    aurora_app_t app;
+    aurora_measurement_calibration_t calibration = unit_calibration();
+    aurora_protocol_frame_t request;
+    aurora_protocol_frame_t response;
+    bool has_response = false;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+
+    aurora_app_init(&app, &calibration, 100U);
+    app.storage.settings.lifetime_energy_wh = 1000U;
+    app.storage.settings.daily_energy_wh = 500U;
+    app.storage.settings.energy_history_count = 3U;
+    app.storage.settings.energy_history_wh[0] = 500U;
+    app.storage.settings.energy_history_wh[1] = 750U;
+    app.storage.settings.energy_history_wh[2] = 1000U;
+    app.last_energy_history_ms = 100U;
+
+    memset(&request, 0, sizeof(request));
+    request.resource = AURORA_PROTOCOL_RESOURCE_RESET;
+    request.action = AURORA_PROTOCOL_ACTION_WRITE;
+    request.message_id = 77U;
+    aurora_app_on_protocol_frame(&app, &request, &response, &has_response, 1234U);
+
+    CHECK(has_response);
+    CHECK(response.data[0] == AURORA_PROTOCOL_RESULT_OK);
+    CHECK(app.storage.settings.lifetime_energy_wh == 0U);
+    CHECK(app.storage.settings.daily_energy_wh == 0U);
+    CHECK(app.storage.settings.energy_history_count == 1U);
+    CHECK(app.storage.settings.energy_history_wh[0] == 0U);
+    CHECK(app.last_energy_history_ms == 1234U);
+    CHECK(aurora_storage_encode_page(&app.storage, page, sizeof(page), true) != 0U);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
  * Output      : 0表示全部Host回归通过
@@ -987,6 +1113,9 @@ int main(void)
     test_v090_ntc_and_zero_quality();
     test_v090_lead_temp_comp_and_mature_timing();
     test_v090_bus_saturation_and_current_plausibility();
+    test_v091_rolling_24h_energy();
+    test_v091_energy_reset_clears_rolling_history();
+    test_v091_mppt_cloud_and_start_failure_vectors();
     test_protocol_roundtrip();
     test_telemetry_legacy_identity();
     test_storage_atomic_format();

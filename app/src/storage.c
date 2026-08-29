@@ -61,6 +61,42 @@ static uint32_t get_u32_le(const uint8_t *source)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static bool energy_history_valid(
+ *               const aurora_persistent_settings_t *settings)
+ * Input       : settings - 待恢复的持久化设置
+ * Output      : true表示历史数量、单调性和总累计边界均合法
+ * Description : 24h历史保存的是生命周期累计Wh快照，必须单调不减且不能超过当前总量。
+ *---------------------------------------------------------------------------*/
+static bool energy_history_valid(const aurora_persistent_settings_t *settings)
+{
+    uint32_t previous;
+    size_t index;
+
+    if ((settings == NULL) || (settings->energy_history_count == 0U) ||
+        (settings->energy_history_count > AURORA_ENERGY_HISTORY_POINT_COUNT))
+    {
+        return false;
+    }
+
+    previous = settings->energy_history_wh[0];
+    if (previous > settings->lifetime_energy_wh)
+    {
+        return false;
+    }
+    for (index = 1U; index < settings->energy_history_count; ++index)
+    {
+        const uint32_t current = settings->energy_history_wh[index];
+        if ((current < previous) || (current > settings->lifetime_energy_wh))
+        {
+            return false;
+        }
+        previous = current;
+    }
+    return true;
+}
+
+
+/*---------------------------------------------------------------------------*
  * Name        : uint32_t aurora_storage_crc32(const uint8_t *data, size_t length)
  * Input       : data - 数据缓冲区；length - 数据长度
  * Output      : IEEE CRC-32；data为空时返回0
@@ -94,7 +130,7 @@ uint32_t aurora_storage_crc32(const uint8_t *data, size_t length)
  * Name        : void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)
  * Input       : ctx - 存储上下文
  * Output      : 无
- * Description : 清零Journal状态并装载新机默认档案；当前默认是铅酸72V，后续可由协议修改。
+ * Description : 初始化默认电池档案、24h滚动能量基准和双页Journal状态，不执行Flash写入。
  *---------------------------------------------------------------------------*/
 void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)
 {
@@ -107,8 +143,13 @@ void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)
     ctx->settings.chemistry = AURORA_CHEM_LEAD;
     ctx->settings.pack = AURORA_PACK_72V;
     ctx->settings.settings_revision = 1U;
+    ctx->settings.energy_history_count = 1U;
+    ctx->settings.energy_history_wh[0] = 0U;
+    ctx->page_a_status = AURORA_STORAGE_PAGE_ERASED;
+    ctx->page_b_status = AURORA_STORAGE_PAGE_ERASED;
     ctx->sequence = 1U;
 }
+
 
 /*---------------------------------------------------------------------------*
  * Name        : void aurora_storage_mark_dirty(aurora_storage_ctx_t *ctx, uint32_t now_ms)
@@ -143,9 +184,11 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
 {
     uint8_t *payload;
     uint32_t crc;
+    size_t index;
 
     if ((ctx == NULL) || (page == NULL) ||
-        (page_size < AURORA_STORAGE_PAGE_SIZE))
+        (page_size < AURORA_STORAGE_PAGE_SIZE) ||
+        !energy_history_valid(&ctx->settings))
     {
         return 0U;
     }
@@ -159,12 +202,19 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
     payload = &page[AURORA_STORAGE_HEADER_SIZE];
     payload[AURORA_STORAGE_CHEMISTRY_OFFSET] = (uint8_t)ctx->settings.chemistry;
     payload[AURORA_STORAGE_PACK_OFFSET] = (uint8_t)ctx->settings.pack;
+    payload[AURORA_STORAGE_HISTORY_COUNT_OFFSET] = ctx->settings.energy_history_count;
+    payload[AURORA_STORAGE_HISTORY_COUNT_OFFSET + 1U] = 0U;
     put_u32_le(&payload[AURORA_STORAGE_LIFETIME_ENERGY_OFFSET],
                ctx->settings.lifetime_energy_wh);
     put_u32_le(&payload[AURORA_STORAGE_DAILY_ENERGY_OFFSET],
                ctx->settings.daily_energy_wh);
     put_u32_le(&payload[AURORA_STORAGE_REVISION_OFFSET],
                ctx->settings.settings_revision);
+    for (index = 0U; index < AURORA_ENERGY_HISTORY_POINT_COUNT; ++index)
+    {
+        put_u32_le(&payload[AURORA_STORAGE_ENERGY_HISTORY_OFFSET + (index * 4U)],
+                   ctx->settings.energy_history_wh[index]);
+    }
 
     crc = aurora_storage_crc32(payload, AURORA_STORAGE_PAYLOAD_SIZE);
     put_u32_le(&page[AURORA_STORAGE_CRC_OFFSET], crc);
@@ -174,42 +224,63 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
     return AURORA_STORAGE_HEADER_SIZE + AURORA_STORAGE_PAYLOAD_SIZE;
 }
 
+
 /*---------------------------------------------------------------------------*
  * Name        : bool aurora_storage_decode_page(const uint8_t *page, size_t page_size, aurora_persistent_settings_t *settings, uint32_t *sequence)
  * Input       : page - 页缓冲区；page_size - 缓冲区大小；settings - 设置输出；sequence - 序号输出
  * Output      : true表示页头、Commit Marker、CRC和枚举范围全部有效
  * Description : 严格校验双页Journal记录；任何字段不一致都拒绝恢复，避免半写页进入运行配置。
  *---------------------------------------------------------------------------*/
-bool aurora_storage_decode_page(const uint8_t *page,
-                                size_t page_size,
-                                aurora_persistent_settings_t *settings,
-                                uint32_t *sequence)
+aurora_storage_page_status_t aurora_storage_classify_page(
+    const uint8_t *page,
+    size_t page_size,
+    aurora_persistent_settings_t *settings,
+    uint32_t *sequence)
 {
     const uint8_t *payload;
     uint16_t version;
     uint16_t payload_size;
+    uint16_t expected_size;
     uint32_t expected_crc;
     uint32_t actual_crc;
+    uint32_t magic;
+    uint32_t commit;
+    size_t index;
 
     if ((page == NULL) || (settings == NULL) || (sequence == NULL) ||
         (page_size < AURORA_STORAGE_PAGE_SIZE))
     {
-        return false;
+        return AURORA_STORAGE_PAGE_CONTENT_ERROR;
     }
 
-    /* Magic和Commit Marker先行，快速拒绝擦除页及掉电半写页。 */
-    if ((get_u32_le(&page[AURORA_STORAGE_MAGIC_OFFSET]) != AURORA_STORAGE_MAGIC) ||
-        (get_u32_le(&page[AURORA_STORAGE_COMMIT_OFFSET]) != AURORA_STORAGE_COMMIT_MARKER))
+    magic = get_u32_le(&page[AURORA_STORAGE_MAGIC_OFFSET]);
+    commit = get_u32_le(&page[AURORA_STORAGE_COMMIT_OFFSET]);
+    if ((magic == STORAGE_ERASED_WORD) && (commit == STORAGE_ERASED_WORD))
     {
-        return false;
+        return AURORA_STORAGE_PAGE_ERASED;
+    }
+    if ((magic != AURORA_STORAGE_MAGIC) || (commit != AURORA_STORAGE_COMMIT_MARKER))
+    {
+        return AURORA_STORAGE_PAGE_INCOMPLETE;
     }
 
     version = get_u16_le(&page[AURORA_STORAGE_VERSION_OFFSET]);
     payload_size = get_u16_le(&page[AURORA_STORAGE_LENGTH_OFFSET]);
-    if ((version != AURORA_STORAGE_VERSION) ||
-        (payload_size != AURORA_STORAGE_PAYLOAD_SIZE))
+    if (version == AURORA_STORAGE_VERSION)
     {
-        return false;
+        expected_size = AURORA_STORAGE_PAYLOAD_SIZE;
+    }
+    else if (version == AURORA_STORAGE_VERSION_LEGACY)
+    {
+        expected_size = AURORA_STORAGE_LEGACY_PAYLOAD_SIZE;
+    }
+    else
+    {
+        return AURORA_STORAGE_PAGE_VERSION_ERROR;
+    }
+    if (payload_size != expected_size)
+    {
+        return AURORA_STORAGE_PAGE_VERSION_ERROR;
     }
 
     payload = &page[AURORA_STORAGE_HEADER_SIZE];
@@ -217,18 +288,127 @@ bool aurora_storage_decode_page(const uint8_t *page,
     actual_crc = aurora_storage_crc32(payload, payload_size);
     if (expected_crc != actual_crc)
     {
-        return false;
+        return AURORA_STORAGE_PAGE_CRC_ERROR;
     }
 
     memset(settings, 0, sizeof(*settings));
     settings->chemistry = (aurora_battery_chem_t)payload[AURORA_STORAGE_CHEMISTRY_OFFSET];
     settings->pack = (aurora_battery_pack_t)payload[AURORA_STORAGE_PACK_OFFSET];
-    settings->lifetime_energy_wh = get_u32_le(&payload[AURORA_STORAGE_LIFETIME_ENERGY_OFFSET]);
-    settings->daily_energy_wh = get_u32_le(&payload[AURORA_STORAGE_DAILY_ENERGY_OFFSET]);
-    settings->settings_revision = get_u32_le(&payload[AURORA_STORAGE_REVISION_OFFSET]);
+    settings->lifetime_energy_wh =
+        get_u32_le(&payload[AURORA_STORAGE_LIFETIME_ENERGY_OFFSET]);
+    settings->settings_revision =
+        get_u32_le(&payload[AURORA_STORAGE_REVISION_OFFSET]);
     *sequence = get_u32_le(&page[AURORA_STORAGE_SEQUENCE_OFFSET]);
 
-    /* 未知枚举不能进入充电状态机。 */
-    return (settings->chemistry < AURORA_CHEM_COUNT) &&
-           (settings->pack < AURORA_PACK_COUNT);
+    if ((settings->chemistry >= AURORA_CHEM_COUNT) ||
+        (settings->pack >= AURORA_PACK_COUNT))
+    {
+        return AURORA_STORAGE_PAGE_CONTENT_ERROR;
+    }
+
+    if (version == AURORA_STORAGE_VERSION_LEGACY)
+    {
+        /*
+         * v1的daily字段是单调累计而非真正24h；迁移时不能伪装成有效窗口。
+         * 从当前总累计建立第一个基准点，随后按30min逐步形成真实24h历史。
+         */
+        settings->daily_energy_wh = 0U;
+        settings->energy_history_count = 1U;
+        settings->energy_history_wh[0] = settings->lifetime_energy_wh;
+        return AURORA_STORAGE_PAGE_VALID_LEGACY;
+    }
+
+    settings->energy_history_count = payload[AURORA_STORAGE_HISTORY_COUNT_OFFSET];
+    for (index = 0U; index < AURORA_ENERGY_HISTORY_POINT_COUNT; ++index)
+    {
+        settings->energy_history_wh[index] =
+            get_u32_le(&payload[AURORA_STORAGE_ENERGY_HISTORY_OFFSET + (index * 4U)]);
+    }
+    if (!energy_history_valid(settings))
+    {
+        return AURORA_STORAGE_PAGE_CONTENT_ERROR;
+    }
+    aurora_storage_energy_history_update(settings);
+    return AURORA_STORAGE_PAGE_VALID;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool aurora_storage_decode_page(const uint8_t *page,
+ *               size_t page_size, aurora_persistent_settings_t *settings,
+ *               uint32_t *sequence)
+ * Input       : page/page_size - Flash页；settings/sequence - 恢复输出
+ * Output      : true表示当前或可迁移的旧版本记录有效
+ * Description : 保留原布尔接口给旧调用方；详细失败原因由classify接口提供。
+ *---------------------------------------------------------------------------*/
+bool aurora_storage_decode_page(const uint8_t *page,
+                                size_t page_size,
+                                aurora_persistent_settings_t *settings,
+                                uint32_t *sequence)
+{
+    const aurora_storage_page_status_t status =
+        aurora_storage_classify_page(page, page_size, settings, sequence);
+    return (status == AURORA_STORAGE_PAGE_VALID) ||
+           (status == AURORA_STORAGE_PAGE_VALID_LEGACY);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_storage_energy_history_update(
+ *               aurora_persistent_settings_t *settings)
+ * Input       : settings - 当前持久化设置
+ * Output      : 无
+ * Description : 用当前总累计减最老快照得到最近24h滚动量；历史不足24h时表示自首次有效快照以来能量。
+ *---------------------------------------------------------------------------*/
+void aurora_storage_energy_history_update(aurora_persistent_settings_t *settings)
+{
+    uint32_t oldest;
+
+    if (settings == NULL)
+    {
+        return;
+    }
+    if ((settings->energy_history_count == 0U) ||
+        (settings->energy_history_count > AURORA_ENERGY_HISTORY_POINT_COUNT))
+    {
+        memset(settings->energy_history_wh, 0, sizeof(settings->energy_history_wh));
+        settings->energy_history_count = 1U;
+        settings->energy_history_wh[0] = settings->lifetime_energy_wh;
+    }
+
+    oldest = settings->energy_history_wh[0];
+    settings->daily_energy_wh =
+        (settings->lifetime_energy_wh >= oldest) ?
+            (settings->lifetime_energy_wh - oldest) : 0U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_storage_energy_history_checkpoint(
+ *               aurora_persistent_settings_t *settings)
+ * Input       : settings - 当前持久化设置
+ * Output      : 无
+ * Description : 每30min追加生命周期累计Wh快照；满49点后左移一格，使首尾始终覆盖最近48个间隔。
+ *---------------------------------------------------------------------------*/
+void aurora_storage_energy_history_checkpoint(aurora_persistent_settings_t *settings)
+{
+    if (settings == NULL)
+    {
+        return;
+    }
+
+    aurora_storage_energy_history_update(settings);
+    if (settings->energy_history_count < AURORA_ENERGY_HISTORY_POINT_COUNT)
+    {
+        settings->energy_history_wh[settings->energy_history_count] =
+            settings->lifetime_energy_wh;
+        settings->energy_history_count++;
+    }
+    else
+    {
+        memmove(&settings->energy_history_wh[0],
+                &settings->energy_history_wh[1],
+                (AURORA_ENERGY_HISTORY_POINT_COUNT - 1U) *
+                    sizeof(settings->energy_history_wh[0]));
+        settings->energy_history_wh[AURORA_ENERGY_HISTORY_POINT_COUNT - 1U] =
+            settings->lifetime_energy_wh;
+    }
+    aurora_storage_energy_history_update(settings);
 }

@@ -23,6 +23,8 @@ extern "C" {
 /* 单个DMA半缓冲包含的16位采样字数。 */
 #define AURORA_ADC_BLOCK_WORDS                      (AURORA_ADC_CHANNEL_COUNT * \
                                                      AURORA_ADC_SCANS_PER_BLOCK)
+/* 24h滚动能量保存49个累计Wh快照，等价于旧120W的48个30min间隔。 */
+#define AURORA_ENERGY_HISTORY_POINT_COUNT           (49U)
 /* 旧产品协议允许的最大数据载荷长度。 */
 #define AURORA_PROTOCOL_MAX_DATA                    (127U)
 
@@ -282,15 +284,17 @@ typedef struct
     bool led_fault_on;                               /* FAULT灯逻辑点亮请求。 */
 } aurora_ui_output_t;
 
-/* 需要持久化的用户设置和累计数据。 */
+/* 需要持久化的用户设置、累计量和24h滚动窗口。 */
 typedef struct
 {
     uint32_t lifetime_energy_wh;                     /* 生命周期累计充电能量，Wh。 */
-    uint32_t daily_energy_wh;                        /* 本统计日累计充电能量，Wh。 */
+    uint32_t daily_energy_wh;                        /* 最近24h滚动能量，30min分辨率，Wh。 */
     uint32_t settings_revision;                      /* 每次有效设置变更递增。 */
+    uint32_t energy_history_wh[AURORA_ENERGY_HISTORY_POINT_COUNT]; /* 累计Wh历史快照。 */
     aurora_battery_chem_t chemistry;                 /* 用户选择的电池化学体系。 */
     aurora_battery_pack_t pack;                      /* 用户选择的电压平台。 */
-    uint16_t layout_reserved;                        /* 显式补齐存储布局。 */
+    uint8_t energy_history_count;                    /* 已建立的有效快照数量，1~49。 */
+    uint8_t layout_reserved[3];                      /* 显式补齐到32位边界。 */
 } aurora_persistent_settings_t;
 
 #ifdef __cplusplus

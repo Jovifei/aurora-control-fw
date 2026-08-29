@@ -170,8 +170,13 @@
 #define AURORA_BAT_OV_RECOVER_DELAY_MS              (2500U)
 
 /* ---------------- 温度与NTC ---------------- */
-/* 新旧原理图均为5.1k上拉+100K/B3950下拉；ADC参考与上拉同源，因此5V→3.3V不会改变R-ADC比值。 */
+/*
+ * 两路NTC均为5.1k上拉+100K/B3950下拉；ADC参考与上拉同源，
+ * 因此5V→3.3V不会改变R-ADC比值。环境探头型号已由硬件确认与MOS探头相同。
+ */
 #define AURORA_NTC_PULL_OHM                         (5100UL)
+#define AURORA_NTC_R25_OHM                          (100000UL)
+#define AURORA_NTC_BETA_KELVIN                      (3950UL)
 /* 物理开路会把ADC拉向VDD；物理短路会把ADC拉向GND。阈值留有-40°C正常端点余量。 */
 #define AURORA_NTC_OPEN_RAW_MIN                     (4093U)
 #define AURORA_NTC_SHORT_RAW_MAX                    (64U)
@@ -276,6 +281,8 @@
 /* 主动遥测与存储。 */
 #define AURORA_TELEMETRY_PERIOD_MS                  (1000U)
 #define AURORA_STORAGE_DIRTY_HOLD_MS                (1000U)
+/* 继承120W的49点累计量窗口：每30min一个快照，48个间隔构成24h。 */
+#define AURORA_ENERGY_HISTORY_INTERVAL_MS            (30UL * 60UL * 1000UL)
 #define AURORA_FW_VERSION_MAJOR                     (2U)
 #define AURORA_FW_VERSION_MINOR                     (0U)
 #define AURORA_FW_VERSION_PATCH                     (8U)

@@ -79,8 +79,19 @@
 
 /* 12位ADC满量程码值。 */
 #define BOARD_ADC_FULL_SCALE_CODE                   (4095L)
-/* 模拟参考电压名义值，mV；实板标定前不得改为已验证。 */
+/* 模拟参考电压名义值，mV；HT75R33-1输出VDD同时作为MCU ADC参考。 */
 #define BOARD_ADC_REFERENCE_MV                      (3300L)
+/*
+ * 两路NTC均由同一3.3V VDD上拉，且ADC参考也是该VDD。
+ * 硬件已确认外接环境探头与板载MOS探头使用相同100K/B3950温度特性；
+ * 因此5V→3.3V只改变节点绝对电压，不改变ADC码比或R-T曲线。
+ */
+#define BOARD_NTC_MOS_PULLUP_OHM                    (5100L)
+#define BOARD_NTC_MOS_R25_OHM                       (100000L)
+#define BOARD_NTC_MOS_BETA_KELVIN                   (3950L)
+#define BOARD_NTC_AMB_PULLUP_OHM                    (5100L)
+#define BOARD_NTC_AMB_R25_OHM                       (100000L)
+#define BOARD_NTC_AMB_BETA_KELVIN                   (3950L)
 /*
  * PV_I：3mΩ分流器×内部16倍OPA，3.3V/12bit下理论约16.79mA/码。
  * 300W新板没有旧120W的VDDA/2电流偏置，零电流理论码接近0；实际零点必须在PWM/Relay关闭时运行时校准。
