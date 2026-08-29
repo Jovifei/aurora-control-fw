@@ -1,4 +1,4 @@
-name: Apply v0.9.1 closeout
+name: Finalize v0.9.1 energy reset
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,18 +25,7 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Reassemble reviewed patch
-        run: |
-          cat tools/.v091_patch_0* | base64 -d > tools/.apply_v091_closeout.py
-          python -m py_compile tools/.apply_v091_closeout.py
-
-      - name: Apply v0.9.1 closeout
-        run: |
-          python tools/.apply_v091_closeout.py
-          rm -f tools/.apply_v091_closeout.py
-          rm -rf tools/__pycache__
-
-      - name: Normalize generated code style
+      - name: Apply reviewed reset fix and regression
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -44,36 +33,41 @@ jobs:
           root = Path.cwd()
 
           def replace_once(path, old, new):
-              file_path = root / path
-              text = file_path.read_text(encoding="utf-8")
-              if text.count(old) != 1:
-                  raise RuntimeError(f"{path}: expected one style anchor, found {text.count(old)}")
-              file_path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
+              p = root / path
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one anchor, found {count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
 
           replace_once(
               "app/src/main.c",
-              """/*---------------------------------------------------------------------------*\n * Name        : static void load_storage(aurora_runtime_t *runtime)\n{\n""",
-              """/*---------------------------------------------------------------------------*\n * Name        : static void load_storage(aurora_runtime_t *runtime)\n * Input       : runtime - 应用运行上下文\n * Output      : 无\n * Description : 分类读取Flash A/B页并选择最新可信记录；单页异常安排安全窗口自愈，两页不可恢复时锁存存储故障。\n *---------------------------------------------------------------------------*/\nstatic void load_storage(aurora_runtime_t *runtime)\n{\n""",
+              """        app->storage.settings.lifetime_energy_wh = 0U;\n        app->storage.settings.daily_energy_wh = 0U;\n        app->energy_accumulator_mw_ms = 0U;\n        aurora_storage_mark_dirty(&app->storage, now_ms);\n""",
+              """        app->storage.settings.lifetime_energy_wh = 0U;\n        app->storage.settings.daily_energy_wh = 0U;\n        memset(app->storage.settings.energy_history_wh, 0,\n               sizeof(app->storage.settings.energy_history_wh));\n        app->storage.settings.energy_history_count = 1U;\n        app->storage.settings.energy_history_wh[0] = 0U;\n        app->energy_accumulator_mw_ms = 0U;\n        app->last_energy_history_ms = now_ms;\n        aurora_storage_mark_dirty(&app->storage, now_ms);\n""",
           )
-          replace_once(
-              "app/src/storage.c",
-              """/*---------------------------------------------------------------------------*\n * Name        : void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n{\n""",
-              """/*---------------------------------------------------------------------------*\n * Name        : void aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n * Input       : ctx - 存储上下文\n * Output      : 无\n * Description : 初始化默认电池档案、24h滚动能量基准和双页Journal状态，不执行Flash写入。\n *---------------------------------------------------------------------------*/\nvoid aurora_storage_init_defaults(aurora_storage_ctx_t *ctx)\n{\n""",
-          )
-          replace_once(
-              "app/inc/storage.h",
-              """typedef uint8_t aurora_storage_page_status_t;\n#define AURORA_STORAGE_PAGE_VALID                   ((aurora_storage_page_status_t)0U)\n""",
-              """typedef uint8_t aurora_storage_page_status_t;\n/* 页状态编码供启动分类、自愈策略和诊断使用。 */\n#define AURORA_STORAGE_PAGE_VALID                   ((aurora_storage_page_status_t)0U)\n""",
-          )
+
+          test_path = root / "tests/test_main.c"
+          test_text = test_path.read_text(encoding="utf-8")
+          marker = """/*---------------------------------------------------------------------------*\n * Name        : int main(void)\n"""
+          if test_text.count(marker) != 1:
+              raise RuntimeError("tests/test_main.c: main marker mismatch")
+          new_test = """/*---------------------------------------------------------------------------*\n * Name        : static void test_v091_energy_reset_clears_rolling_history(void)\n * Input       : 无\n * Output      : 无\n * Description : 验证能量RESET同时清空49点滚动历史、重新起算30min窗口，并保持v2 Flash页可序列化。\n *---------------------------------------------------------------------------*/\nstatic void test_v091_energy_reset_clears_rolling_history(void)\n{\n    aurora_app_t app;\n    aurora_measurement_calibration_t calibration = unit_calibration();\n    aurora_protocol_frame_t request;\n    aurora_protocol_frame_t response;\n    bool has_response = false;\n    uint8_t page[AURORA_STORAGE_PAGE_SIZE];\n\n    aurora_app_init(&app, &calibration, 100U);\n    app.storage.settings.lifetime_energy_wh = 1000U;\n    app.storage.settings.daily_energy_wh = 500U;\n    app.storage.settings.energy_history_count = 3U;\n    app.storage.settings.energy_history_wh[0] = 500U;\n    app.storage.settings.energy_history_wh[1] = 750U;\n    app.storage.settings.energy_history_wh[2] = 1000U;\n    app.last_energy_history_ms = 100U;\n\n    memset(&request, 0, sizeof(request));\n    request.resource = AURORA_PROTOCOL_RESOURCE_RESET;\n    request.action = AURORA_PROTOCOL_ACTION_WRITE;\n    request.message_id = 77U;\n    aurora_app_on_protocol_frame(&app, &request, &response, &has_response, 1234U);\n\n    CHECK(has_response);\n    CHECK(response.data[0] == AURORA_PROTOCOL_RESULT_OK);\n    CHECK(app.storage.settings.lifetime_energy_wh == 0U);\n    CHECK(app.storage.settings.daily_energy_wh == 0U);\n    CHECK(app.storage.settings.energy_history_count == 1U);\n    CHECK(app.storage.settings.energy_history_wh[0] == 0U);\n    CHECK(app.last_energy_history_ms == 1234U);\n    CHECK(aurora_storage_encode_page(&app.storage, page, sizeof(page), true) != 0U);\n}\n\n"""
+          test_text = test_text.replace(marker, new_test + marker, 1)
+          call_anchor = """    test_v091_rolling_24h_energy();\n    test_v091_mppt_cloud_and_start_failure_vectors();\n"""
+          call_new = """    test_v091_rolling_24h_energy();\n    test_v091_energy_reset_clears_rolling_history();\n    test_v091_mppt_cloud_and_start_failure_vectors();\n"""
+          if test_text.count(call_anchor) != 1:
+              raise RuntimeError("tests/test_main.c: test call anchor mismatch")
+          test_path.write_text(test_text.replace(call_anchor, call_new, 1),
+                               encoding="utf-8", newline="\n")
           PY
 
       - name: Run all firmware checks
         run: python tools/run_checks.py
 
-      - name: Commit generated closeout
+      - name: Commit final v0.9.1 fix
         run: |
           git config user.name "Jovifei"
           git config user.email "110970864+Jovifei@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: v0.9.1 close NTC and remaining parity gaps"
+          git add app/src/main.c tests/test_main.c
+          git commit -m "fix: reset rolling energy history atomically"
           git push origin HEAD:${GITHUB_REF_NAME}
