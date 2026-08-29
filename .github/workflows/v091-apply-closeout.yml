@@ -36,6 +36,15 @@ jobs:
           rm -f tools/.apply_v091_closeout.py
           rm -rf tools/__pycache__
 
+      - name: Show generated closeout layout
+        run: |
+          echo '--- app/src/main.c 470-670 ---'
+          nl -ba app/src/main.c | sed -n '470,670p'
+          echo '--- app/src/storage.c 105-155 ---'
+          nl -ba app/src/storage.c | sed -n '105,155p'
+          echo '--- app/inc/storage.h 35-65 ---'
+          nl -ba app/inc/storage.h | sed -n '35,65p'
+
       - name: Run all firmware checks
         run: python tools/run_checks.py
 
