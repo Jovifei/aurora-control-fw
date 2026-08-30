@@ -1,0 +1,151 @@
+name: Generate function-level code analysis and comments
+
+on:
+  push:
+    branches:
+      - codex/v0.10.1-function-docs-comments
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Generate source comments and function-level documents
+        run: |
+          python tools/_one_shot_generate_code_analysis.py
+          python tools/_one_shot_fix_generated_audits.py
+
+      - name: Verify firmware C tokens are unchanged
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+
+          root = Path('.')
+          paths = sorted(list(root.glob('app/**/*.c')) + list(root.glob('app/**/*.h')) +
+                         list(root.glob('driver/**/*.c')) + list(root.glob('driver/**/*.h')))
+
+          def normalize(text: str) -> str:
+              out = []
+              i = 0
+              state = 'code'
+              while i < len(text):
+                  ch = text[i]
+                  nxt = text[i + 1] if i + 1 < len(text) else ''
+                  if state == 'code':
+                      if ch == '/' and nxt == '/':
+                          state = 'line'; i += 2; continue
+                      if ch == '/' and nxt == '*':
+                          state = 'block'; i += 2; continue
+                      if ch == '"':
+                          out.append(ch); state = 'string'; i += 1; continue
+                      if ch == "'":
+                          out.append(ch); state = 'char'; i += 1; continue
+                      if not ch.isspace():
+                          out.append(ch)
+                      i += 1; continue
+                  if state == 'line':
+                      if ch == '\n': state = 'code'
+                      i += 1; continue
+                  if state == 'block':
+                      if ch == '*' and nxt == '/': state = 'code'; i += 2
+                      else: i += 1
+                      continue
+                  out.append(ch)
+                  if ch == '\\' and i + 1 < len(text):
+                      out.append(text[i + 1]); i += 2; continue
+                  if (state == 'string' and ch == '"') or (state == 'char' and ch == "'"):
+                      state = 'code'
+                  i += 1
+              return ''.join(out)
+
+          errors = []
+          for path in paths:
+              rel = path.as_posix()
+              try:
+                  before = subprocess.check_output(['git', 'show', f'HEAD:{rel}']).decode('utf-8', errors='strict')
+              except subprocess.CalledProcessError:
+                  continue
+              after = path.read_bytes().decode('utf-8', errors='strict')
+              a = hashlib.sha256(normalize(before).encode()).hexdigest()
+              b = hashlib.sha256(normalize(after).encode()).hexdigest()
+              if a != b:
+                  errors.append(rel)
+          if errors:
+              raise SystemExit('Executable token mismatch: ' + ', '.join(errors))
+          print(f'Executable token invariant PASS: {len(paths)} files')
+          PY
+
+      - name: Run encoding, comment and firmware quality gates
+        run: |
+          python tools/check_text_encoding.py
+          python tools/check_comment_style.py
+          python tools/run_checks.py
+          git diff --check
+
+      - name: Finalize report and install permanent audit workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for rel in [
+              'docs/程序代码分析/19-构建与质量门验证报告.md',
+              'docs/程序代码分析/20-300W函数级代码分析与注释交付报告.md',
+          ]:
+              path = Path(rel)
+              text = path.read_text(encoding='utf-8', errors='strict')
+              text = text.replace('__QUALITY_STATUS__', 'PASS（生成提交前已通过编码、注释与 tools/run_checks.py 全部质量门）')
+              path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+          rm -f tools/_one_shot_generate_code_analysis.py
+          rm -f tools/_one_shot_fix_generated_audits.py
+          cat > .github/workflows/code-analysis-comments-audit.yml <<'YAML'
+          name: Code analysis, comment and UTF-8 audit
+
+          on:
+            pull_request:
+              paths:
+                - 'app/**'
+                - 'driver/**'
+                - 'docs/**'
+                - 'tools/check_comment_style.py'
+                - 'tools/check_text_encoding.py'
+                - '.github/workflows/code-analysis-comments-audit.yml'
+            push:
+              branches:
+                - main
+
+          permissions:
+            contents: read
+
+          jobs:
+            audit:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Strict UTF-8 and mojibake audit
+                  run: python tools/check_text_encoding.py
+                - name: APP and Driver comment-style audit
+                  run: python tools/check_comment_style.py
+                - name: Existing firmware quality gates
+                  run: python tools/run_checks.py
+          YAML
+          git diff --check
+
+      - name: Commit generated deliverables
+        run: |
+          git add -A
+          git commit -m "docs(code): add function-level analysis and audited APP/Driver comments"
+          git push origin HEAD:codex/v0.10.1-function-docs-comments
