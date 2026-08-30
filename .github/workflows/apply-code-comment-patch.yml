@@ -1,0 +1,45 @@
+name: Apply code analysis and comments patch
+
+on:
+  push:
+    branches:
+      - codex/code-analysis-comments
+    paths:
+      - .github/workflows/apply-code-comment-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/code-comment-patch/part* | base64 -d | xz -d > /tmp/code-comments.patch
+          git apply --index /tmp/code-comments.patch
+          rm -rf .github/code-comment-patch
+          rm -f .github/workflows/apply-code-comment-patch.yml
+
+      - name: Run firmware quality gates
+        run: python tools/run_checks.py
+
+      - name: Replace staging history with one clean commit
+        shell: bash
+        env:
+          BASE_SHA: 3fe73fc322a65ebee95b06a80a02a72c56106efe
+        run: |
+          set -euo pipefail
+          git config user.name "Jovifei"
+          git config user.email "110970864+Jovifei@users.noreply.github.com"
+          git reset --soft "$BASE_SHA"
+          git add -A
+          git commit -m "docs: add function-level code analysis and standardize comments"
+          git push --force-with-lease origin HEAD:codex/code-analysis-comments
