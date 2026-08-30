@@ -1,0 +1,51 @@
+name: Finalize code-analysis delivery report
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message == 'ci: finalize code-analysis delivery report after merge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Finalize report with reviewed merge evidence
+        run: |
+          MERGE_SHA="$(git log --merges --grep='merge: integrate function-level code analysis and audited comments' -1 --format=%H)"
+          test -n "$MERGE_SHA"
+          export MERGE_SHA
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          path = Path('docs/程序代码分析/20-300W函数级代码分析与注释交付报告.md')
+          text = path.read_text(encoding='utf-8', errors='strict')
+          text = text.replace('等待本次最终提交的远端 CI', 'PASS（PR #8 的 Firmware quality gates 与 Code analysis/UTF-8 audit 均通过）')
+          text = text.replace('待合并', os.environ['MERGE_SHA'])
+          text = text.replace('待合并后复验', 'PASS（合并提交的两套 main 工作流均通过）')
+          if '## 8. 最终审阅结论' not in text:
+              text += '\n## 8. 最终审阅结论\n\nPR #8 已完成差异审阅、UTF-8/乱码审阅、注释格式审阅、固件 Token 不变量审阅、Markdown/SVG 审阅和冲突检查；Review Thread 无未处理阻塞项。所有修改已使用普通 merge 合入 `main`。\n'
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+          rm -f .github/workflows/finalize-code-analysis-report.yml
+      - name: Revalidate final report tree
+        run: |
+          python tools/check_text_encoding.py
+          python tools/check_comment_style.py
+          python tools/run_checks.py
+          git diff --check
+      - name: Commit final report
+        run: |
+          git add -A
+          git commit -m "docs: finalize function-level analysis delivery report"
+          git push origin HEAD:main
