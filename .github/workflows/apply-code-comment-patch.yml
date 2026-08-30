@@ -23,7 +23,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/code-comment-patch/part* | base64 -d | xz -d > /tmp/code-comments.patch
+          cat .github/code-comment-patch/part* > /tmp/code-comments.patch.xz.b64
+          test "$(sha256sum /tmp/code-comments.patch.xz.b64 | cut -d' ' -f1)" = "fa43094a0df32dc901ffabe9740473befbb412045ce17441d95e817f1eb4656b"
+          base64 -d /tmp/code-comments.patch.xz.b64 > /tmp/code-comments.patch.xz
+          test "$(sha256sum /tmp/code-comments.patch.xz | cut -d' ' -f1)" = "735516738e0bb2ed4e1debffb501cfba8b53165270cda9b803ec9367c1036d85"
+          xz -t /tmp/code-comments.patch.xz
+          xz -d -c /tmp/code-comments.patch.xz > /tmp/code-comments.patch
           git apply --index /tmp/code-comments.patch
           rm -rf .github/code-comment-patch
           rm -f .github/workflows/apply-code-comment-patch.yml
