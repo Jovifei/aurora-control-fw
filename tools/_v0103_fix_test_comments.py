@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-path = Path(__file__).resolve().parents[1] / "tests/test_v0103.c"
+root = Path(__file__).resolve().parents[1]
+path = root / "tests/test_v0103.c"
 text = path.read_text(encoding="utf-8")
 
 headers = {
@@ -101,4 +102,45 @@ for signature, replacement in headers.items():
     text = text.replace(signature, replacement, 1)
 
 path.write_text(text, encoding="utf-8", newline="\n")
-print("v0.10.3 test function comments normalized")
+
+# 主修补脚本运行时的三引号会把 \x00 转成真实NUL；这里使用 raw 字符串覆盖成合法的永久检查器。
+encoding_gate = r'''#!/usr/bin/env python3
+"""严格检查工程文本编码，防止UTF-8/GBK误转和常见乱码进入仓库。"""
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+SUFFIXES = {".c", ".h", ".py", ".md", ".yml", ".yaml", ".cmake", ".txt", ".sct", ".uvprojx", ".svg"}
+SKIP = {".git", "build-gcc", "build-clang", "build-sanitize", "__pycache__"}
+BAD = ("\ufffd", "锟斤拷", "烫烫烫", "屯屯屯", "ï¿½", "â€™")
+errors = []
+
+for candidate in ROOT.rglob("*"):
+    if not candidate.is_file() or candidate.suffix.lower() not in SUFFIXES:
+        continue
+    if any(part in SKIP for part in candidate.parts):
+        continue
+    raw = candidate.read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        errors.append(f"{candidate.relative_to(ROOT)}: UTF-8 BOM")
+        continue
+    if b"\x00" in raw:
+        errors.append(f"{candidate.relative_to(ROOT)}: NUL byte")
+        continue
+    try:
+        decoded = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        errors.append(f"{candidate.relative_to(ROOT)}: invalid UTF-8: {exc}")
+        continue
+    for token in BAD:
+        if token in decoded:
+            errors.append(f"{candidate.relative_to(ROOT)}: mojibake token {token!r}")
+
+if errors:
+    print("TEXT ENCODING CHECK: FAIL")
+    print("\n".join(errors))
+    sys.exit(1)
+print("TEXT ENCODING CHECK: PASS")
+'''
+(root / "tools/check_text_encoding.py").write_text(encoding_gate, encoding="utf-8", newline="\n")
+print("v0.10.3 test comments and UTF-8 gate normalized")
