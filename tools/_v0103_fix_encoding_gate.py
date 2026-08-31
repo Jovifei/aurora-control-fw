@@ -10,7 +10,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SUFFIXES = {".c", ".h", ".py", ".md", ".yml", ".yaml", ".cmake", ".txt", ".sct", ".uvprojx", ".svg"}
 SKIP_DIRS = {".git", "build-gcc", "build-clang", "build-sanitize", "__pycache__"}
-# 使用Unicode转义生成检测词，避免检查器源码本身含有待检乱码字面量。
 BAD = (
     "\ufffd",
     "\u951f\u65a4\u62f7",
@@ -26,7 +25,6 @@ for candidate in ROOT.rglob("*"):
         continue
     if any(part in SKIP_DIRS for part in candidate.parts):
         continue
-    # 本轮一次性生成器会在最终提交后删除；不要让检测词模板反向命中它们自身。
     if candidate.parent == ROOT / "tools" and candidate.name.startswith("_v0103_"):
         continue
     raw = candidate.read_bytes()
@@ -52,4 +50,15 @@ if errors:
 print("TEXT ENCODING CHECK: PASS")
 '''
 (root / "tools/check_text_encoding.py").write_text(content, encoding="utf-8", newline="\n")
-print("UTF-8 gate made self-safe")
+
+contract_path = root / "tests/test_v0103_contract.py"
+contract = contract_path.read_text(encoding="utf-8")
+old = '        self.assertIn("sample->sequence == ctx->relay_holdoff_sequence", power)\n'
+new = ('        self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power)\n'
+       '        self.assertIn("sample->sequence - ctx->relay_holdoff_sequence", power)\n')
+if old in contract:
+    contract = contract.replace(old, new, 1)
+elif new not in contract:
+    raise SystemExit("v0.10.3 Relay holdoff contract pattern not found")
+contract_path.write_text(contract, encoding="utf-8", newline="\n")
+print("UTF-8 gate and Relay holdoff contract normalized")
