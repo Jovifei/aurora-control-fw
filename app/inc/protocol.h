@@ -34,6 +34,10 @@ extern "C" {
 #define AURORA_PROTOCOL_RESOURCE_SETTING            (10002U)
 /* 复位资源：清除累计能量。 */
 #define AURORA_PROTOCOL_RESOURCE_RESET              (10003U)
+/* 运行模式资源：0=Battery，1=Demo Load。 */
+#define AURORA_PROTOCOL_RESOURCE_OPERATING_MODE     (10004U)
+/* Demo参数资源：目标电压mV + 功率上限mW，均小端uint32。 */
+#define AURORA_PROTOCOL_RESOURCE_DEMO_CONFIG        (10005U)
 
 /* 命令执行成功返回值。 */
 #define AURORA_PROTOCOL_RESULT_OK                   (0U)
@@ -43,6 +47,8 @@ extern "C" {
 #define AURORA_PROTOCOL_SETTING_DATA_LENGTH         (2U)
 /* 命令应答固定载荷长度：result。 */
 #define AURORA_PROTOCOL_RESULT_DATA_LENGTH          (1U)
+#define AURORA_PROTOCOL_MODE_DATA_LENGTH            (1U)
+#define AURORA_PROTOCOL_DEMO_CONFIG_DATA_LENGTH     (8U)
 /* 旧产品遥测载荷固定长度。 */
 #define AURORA_PROTOCOL_TELEMETRY_DATA_LENGTH       (30U)
 
@@ -82,7 +88,14 @@ void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame,
                                     const aurora_measurement_t *sample,
                                     aurora_charge_state_t charge_state,
                                     uint32_t fault_mask,
-                                    const aurora_persistent_settings_t *settings);
+                                    const aurora_persistent_settings_t *settings); // 兼容旧遥测调用入口
+void aurora_protocol_fill_telemetry_ex(aurora_protocol_frame_t *frame,
+                                       uint32_t message_id,
+                                       const aurora_measurement_t *sample,
+                                       aurora_charge_state_t charge_state,
+                                       bool actual_power_transfer,
+                                       uint32_t fault_mask,
+                                       const aurora_persistent_settings_t *settings); // 使用真实功率传输状态填充遥测
 
 #ifdef __cplusplus
 }

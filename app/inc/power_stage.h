@@ -18,15 +18,24 @@ typedef struct
     uint32_t no_sun_since_ms;                        /* 真正无PV持续起点。 */
     uint32_t bat_stability_since_ms;                 /* 10s电池稳定窗口起点。 */
     uint32_t start_success_since_ms;                 /* Ibat_est>=80mA成功启动计时。 */
+    uint32_t demo_probe_since_ms;                    /* Demo主动负载探测起点。 */
+    uint32_t demo_no_load_since_ms;                  /* Demo持续无负载证据起点。 */
     uint32_t selected_start_delay_ms;                /* 本次1~10s或15s启动等待。 */
     uint32_t dynamic_start_delay_ms;                 /* >15V启动的自适应1~10s延时。 */
     int32_t bat_stability_min_mv;                    /* 10s窗口BAT_U最小值。 */
     int32_t bat_stability_max_mv;                    /* 10s窗口BAT_U最大值。 */
     uint16_t duty_q15;                               /* 最近一次物理占空比命令。 */
     aurora_power_state_t state;                      /* 当前启动/预充/运行状态。 */
+    aurora_start_failure_reason_t last_failure_reason; /* 最近一次启动失败分类。 */
+    uint8_t zero_cal_failure_count;                  /* 完整零点校准失败轮数。 */
+    uint8_t precharge_failure_count;                 /* PV充足但母线预升压失败轮数。 */
+    uint8_t relay_failure_count;                     /* Relay闭合后二次压差失败轮数。 */
+    uint8_t bat_stability_failure_count;             /* BAT_U稳定窗口失败轮数。 */
     bool relay_closed;                               /* 软件期望继电器状态。 */
     bool startup_success_recorded;                   /* 本轮成功后只减少一次启动延时。 */
-    uint8_t state_reserved[2];                       /* 显式补齐。 */
+    bool startup_locked;                             /* 有限重试耗尽或严重过压后锁存。 */
+    bool demo_load_confirmed;                        /* Demo探测得到持续负载证据。 */
+    uint8_t state_reserved[3];                       /* 显式补齐结构尾部。 */
 } aurora_power_stage_ctx_t;
 
 void aurora_power_stage_init(aurora_power_stage_ctx_t *ctx, uint32_t now_ms);
@@ -37,7 +46,19 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
                                                bool protection_safe,
                                                bool zero_cal_ready,
                                                bool zero_cal_failed,
-                                               uint32_t now_ms);
+                                               uint32_t now_ms); // 兼容Battery模式的原有调用入口
+
+aurora_power_command_t aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx,
+                                                  const aurora_measurement_t *sample,
+                                                  const aurora_mppt_output_t *mppt,
+                                                  const aurora_charge_output_t *charger,
+                                                  bool protection_safe,
+                                                  bool zero_cal_ready,
+                                                  bool zero_cal_failed,
+                                                  aurora_operating_mode_t operating_mode,
+                                                  uint32_t demo_target_voltage_mv,
+                                                  uint32_t demo_power_limit_mw,
+                                                  uint32_t now_ms); // 支持Battery/Demo模式的扩展入口
 
 #ifdef __cplusplus
 }

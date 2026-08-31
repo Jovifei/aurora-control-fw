@@ -53,11 +53,8 @@ typedef enum
  * Output      : true表示条件已连续成立达到指定毫秒数
  * Description : 条件断开立即复位计时，使用无符号时间差兼容32位自然回绕。
  *---------------------------------------------------------------------------*/
-static bool timer_elapsed(aurora_protection_ctx_t *ctx,
-                          protection_timer_index_t index,
-                          bool condition,
-                          uint32_t delay_ms,
-                          uint32_t now_ms)
+static bool timer_elapsed(aurora_protection_ctx_t *ctx, protection_timer_index_t index,
+                          bool condition, uint32_t delay_ms, uint32_t now_ms)
 {
     aurora_condition_timer_t *timer = &ctx->timer[(size_t)index];
 
@@ -85,10 +82,7 @@ static bool timer_elapsed(aurora_protection_ctx_t *ctx,
  * Output      : 无
  * Description : 设置active及可选latched位；首次出现时递增epoch使旧PWM授权立即作废。
  *---------------------------------------------------------------------------*/
-static void set_fault(aurora_protection_ctx_t *ctx,
-                      uint32_t mask,
-                      bool latch,
-                      uint32_t now_ms)
+static void set_fault(aurora_protection_ctx_t *ctx, uint32_t mask, bool latch, uint32_t now_ms)
 {
     const uint32_t before = ctx->active_mask | ctx->latched_mask;
 
@@ -179,8 +173,7 @@ void aurora_protection_init(aurora_protection_ctx_t *ctx, uint32_t now_ms)
  * Output      : 无
  * Description : 比较器、Break、DMA和内部快速路径采用active+latched硬锁存，禁止自动重发波。
  *---------------------------------------------------------------------------*/
-void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
-                                        uint32_t fault_mask,
+void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx, uint32_t fault_mask,
                                         uint32_t now_ms)
 {
     if (ctx != NULL)
@@ -190,31 +183,50 @@ void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : void aurora_protection_step(aurora_protection_ctx_t *ctx,
+ * Name        : void aurora_protection_latch_software_fault(
+ *               aurora_protection_ctx_t *ctx, uint32_t fault_mask,
+ *               bool latch, uint32_t now_ms)
+ * Input       : ctx - 保护上下文；fault_mask - 软件诊断故障位；
+ *               latch - true表示必须显式/延时恢复；now_ms - 当前毫秒
+ * Output      : 无
+ * Description :
+ * 供PowerStage启动失败、BUS过压和Demo输出诊断进入统一fault_mask，禁止模块私自绕过保护仲裁。
+ *---------------------------------------------------------------------------*/
+void aurora_protection_latch_software_fault(aurora_protection_ctx_t *ctx, uint32_t fault_mask,
+                                            bool latch, uint32_t now_ms)
+{
+    if ((ctx == NULL) || (fault_mask == 0U))
+    {
+        return;
+    }
+    set_fault(ctx, fault_mask, latch, now_ms);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_protection_step_ex(aurora_protection_ctx_t *ctx,
  *               const aurora_measurement_t *sample,
  *               const aurora_charge_profile_t *profile,
- *               bool pv_current_calibrated, bool boost_output_active, uint32_t now_ms)
+ *               aurora_operating_mode_t operating_mode,
+ *               bool pv_current_calibrated, bool boost_output_active,
+ *               uint32_t now_ms)
  * Input       : ctx - 保护上下文；sample - 最新测量；profile - 当前电池档案；
- *               pv_current_calibrated - PV_I运行时零点已经完成；boost_output_active - 物理Boost PWM当前是否真正输出；
- *               now_ms - 当前毫秒
+ *               operating_mode - Battery/Demo；pv_current_calibrated - PV_I零点已完成；
+ *               boost_output_active - 物理Boost PWM是否真正输出；now_ms - 当前毫秒
  * Output      : 无
- * Description : 按V2.7逐项执行PV/BAT/OCP/过功率/温度/NTC真实毫秒保护；
- *               软件PV OCP/过功率仅在物理PWM真正输出后计时，避免启动前零点瞬态误报。
+ * Description : 按V2.7逐项执行PV/BAT/OCP/过功率/温度/NTC真实毫秒保护。
+ *               软件PV OCP/过功率仅在物理PWM真正输出后计时。
  *---------------------------------------------------------------------------*/
-void aurora_protection_step(aurora_protection_ctx_t *ctx,
-                            const aurora_measurement_t *sample,
-                            const aurora_charge_profile_t *profile,
-                            bool pv_current_calibrated,
-                            bool boost_output_active,
-                            uint32_t now_ms)
+void aurora_protection_step_ex(aurora_protection_ctx_t *ctx, const aurora_measurement_t *sample,
+                               const aurora_charge_profile_t *profile,
+                               aurora_operating_mode_t operating_mode, bool pv_current_calibrated,
+                               bool boost_output_active, uint32_t now_ms)
 {
-    const uint32_t required = AURORA_MEAS_VALID_PV_V |
-                              AURORA_MEAS_VALID_PV_I |
-                              AURORA_MEAS_VALID_BAT_V |
-                              AURORA_MEAS_VALID_BUS_V |
+    const uint32_t required = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I |
+                              AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V |
                               AURORA_MEAS_VALID_PV_POWER;
     bool trip;
     bool recover;
+    const bool battery_mode = operating_mode == AURORA_MODE_BATTERY;
 
     if ((ctx == NULL) || (sample == NULL) || (profile == NULL))
     {
@@ -236,8 +248,7 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         clear_auto_fault(ctx, AURORA_FAULT_BUS_ADC_SATURATION);
     }
 
-    if ((sample->sequence != 0U) &&
-        ((sample->valid_mask & required) == required))
+    if ((sample->sequence != 0U) && ((sample->valid_mask & required) == required))
     {
         ctx->measurement_seen = true;
     }
@@ -259,12 +270,11 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
     }
 
     /* PV欠压/恢复：8V 1s / 9V 1s。 */
-    trip = timer_elapsed(ctx, TIMER_PV_UV_TRIP,
-                         sample->pv_voltage_mv < AURORA_PV_UV_TRIP_MV,
+    trip = timer_elapsed(ctx, TIMER_PV_UV_TRIP, sample->pv_voltage_mv < AURORA_PV_UV_TRIP_MV,
                          AURORA_PV_UV_TRIP_DELAY_MS, now_ms);
-    recover = timer_elapsed(ctx, TIMER_PV_UV_RECOVER,
-                            sample->pv_voltage_mv > AURORA_PV_UV_RECOVER_MV,
-                            AURORA_PV_UV_RECOVER_DELAY_MS, now_ms);
+    recover =
+        timer_elapsed(ctx, TIMER_PV_UV_RECOVER, sample->pv_voltage_mv > AURORA_PV_UV_RECOVER_MV,
+                      AURORA_PV_UV_RECOVER_DELAY_MS, now_ms);
     if (trip)
     {
         set_fault(ctx, AURORA_FAULT_PV_UNDERVOLT, false, now_ms);
@@ -275,12 +285,11 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
     }
 
     /* PV过压/恢复：55V 1s / 54V 1s。 */
-    trip = timer_elapsed(ctx, TIMER_PV_OV_TRIP,
-                         sample->pv_voltage_mv > AURORA_PV_OV_TRIP_MV,
+    trip = timer_elapsed(ctx, TIMER_PV_OV_TRIP, sample->pv_voltage_mv > AURORA_PV_OV_TRIP_MV,
                          AURORA_PV_OV_TRIP_DELAY_MS, now_ms);
-    recover = timer_elapsed(ctx, TIMER_PV_OV_RECOVER,
-                            sample->pv_voltage_mv < AURORA_PV_OV_RECOVER_MV,
-                            AURORA_PV_OV_RECOVER_DELAY_MS, now_ms);
+    recover =
+        timer_elapsed(ctx, TIMER_PV_OV_RECOVER, sample->pv_voltage_mv < AURORA_PV_OV_RECOVER_MV,
+                      AURORA_PV_OV_RECOVER_DELAY_MS, now_ms);
     if (trip)
     {
         set_fault(ctx, AURORA_FAULT_PV_OVERVOLT, false, now_ms);
@@ -290,80 +299,87 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         clear_auto_fault(ctx, AURORA_FAULT_PV_OVERVOLT);
     }
 
-    /* BAT欠压：只有确认接入电池后才检查，恢复点为档案下限+0.5V。 */
-    trip = timer_elapsed(ctx, TIMER_BAT_UV_TRIP,
-                         (sample->battery_voltage_mv > AURORA_BATTERY_CONNECTED_MIN_MV) &&
-                         ((uint32_t)sample->battery_voltage_mv < profile->battery_uv_mv),
-                         AURORA_BAT_UV_TRIP_DELAY_MS, now_ms);
-    recover = timer_elapsed(ctx, TIMER_BAT_UV_RECOVER,
-                            (sample->battery_voltage_mv > 0) &&
-                            ((uint32_t)sample->battery_voltage_mv >=
-                             profile->battery_uv_recover_mv),
-                            AURORA_BAT_UV_RECOVER_DELAY_MS, now_ms);
-    if (trip)
+    if (battery_mode)
     {
-        set_fault(ctx, AURORA_FAULT_BAT_UNDERVOLT, false, now_ms);
-    }
-    else if (recover)
-    {
-        clear_auto_fault(ctx, AURORA_FAULT_BAT_UNDERVOLT);
-    }
+        /* BAT欠压：只有确认接入电池后才检查，恢复点为档案下限+0.5V。 */
+        trip = timer_elapsed(ctx, TIMER_BAT_UV_TRIP,
+                             (sample->battery_voltage_mv > AURORA_BATTERY_CONNECTED_MIN_MV) &&
+                                 ((uint32_t)sample->battery_voltage_mv < profile->battery_uv_mv),
+                             AURORA_BAT_UV_TRIP_DELAY_MS, now_ms);
+        recover = timer_elapsed(
+            ctx, TIMER_BAT_UV_RECOVER,
+            (sample->battery_voltage_mv > 0) &&
+                ((uint32_t)sample->battery_voltage_mv >= profile->battery_uv_recover_mv),
+            AURORA_BAT_UV_RECOVER_DELAY_MS, now_ms);
+        if (trip)
+        {
+            set_fault(ctx, AURORA_FAULT_BAT_UNDERVOLT, false, now_ms);
+        }
+        else if (recover)
+        {
+            clear_auto_fault(ctx, AURORA_FAULT_BAT_UNDERVOLT);
+        }
 
-    /*
-     * BAT多级OV：5s一级、1s加严、3ms快速、1s绝对93V。
-     * 任一级成立都使用同一BAT_OVERVOLT故障位，恢复必须回到CV上限以下2.5s。
-     */
-    trip = timer_elapsed(ctx, TIMER_BAT_OV_SLOW,
-                         (sample->battery_voltage_mv > 0) &&
-                         ((uint32_t)sample->battery_voltage_mv > profile->ov_slow_mv),
-                         AURORA_BAT_OV_SLOW_DELAY_MS, now_ms) ||
-           timer_elapsed(ctx, TIMER_BAT_OV_MEDIUM,
-                         (sample->battery_voltage_mv > 0) &&
-                         ((uint32_t)sample->battery_voltage_mv > profile->ov_medium_mv),
-                         AURORA_BAT_OV_MEDIUM_DELAY_MS, now_ms) ||
-           timer_elapsed(ctx, TIMER_BAT_OV_FAST,
-                         (sample->battery_voltage_mv > 0) &&
-                         ((uint32_t)sample->battery_voltage_mv > profile->ov_fast_mv),
-                         AURORA_BAT_OV_FAST_DELAY_MS, now_ms) ||
-           timer_elapsed(ctx, TIMER_BAT_OV_ABSOLUTE,
-                         (sample->battery_voltage_mv > 0) &&
-                         ((uint32_t)sample->battery_voltage_mv > profile->ov_absolute_mv),
-                         AURORA_BAT_OV_ABSOLUTE_DELAY_MS, now_ms);
-    recover = timer_elapsed(ctx, TIMER_BAT_OV_RECOVER,
-                            (sample->battery_voltage_mv > 0) &&
-                            ((uint32_t)sample->battery_voltage_mv < profile->cv_max_mv),
-                            AURORA_BAT_OV_RECOVER_DELAY_MS, now_ms);
-    if (trip)
-    {
-        set_fault(ctx, AURORA_FAULT_BAT_OVERVOLT, false, now_ms);
+        /*
+         * BAT多级OV：5s一级、1s加严、3ms快速、1s绝对93V。
+         * 任一级成立都使用同一BAT_OVERVOLT故障位，恢复必须回到CV上限以下2.5s。
+         */
+        trip = timer_elapsed(ctx, TIMER_BAT_OV_SLOW,
+                             (sample->battery_voltage_mv > 0) &&
+                                 ((uint32_t)sample->battery_voltage_mv > profile->ov_slow_mv),
+                             AURORA_BAT_OV_SLOW_DELAY_MS, now_ms) ||
+               timer_elapsed(ctx, TIMER_BAT_OV_MEDIUM,
+                             (sample->battery_voltage_mv > 0) &&
+                                 ((uint32_t)sample->battery_voltage_mv > profile->ov_medium_mv),
+                             AURORA_BAT_OV_MEDIUM_DELAY_MS, now_ms) ||
+               timer_elapsed(ctx, TIMER_BAT_OV_FAST,
+                             (sample->battery_voltage_mv > 0) &&
+                                 ((uint32_t)sample->battery_voltage_mv > profile->ov_fast_mv),
+                             AURORA_BAT_OV_FAST_DELAY_MS, now_ms) ||
+               timer_elapsed(ctx, TIMER_BAT_OV_ABSOLUTE,
+                             (sample->battery_voltage_mv > 0) &&
+                                 ((uint32_t)sample->battery_voltage_mv > profile->ov_absolute_mv),
+                             AURORA_BAT_OV_ABSOLUTE_DELAY_MS, now_ms);
+        recover = timer_elapsed(ctx, TIMER_BAT_OV_RECOVER,
+                                (sample->battery_voltage_mv > 0) &&
+                                    ((uint32_t)sample->battery_voltage_mv < profile->cv_max_mv),
+                                AURORA_BAT_OV_RECOVER_DELAY_MS, now_ms);
+        if (trip)
+        {
+            set_fault(ctx, AURORA_FAULT_BAT_OVERVOLT, false, now_ms);
+        }
+        else if (recover)
+        {
+            clear_auto_fault(ctx, AURORA_FAULT_BAT_OVERVOLT);
+        }
     }
-    else if (recover)
+    else
     {
-        clear_auto_fault(ctx, AURORA_FAULT_BAT_OVERVOLT);
+        // Demo不连接电池，清除Battery专属自动故障并复位其计时条件。
+        clear_auto_fault(ctx, AURORA_FAULT_BAT_UNDERVOLT | AURORA_FAULT_BAT_OVERVOLT);
+        (void)timer_elapsed(ctx, TIMER_BAT_UV_TRIP, false, AURORA_BAT_UV_TRIP_DELAY_MS, now_ms);
+        (void)timer_elapsed(ctx, TIMER_BAT_OV_SLOW, false, AURORA_BAT_OV_SLOW_DELAY_MS, now_ms);
     }
 
     /* PV软件分级过流：结构继承V2.7，300W基础12A仍是待台架冻结候选。 */
     trip = timer_elapsed(ctx, TIMER_PV_OCP_SLOW,
-                         boost_output_active &&
-                         sample->pv_current_ma >
-                             current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
-                                                  AURORA_PV_OCP_SLOW_NUM),
+                         boost_output_active && sample->pv_current_ma >
+                                                    current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
+                                                                         AURORA_PV_OCP_SLOW_NUM),
                          AURORA_PV_OCP_SLOW_DELAY_MS, now_ms) ||
            timer_elapsed(ctx, TIMER_PV_OCP_MEDIUM,
-                         boost_output_active &&
-                         sample->pv_current_ma >
-                             current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
-                                                  AURORA_PV_OCP_MID_NUM),
+                         boost_output_active && sample->pv_current_ma >
+                                                    current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
+                                                                         AURORA_PV_OCP_MID_NUM),
                          AURORA_PV_OCP_MID_DELAY_MS, now_ms) ||
            timer_elapsed(ctx, TIMER_PV_OCP_FAST,
-                         boost_output_active &&
-                         sample->pv_current_ma >
-                             current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
-                                                  AURORA_PV_OCP_FAST_NUM),
+                         boost_output_active && sample->pv_current_ma >
+                                                    current_threshold_ma(AURORA_PV_CURRENT_LIMIT_MA,
+                                                                         AURORA_PV_OCP_FAST_NUM),
                          AURORA_PV_OCP_FAST_DELAY_MS, now_ms);
     recover = timer_elapsed(ctx, TIMER_PV_OCP_RECOVER,
                             sample->pv_current_ma >= 0 &&
-                            sample->pv_current_ma <= AURORA_PV_CURRENT_LIMIT_MA,
+                                sample->pv_current_ma <= AURORA_PV_CURRENT_LIMIT_MA,
                             AURORA_PV_OCP_RECOVER_DELAY_MS, now_ms);
     if (trip)
     {
@@ -380,16 +396,15 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
      */
     trip = timer_elapsed(ctx, TIMER_PV_I_RUN_NEG_TRIP,
                          pv_current_calibrated && boost_output_active &&
-                         sample->pv_current_ma <= AURORA_PV_I_RUN_NEGATIVE_TRIP_MA,
+                             sample->pv_current_ma <= AURORA_PV_I_RUN_NEGATIVE_TRIP_MA,
                          AURORA_PV_I_RUN_NEGATIVE_DELAY_MS, now_ms) ||
            timer_elapsed(ctx, TIMER_PV_I_OFF_ABS_TRIP,
                          pv_current_calibrated && !boost_output_active &&
-                         abs_current_ma(sample->pv_current_ma) >= AURORA_PV_I_OFF_ABS_TRIP_MA,
+                             abs_current_ma(sample->pv_current_ma) >= AURORA_PV_I_OFF_ABS_TRIP_MA,
                          AURORA_PV_I_OFF_ABS_DELAY_MS, now_ms);
     recover = timer_elapsed(ctx, TIMER_PV_I_PLAUS_RECOVER,
-                            !boost_output_active &&
-                            abs_current_ma(sample->pv_current_ma) <=
-                                AURORA_PV_I_PLAUS_RECOVER_ABS_MA,
+                            !boost_output_active && abs_current_ma(sample->pv_current_ma) <=
+                                                        AURORA_PV_I_PLAUS_RECOVER_ABS_MA,
                             AURORA_PV_I_PLAUS_RECOVER_DELAY_MS, now_ms);
     if (trip)
     {
@@ -407,11 +422,11 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
                        AURORA_OVERPOWER_DEN);
         trip = timer_elapsed(ctx, TIMER_PV_POWER_TRIP,
                              boost_output_active && sample->pv_power_mw > 0 &&
-                             (uint32_t)sample->pv_power_mw > trip_power_mw,
+                                 (uint32_t)sample->pv_power_mw > trip_power_mw,
                              AURORA_OVERPOWER_DELAY_MS, now_ms);
         recover = timer_elapsed(ctx, TIMER_PV_POWER_RECOVER,
                                 sample->pv_power_mw >= 0 &&
-                                (uint32_t)sample->pv_power_mw <= AURORA_RATED_POWER_MW,
+                                    (uint32_t)sample->pv_power_mw <= AURORA_RATED_POWER_MW,
                                 AURORA_OVERPOWER_RECOVER_DELAY_MS, now_ms);
         if (trip)
         {
@@ -428,19 +443,18 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         const bool open = sample->mos_ntc_status == AURORA_NTC_STATUS_OPEN;
         const bool shorted = sample->mos_ntc_status == AURORA_NTC_STATUS_SHORT;
 
-        if (timer_elapsed(ctx, TIMER_MOS_NTC_OPEN_TRIP, open,
-                          AURORA_NTC_FAULT_DELAY_MS, now_ms))
+        if (timer_elapsed(ctx, TIMER_MOS_NTC_OPEN_TRIP, open, AURORA_NTC_FAULT_DELAY_MS, now_ms))
         {
             set_fault(ctx, AURORA_FAULT_MOS_NTC_OPEN, false, now_ms);
         }
-        else if (timer_elapsed(ctx, TIMER_MOS_NTC_OPEN_RECOVER, !open,
-                               AURORA_NTC_RECOVER_DELAY_MS, now_ms))
+        else if (timer_elapsed(ctx, TIMER_MOS_NTC_OPEN_RECOVER, !open, AURORA_NTC_RECOVER_DELAY_MS,
+                               now_ms))
         {
             clear_auto_fault(ctx, AURORA_FAULT_MOS_NTC_OPEN);
         }
 
-        if (timer_elapsed(ctx, TIMER_MOS_NTC_SHORT_TRIP, shorted,
-                          AURORA_NTC_FAULT_DELAY_MS, now_ms))
+        if (timer_elapsed(ctx, TIMER_MOS_NTC_SHORT_TRIP, shorted, AURORA_NTC_FAULT_DELAY_MS,
+                          now_ms))
         {
             set_fault(ctx, AURORA_FAULT_MOS_NTC_SHORT, false, now_ms);
         }
@@ -450,8 +464,7 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             clear_auto_fault(ctx, AURORA_FAULT_MOS_NTC_SHORT);
         }
 
-        if (!open && !shorted &&
-            ((sample->valid_mask & AURORA_MEAS_VALID_MOS_TEMP) != 0U))
+        if (!open && !shorted && ((sample->valid_mask & AURORA_MEAS_VALID_MOS_TEMP) != 0U))
         {
             trip = timer_elapsed(ctx, TIMER_MOS_TEMP_TRIP,
                                  sample->mos_temp_dC > AURORA_MOS_TRIP_TEMP_DC,
@@ -475,19 +488,18 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
         const bool open = sample->ambient_ntc_status == AURORA_NTC_STATUS_OPEN;
         const bool shorted = sample->ambient_ntc_status == AURORA_NTC_STATUS_SHORT;
 
-        if (timer_elapsed(ctx, TIMER_AMB_NTC_OPEN_TRIP, open,
-                          AURORA_NTC_FAULT_DELAY_MS, now_ms))
+        if (timer_elapsed(ctx, TIMER_AMB_NTC_OPEN_TRIP, open, AURORA_NTC_FAULT_DELAY_MS, now_ms))
         {
             set_fault(ctx, AURORA_FAULT_AMB_NTC_OPEN, false, now_ms);
         }
-        else if (timer_elapsed(ctx, TIMER_AMB_NTC_OPEN_RECOVER, !open,
-                               AURORA_NTC_RECOVER_DELAY_MS, now_ms))
+        else if (timer_elapsed(ctx, TIMER_AMB_NTC_OPEN_RECOVER, !open, AURORA_NTC_RECOVER_DELAY_MS,
+                               now_ms))
         {
             clear_auto_fault(ctx, AURORA_FAULT_AMB_NTC_OPEN);
         }
 
-        if (timer_elapsed(ctx, TIMER_AMB_NTC_SHORT_TRIP, shorted,
-                          AURORA_NTC_FAULT_DELAY_MS, now_ms))
+        if (timer_elapsed(ctx, TIMER_AMB_NTC_SHORT_TRIP, shorted, AURORA_NTC_FAULT_DELAY_MS,
+                          now_ms))
         {
             set_fault(ctx, AURORA_FAULT_AMB_NTC_SHORT, false, now_ms);
         }
@@ -497,18 +509,21 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             clear_auto_fault(ctx, AURORA_FAULT_AMB_NTC_SHORT);
         }
 
-        if (!open && !shorted &&
-            ((sample->valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U))
+        if (!open && !shorted && ((sample->valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U))
         {
             trip = timer_elapsed(ctx, TIMER_AMB_HIGH_TRIP,
                                  sample->ambient_temp_dC > AURORA_AMB_HIGH_TRIP_TEMP_DC,
                                  AURORA_AMB_TEMP_TRIP_DELAY_MS, now_ms) ||
                    timer_elapsed(ctx, TIMER_AMB_LOW_TRIP,
-                                 sample->ambient_temp_dC < AURORA_AMB_LOW_TRIP_TEMP_DC,
+                                 sample->ambient_temp_dC < (battery_mode
+                                                                ? profile->ambient_low_trip_dC
+                                                                : AURORA_AMB_LOW_TRIP_TEMP_DC),
                                  AURORA_AMB_TEMP_TRIP_DELAY_MS, now_ms);
             recover = timer_elapsed(ctx, TIMER_AMB_TEMP_RECOVER,
-                                    sample->ambient_temp_dC >= AURORA_AMB_LOW_RECOVER_TEMP_DC &&
-                                    sample->ambient_temp_dC <= AURORA_AMB_HIGH_RECOVER_TEMP_DC,
+                                    sample->ambient_temp_dC >=
+                                            (battery_mode ? profile->ambient_low_recover_dC
+                                                          : AURORA_AMB_LOW_RECOVER_TEMP_DC) &&
+                                        sample->ambient_temp_dC <= AURORA_AMB_HIGH_RECOVER_TEMP_DC,
                                     AURORA_AMB_TEMP_RECOVER_DELAY_MS, now_ms);
             if (trip)
             {
@@ -520,7 +535,6 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
             }
         }
     }
-
 }
 
 /*---------------------------------------------------------------------------*
@@ -530,12 +544,10 @@ void aurora_protection_step(aurora_protection_ctx_t *ctx,
  * Output      : true表示指定锁存已清除；false表示仍有active条件或硬件源
  * Description : 仅用于快速/硬锁存故障；普通V2.7保护由各自恢复时间自动解除。
  *---------------------------------------------------------------------------*/
-bool aurora_protection_clear(aurora_protection_ctx_t *ctx,
-                             uint32_t clear_mask,
+bool aurora_protection_clear(aurora_protection_ctx_t *ctx, uint32_t clear_mask,
                              bool hardware_sources_inactive)
 {
-    if ((ctx == NULL) || !hardware_sources_inactive ||
-        ((ctx->active_mask & clear_mask) != 0U))
+    if ((ctx == NULL) || !hardware_sources_inactive || ((ctx->active_mask & clear_mask) != 0U))
     {
         return false;
     }
@@ -557,9 +569,8 @@ bool aurora_protection_clear(aurora_protection_ctx_t *ctx,
  * Output      : true表示指定快速故障已清除；false表示硬件源仍有效或参数错误
  * Description : 只供Service在硬件源连续消失并满足恢复时间后调用；同时清active/latched并递增epoch。
  *---------------------------------------------------------------------------*/
-bool aurora_protection_clear_verified_fast_fault(aurora_protection_ctx_t *ctx,
-                                                  uint32_t clear_mask,
-                                                  bool hardware_sources_inactive)
+bool aurora_protection_clear_verified_fast_fault(aurora_protection_ctx_t *ctx, uint32_t clear_mask,
+                                                 bool hardware_sources_inactive)
 {
     if ((ctx == NULL) || !hardware_sources_inactive)
     {
@@ -583,9 +594,7 @@ bool aurora_protection_clear_verified_fast_fault(aurora_protection_ctx_t *ctx,
  *---------------------------------------------------------------------------*/
 bool aurora_protection_is_safe(const aurora_protection_ctx_t *ctx)
 {
-    return (ctx != NULL) &&
-           (ctx->active_mask == 0U) &&
-           (ctx->latched_mask == 0U);
+    return (ctx != NULL) && (ctx->active_mask == 0U) && (ctx->latched_mask == 0U);
 }
 
 /*---------------------------------------------------------------------------*
@@ -608,4 +617,22 @@ uint32_t aurora_protection_epoch(const aurora_protection_ctx_t *ctx)
 uint32_t aurora_protection_fault_mask(const aurora_protection_ctx_t *ctx)
 {
     return (ctx != NULL) ? (ctx->active_mask | ctx->latched_mask) : AURORA_FAULT_INTERNAL;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_protection_step(aurora_protection_ctx_t *ctx,
+ *               const aurora_measurement_t *sample,
+ *               const aurora_charge_profile_t *profile,
+ *               bool pv_current_calibrated, bool boost_output_active,
+ *               uint32_t now_ms)
+ * Input       : 与历史Battery模式接口一致
+ * Output      : 无
+ * Description : 保留旧调用方和Host测试兼容；内部固定选择Battery模式执行完整保护。
+ *---------------------------------------------------------------------------*/
+void aurora_protection_step(aurora_protection_ctx_t *ctx, const aurora_measurement_t *sample,
+                            const aurora_charge_profile_t *profile, bool pv_current_calibrated,
+                            bool boost_output_active, uint32_t now_ms)
+{
+    aurora_protection_step_ex(ctx, sample, profile, AURORA_MODE_BATTERY, pv_current_calibrated,
+                              boost_output_active, now_ms);
 }

@@ -56,11 +56,11 @@ void drv_io_init(void)
     gpio_output(GPIOA, DDL_GPIO_PIN_12, false); /* LINK：默认关闭 */
 
     /* 最新图纸两颗LED均为低电平点亮，启动时先灭。 */
-    gpio_output(GPIOB, DDL_GPIO_PIN_9, true);   /* LED_RUN */
-    gpio_output(GPIOB, DDL_GPIO_PIN_11, true);  /* LED_FAULT */
+    gpio_output(GPIOB, DDL_GPIO_PIN_9, true);  /* LED_RUN */
+    gpio_output(GPIOB, DDL_GPIO_PIN_11, true); /* LED_FAULT */
 
     /* 调试串口当前不参与产品逻辑；TX保持空闲高，RX保持复位输入态。 */
-    gpio_output(GPIOB, DDL_GPIO_PIN_7, true);   /* DEBUG_TX */
+    gpio_output(GPIOB, DDL_GPIO_PIN_7, true); /* DEBUG_TX */
 }
 
 /*---------------------------------------------------------------------------*

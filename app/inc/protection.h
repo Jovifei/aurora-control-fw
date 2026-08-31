@@ -35,12 +35,23 @@ void aurora_protection_init(aurora_protection_ctx_t *ctx, uint32_t now_ms);
 void aurora_protection_latch_fast_fault(aurora_protection_ctx_t *ctx,
                                         uint32_t fault_mask,
                                         uint32_t now_ms);
+void aurora_protection_latch_software_fault(aurora_protection_ctx_t *ctx,
+                                            uint32_t fault_mask,
+                                            bool latch,
+                                            uint32_t now_ms);
 void aurora_protection_step(aurora_protection_ctx_t *ctx,
                             const aurora_measurement_t *sample,
                             const aurora_charge_profile_t *profile,
                             bool pv_current_calibrated,
                             bool boost_output_active,
-                            uint32_t now_ms);
+                            uint32_t now_ms); // 兼容Battery模式的原有保护入口
+void aurora_protection_step_ex(aurora_protection_ctx_t *ctx,
+                               const aurora_measurement_t *sample,
+                               const aurora_charge_profile_t *profile,
+                               aurora_operating_mode_t operating_mode,
+                               bool pv_current_calibrated,
+                               bool boost_output_active,
+                               uint32_t now_ms); // 支持Battery/Demo模式的扩展保护入口
 bool aurora_protection_clear(aurora_protection_ctx_t *ctx,
                              uint32_t clear_mask,
                              bool hardware_sources_inactive);

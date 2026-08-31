@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="520" viewBox="0 0 1360 520">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">power_stage.c 状态机</text>
+<rect x="30" y="200" width="110" height="60" class="smallbox"/><text x="52" y="236" class="txt">WAIT_PV</text>
+<rect x="170" y="200" width="130" height="60" class="smallbox"/><text x="190" y="236" class="txt">START_DELAY</text>
+<rect x="330" y="200" width="120" height="60" class="smallbox"/><text x="358" y="236" class="txt">ZERO_CAL</text>
+<rect x="480" y="200" width="150" height="60" class="smallbox"/><text x="497" y="236" class="txt">WAIT_BATTERY</text>
+<rect x="660" y="200" width="140" height="60" class="smallbox"/><text x="685" y="236" class="txt">PRECHARGE</text>
+<rect x="830" y="200" width="150" height="60" class="smallbox"/><text x="850" y="236" class="txt">RELAY_SETTLE</text>
+<rect x="1010" y="200" width="170" height="60" class="smallbox"/><text x="1032" y="236" class="txt">BAT_STABILITY</text>
+<rect x="1210" y="200" width="90" height="60" class="smallbox"/><text x="1239" y="236" class="txt">RUN</text>
+<path d="M140,230 L170,230" class="line"/>
+<path d="M300,230 L330,230" class="line"/>
+<path d="M450,230 L480,230" class="line"/>
+<path d="M630,230 L660,230" class="line"/>
+<path d="M800,230 L830,230" class="line"/>
+<path d="M980,230 L1010,230" class="line"/>
+<path d="M1180,230 L1210,230" class="line"/>
+<rect x="1090" y="360" width="100" height="60" class="smallbox"/><text x="1120" y="396" class="txt">NO_SUN</text>
+<rect x="1240" y="360" width="90" height="60" class="smallbox"/><text x="1266" y="396" class="txt">FAULT</text>
+<path d="M1255,260 L1140,360" class="line"/>
+<path d="M1260,260 L1285,360" class="line"/>
+<path d="M1285,420 C1285,455 85,455 85,260" class="line"/>
+<text x="44" y="110" class="stxt">职责：它是唯一把 charger/mppt/protection 结果落成“PWM 使能 + Relay 使能 + Duty”的模块。</text>
+<text x="44" y="132" class="stxt">理解重点：系统不是一上电就发波，而是先等 PV、再零点校准、再母线预充、再继电器、再电池稳定，最后才 RUN。</text>
+
+</svg>

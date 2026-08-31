@@ -9,168 +9,262 @@
  * 充电目标、验收上下限和软件保护阈值分开保存，避免把“最大允许值”误当控制目标。
  * 300W仅改变功率能力和硬件实现，不擅自改变电池化学体系的成熟充电电压。
  */
-static const aurora_charge_profile_t k_profiles[AURORA_CHEM_COUNT][AURORA_PACK_COUNT] =
-{
-    [AURORA_CHEM_LEAD][AURORA_PACK_48V] =
-    {
-        .battery_uv_mv = 41500U, .battery_uv_recover_mv = 42000U,
-        .trickle_exit_mv = 48000U,
-        .cv_target_mv = 58000U, .cv_min_mv = 57800U, .cv_max_mv = 58200U,
-        .ov_slow_mv = 58800U, .ov_medium_mv = 59500U,
-        .ov_fast_mv = 61800U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 54600U, .float_min_mv = 54400U, .float_max_mv = 54800U,
-        .full_voltage_mv = 58200U, .recharge_mv = 51200U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 80U,
-        .chemistry = AURORA_CHEM_LEAD, .pack = AURORA_PACK_48V
-    },
-    [AURORA_CHEM_LEAD][AURORA_PACK_60V] =
-    {
-        .battery_uv_mv = 52000U, .battery_uv_recover_mv = 52500U,
-        .trickle_exit_mv = 60000U,
-        .cv_target_mv = 72500U, .cv_min_mv = 72300U, .cv_max_mv = 72700U,
-        .ov_slow_mv = 73400U, .ov_medium_mv = 74100U,
-        .ov_fast_mv = 76400U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 68300U, .float_min_mv = 68100U, .float_max_mv = 68500U,
-        .full_voltage_mv = 72700U, .recharge_mv = 64000U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 80U,
-        .chemistry = AURORA_CHEM_LEAD, .pack = AURORA_PACK_60V
-    },
-    [AURORA_CHEM_LEAD][AURORA_PACK_72V] =
-    {
-        .battery_uv_mv = 62500U, .battery_uv_recover_mv = 63000U,
-        .trickle_exit_mv = 72000U,
-        .cv_target_mv = 87000U, .cv_min_mv = 86800U, .cv_max_mv = 87200U,
-        .ov_slow_mv = 88000U, .ov_medium_mv = 88700U,
-        .ov_fast_mv = 91000U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 82000U, .float_min_mv = 81800U, .float_max_mv = 82200U,
-        .full_voltage_mv = 87200U, .recharge_mv = 76800U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 80U,
-        .chemistry = AURORA_CHEM_LEAD, .pack = AURORA_PACK_72V
-    },
+static const aurora_charge_profile_t k_profiles[AURORA_CHEM_COUNT][AURORA_PACK_COUNT] = {
+    [AURORA_CHEM_LEAD][AURORA_PACK_48V] = {.battery_uv_mv = 41500U,
+                                           .battery_uv_recover_mv = 42000U,
+                                           .trickle_exit_mv = 48000U,
+                                           .cv_target_mv = 58000U,
+                                           .cv_min_mv = 57800U,
+                                           .cv_max_mv = 58200U,
+                                           .ov_slow_mv = 58800U,
+                                           .ov_medium_mv = 59500U,
+                                           .ov_fast_mv = 61800U,
+                                           .ov_absolute_mv = 93000U,
+                                           .float_target_mv = 54600U,
+                                           .float_min_mv = 54400U,
+                                           .float_max_mv = 54800U,
+                                           .full_voltage_mv = 58200U,
+                                           .recharge_mv = 51200U,
+                                           .trickle_current_ma = 1000U,
+                                           .cc_current_ma = 3000U,
+                                           .tail_current_ma = 300U,
+                                           .float_end_current_ma = 80U,
+                                           .chemistry = AURORA_CHEM_LEAD,
+                                           .pack = AURORA_PACK_48V},
+    [AURORA_CHEM_LEAD][AURORA_PACK_60V] = {.battery_uv_mv = 52000U,
+                                           .battery_uv_recover_mv = 52500U,
+                                           .trickle_exit_mv = 60000U,
+                                           .cv_target_mv = 72500U,
+                                           .cv_min_mv = 72300U,
+                                           .cv_max_mv = 72700U,
+                                           .ov_slow_mv = 73400U,
+                                           .ov_medium_mv = 74100U,
+                                           .ov_fast_mv = 76400U,
+                                           .ov_absolute_mv = 93000U,
+                                           .float_target_mv = 68300U,
+                                           .float_min_mv = 68100U,
+                                           .float_max_mv = 68500U,
+                                           .full_voltage_mv = 72700U,
+                                           .recharge_mv = 64000U,
+                                           .trickle_current_ma = 1000U,
+                                           .cc_current_ma = 3000U,
+                                           .tail_current_ma = 300U,
+                                           .float_end_current_ma = 80U,
+                                           .chemistry = AURORA_CHEM_LEAD,
+                                           .pack = AURORA_PACK_60V},
+    [AURORA_CHEM_LEAD][AURORA_PACK_72V] = {.battery_uv_mv = 62500U,
+                                           .battery_uv_recover_mv = 63000U,
+                                           .trickle_exit_mv = 72000U,
+                                           .cv_target_mv = 87000U,
+                                           .cv_min_mv = 86800U,
+                                           .cv_max_mv = 87200U,
+                                           .ov_slow_mv = 88000U,
+                                           .ov_medium_mv = 88700U,
+                                           .ov_fast_mv = 91000U,
+                                           .ov_absolute_mv = 93000U,
+                                           .float_target_mv = 82000U,
+                                           .float_min_mv = 81800U,
+                                           .float_max_mv = 82200U,
+                                           .full_voltage_mv = 87200U,
+                                           .recharge_mv = 76800U,
+                                           .trickle_current_ma = 1000U,
+                                           .cc_current_ma = 3000U,
+                                           .tail_current_ma = 300U,
+                                           .float_end_current_ma = 80U,
+                                           .chemistry = AURORA_CHEM_LEAD,
+                                           .pack = AURORA_PACK_72V},
 
-    [AURORA_CHEM_TERNARY][AURORA_PACK_48V] =
-    {
-        .battery_uv_mv = 35100U, .battery_uv_recover_mv = 35600U,
-        .trickle_exit_mv = 39000U,
-        .cv_target_mv = 54600U, .cv_min_mv = 54400U, .cv_max_mv = 54800U,
-        .ov_slow_mv = 56875U, .ov_medium_mv = 57575U,
-        .ov_fast_mv = 61800U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 54600U, .recharge_mv = 52650U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_TERNARY, .pack = AURORA_PACK_48V
-    },
-    [AURORA_CHEM_TERNARY][AURORA_PACK_60V] =
-    {
-        .battery_uv_mv = 45900U, .battery_uv_recover_mv = 46400U,
-        .trickle_exit_mv = 51000U,
-        .cv_target_mv = 71400U, .cv_min_mv = 71200U, .cv_max_mv = 71600U,
-        .ov_slow_mv = 74375U, .ov_medium_mv = 75075U,
-        .ov_fast_mv = 76400U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 71400U, .recharge_mv = 68850U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_TERNARY, .pack = AURORA_PACK_60V
-    },
-    [AURORA_CHEM_TERNARY][AURORA_PACK_72V] =
-    {
-        .battery_uv_mv = 54000U, .battery_uv_recover_mv = 54500U,
-        .trickle_exit_mv = 60000U,
-        .cv_target_mv = 84000U, .cv_min_mv = 83800U, .cv_max_mv = 84200U,
-        .ov_slow_mv = 87500U, .ov_medium_mv = 88200U,
-        .ov_fast_mv = 91000U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 84000U, .recharge_mv = 81000U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_TERNARY, .pack = AURORA_PACK_72V
-    },
+    [AURORA_CHEM_TERNARY][AURORA_PACK_48V] = {.battery_uv_mv = 35100U,
+                                              .battery_uv_recover_mv = 35600U,
+                                              .trickle_exit_mv = 39000U,
+                                              .cv_target_mv = 54600U,
+                                              .cv_min_mv = 54400U,
+                                              .cv_max_mv = 54800U,
+                                              .ov_slow_mv = 56875U,
+                                              .ov_medium_mv = 57575U,
+                                              .ov_fast_mv = 61800U,
+                                              .ov_absolute_mv = 93000U,
+                                              .float_target_mv = 0U,
+                                              .float_min_mv = 0U,
+                                              .float_max_mv = 0U,
+                                              .full_voltage_mv = 54600U,
+                                              .recharge_mv = 52650U,
+                                              .trickle_current_ma = 1000U,
+                                              .cc_current_ma = 3000U,
+                                              .tail_current_ma = 300U,
+                                              .float_end_current_ma = 0U,
+                                              .chemistry = AURORA_CHEM_TERNARY,
+                                              .pack = AURORA_PACK_48V},
+    [AURORA_CHEM_TERNARY][AURORA_PACK_60V] = {.battery_uv_mv = 45900U,
+                                              .battery_uv_recover_mv = 46400U,
+                                              .trickle_exit_mv = 51000U,
+                                              .cv_target_mv = 71400U,
+                                              .cv_min_mv = 71200U,
+                                              .cv_max_mv = 71600U,
+                                              .ov_slow_mv = 74375U,
+                                              .ov_medium_mv = 75075U,
+                                              .ov_fast_mv = 76400U,
+                                              .ov_absolute_mv = 93000U,
+                                              .float_target_mv = 0U,
+                                              .float_min_mv = 0U,
+                                              .float_max_mv = 0U,
+                                              .full_voltage_mv = 71400U,
+                                              .recharge_mv = 68850U,
+                                              .trickle_current_ma = 1000U,
+                                              .cc_current_ma = 3000U,
+                                              .tail_current_ma = 300U,
+                                              .float_end_current_ma = 0U,
+                                              .chemistry = AURORA_CHEM_TERNARY,
+                                              .pack = AURORA_PACK_60V},
+    [AURORA_CHEM_TERNARY][AURORA_PACK_72V] = {.battery_uv_mv = 54000U,
+                                              .battery_uv_recover_mv = 54500U,
+                                              .trickle_exit_mv = 60000U,
+                                              .cv_target_mv = 84000U,
+                                              .cv_min_mv = 83800U,
+                                              .cv_max_mv = 84200U,
+                                              .ov_slow_mv = 87500U,
+                                              .ov_medium_mv = 88200U,
+                                              .ov_fast_mv = 91000U,
+                                              .ov_absolute_mv = 93000U,
+                                              .float_target_mv = 0U,
+                                              .float_min_mv = 0U,
+                                              .float_max_mv = 0U,
+                                              .full_voltage_mv = 84000U,
+                                              .recharge_mv = 81000U,
+                                              .trickle_current_ma = 1000U,
+                                              .cc_current_ma = 3000U,
+                                              .tail_current_ma = 300U,
+                                              .float_end_current_ma = 0U,
+                                              .chemistry = AURORA_CHEM_TERNARY,
+                                              .pack = AURORA_PACK_72V},
 
-    [AURORA_CHEM_LFP][AURORA_PACK_48V] =
-    {
-        .battery_uv_mv = 40000U, .battery_uv_recover_mv = 40500U,
-        .trickle_exit_mv = 48000U,
-        .cv_target_mv = 57600U, .cv_min_mv = 57400U, .cv_max_mv = 57800U,
-        .ov_slow_mv = 60000U, .ov_medium_mv = 60700U,
-        .ov_fast_mv = 61800U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 57600U, .recharge_mv = 53600U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_LFP, .pack = AURORA_PACK_48V
-    },
-    [AURORA_CHEM_LFP][AURORA_PACK_60V] =
-    {
-        .battery_uv_mv = 50000U, .battery_uv_recover_mv = 50500U,
-        .trickle_exit_mv = 60000U,
-        .cv_target_mv = 72000U, .cv_min_mv = 71800U, .cv_max_mv = 72200U,
-        .ov_slow_mv = 75000U, .ov_medium_mv = 75700U,
-        .ov_fast_mv = 76400U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 72000U, .recharge_mv = 67000U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_LFP, .pack = AURORA_PACK_60V
-    },
-    [AURORA_CHEM_LFP][AURORA_PACK_72V] =
-    {
-        .battery_uv_mv = 60000U, .battery_uv_recover_mv = 60500U,
-        .trickle_exit_mv = 72000U,
-        .cv_target_mv = 86400U, .cv_min_mv = 86200U, .cv_max_mv = 86600U,
-        .ov_slow_mv = 90000U, .ov_medium_mv = 90700U,
-        .ov_fast_mv = 91000U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 86400U, .recharge_mv = 80400U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_LFP, .pack = AURORA_PACK_72V
-    },
+    [AURORA_CHEM_LFP][AURORA_PACK_48V] = {.battery_uv_mv = 40000U,
+                                          .battery_uv_recover_mv = 40500U,
+                                          .trickle_exit_mv = 48000U,
+                                          .cv_target_mv = 57600U,
+                                          .cv_min_mv = 57400U,
+                                          .cv_max_mv = 57800U,
+                                          .ov_slow_mv = 60000U,
+                                          .ov_medium_mv = 60700U,
+                                          .ov_fast_mv = 61800U,
+                                          .ov_absolute_mv = 93000U,
+                                          .float_target_mv = 0U,
+                                          .float_min_mv = 0U,
+                                          .float_max_mv = 0U,
+                                          .full_voltage_mv = 57600U,
+                                          .recharge_mv = 53600U,
+                                          .trickle_current_ma = 1000U,
+                                          .cc_current_ma = 3000U,
+                                          .tail_current_ma = 300U,
+                                          .float_end_current_ma = 0U,
+                                          .chemistry = AURORA_CHEM_LFP,
+                                          .pack = AURORA_PACK_48V},
+    [AURORA_CHEM_LFP][AURORA_PACK_60V] = {.battery_uv_mv = 50000U,
+                                          .battery_uv_recover_mv = 50500U,
+                                          .trickle_exit_mv = 60000U,
+                                          .cv_target_mv = 72000U,
+                                          .cv_min_mv = 71800U,
+                                          .cv_max_mv = 72200U,
+                                          .ov_slow_mv = 75000U,
+                                          .ov_medium_mv = 75700U,
+                                          .ov_fast_mv = 76400U,
+                                          .ov_absolute_mv = 93000U,
+                                          .float_target_mv = 0U,
+                                          .float_min_mv = 0U,
+                                          .float_max_mv = 0U,
+                                          .full_voltage_mv = 72000U,
+                                          .recharge_mv = 67000U,
+                                          .trickle_current_ma = 1000U,
+                                          .cc_current_ma = 3000U,
+                                          .tail_current_ma = 300U,
+                                          .float_end_current_ma = 0U,
+                                          .chemistry = AURORA_CHEM_LFP,
+                                          .pack = AURORA_PACK_60V},
+    [AURORA_CHEM_LFP][AURORA_PACK_72V] = {.battery_uv_mv = 60000U,
+                                          .battery_uv_recover_mv = 60500U,
+                                          .trickle_exit_mv = 72000U,
+                                          .cv_target_mv = 86400U,
+                                          .cv_min_mv = 86200U,
+                                          .cv_max_mv = 86600U,
+                                          .ov_slow_mv = 90000U,
+                                          .ov_medium_mv = 90700U,
+                                          .ov_fast_mv = 91000U,
+                                          .ov_absolute_mv = 93000U,
+                                          .float_target_mv = 0U,
+                                          .float_min_mv = 0U,
+                                          .float_max_mv = 0U,
+                                          .full_voltage_mv = 86400U,
+                                          .recharge_mv = 80400U,
+                                          .trickle_current_ma = 1000U,
+                                          .cc_current_ma = 3000U,
+                                          .tail_current_ma = 300U,
+                                          .float_end_current_ma = 0U,
+                                          .chemistry = AURORA_CHEM_LFP,
+                                          .pack = AURORA_PACK_72V},
 
-    [AURORA_CHEM_SODIUM][AURORA_PACK_48V] =
-    {
-        .battery_uv_mv = 30600U, .battery_uv_recover_mv = 31100U,
-        .trickle_exit_mv = 34000U,
-        .cv_target_mv = 56100U, .cv_min_mv = 55900U, .cv_max_mv = 56300U,
-        .ov_slow_mv = 58650U, .ov_medium_mv = 59350U,
-        .ov_fast_mv = 61800U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 56100U, .recharge_mv = 52700U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_SODIUM, .pack = AURORA_PACK_48V
-    },
-    [AURORA_CHEM_SODIUM][AURORA_PACK_60V] =
-    {
-        .battery_uv_mv = 39600U, .battery_uv_recover_mv = 40100U,
-        .trickle_exit_mv = 44000U,
-        .cv_target_mv = 72600U, .cv_min_mv = 72400U, .cv_max_mv = 72800U,
-        .ov_slow_mv = 75900U, .ov_medium_mv = 76600U,
-        .ov_fast_mv = 76400U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 72600U, .recharge_mv = 68200U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_SODIUM, .pack = AURORA_PACK_60V
-    },
-    [AURORA_CHEM_SODIUM][AURORA_PACK_72V] =
-    {
-        .battery_uv_mv = 46800U, .battery_uv_recover_mv = 47300U,
-        .trickle_exit_mv = 52000U,
-        .cv_target_mv = 85800U, .cv_min_mv = 85600U, .cv_max_mv = 86000U,
-        .ov_slow_mv = 89700U, .ov_medium_mv = 90400U,
-        .ov_fast_mv = 91000U, .ov_absolute_mv = 93000U,
-        .float_target_mv = 0U, .float_min_mv = 0U, .float_max_mv = 0U,
-        .full_voltage_mv = 85800U, .recharge_mv = 80600U,
-        .trickle_current_ma = 1000U, .cc_current_ma = 3000U,
-        .tail_current_ma = 300U, .float_end_current_ma = 0U,
-        .chemistry = AURORA_CHEM_SODIUM, .pack = AURORA_PACK_72V
-    }
-};
+    [AURORA_CHEM_SODIUM][AURORA_PACK_48V] = {.battery_uv_mv = 30600U,
+                                             .battery_uv_recover_mv = 31100U,
+                                             .trickle_exit_mv = 34000U,
+                                             .cv_target_mv = 56100U,
+                                             .cv_min_mv = 55900U,
+                                             .cv_max_mv = 56300U,
+                                             .ov_slow_mv = 58650U,
+                                             .ov_medium_mv = 59350U,
+                                             .ov_fast_mv = 61800U,
+                                             .ov_absolute_mv = 93000U,
+                                             .float_target_mv = 0U,
+                                             .float_min_mv = 0U,
+                                             .float_max_mv = 0U,
+                                             .full_voltage_mv = 56100U,
+                                             .recharge_mv = 52700U,
+                                             .trickle_current_ma = 1000U,
+                                             .cc_current_ma = 3000U,
+                                             .tail_current_ma = 300U,
+                                             .float_end_current_ma = 0U,
+                                             .chemistry = AURORA_CHEM_SODIUM,
+                                             .pack = AURORA_PACK_48V},
+    [AURORA_CHEM_SODIUM][AURORA_PACK_60V] = {.battery_uv_mv = 39600U,
+                                             .battery_uv_recover_mv = 40100U,
+                                             .trickle_exit_mv = 44000U,
+                                             .cv_target_mv = 72600U,
+                                             .cv_min_mv = 72400U,
+                                             .cv_max_mv = 72800U,
+                                             .ov_slow_mv = 75900U,
+                                             .ov_medium_mv = 76600U,
+                                             .ov_fast_mv = 76400U,
+                                             .ov_absolute_mv = 93000U,
+                                             .float_target_mv = 0U,
+                                             .float_min_mv = 0U,
+                                             .float_max_mv = 0U,
+                                             .full_voltage_mv = 72600U,
+                                             .recharge_mv = 68200U,
+                                             .trickle_current_ma = 1000U,
+                                             .cc_current_ma = 3000U,
+                                             .tail_current_ma = 300U,
+                                             .float_end_current_ma = 0U,
+                                             .chemistry = AURORA_CHEM_SODIUM,
+                                             .pack = AURORA_PACK_60V},
+    [AURORA_CHEM_SODIUM][AURORA_PACK_72V] = {.battery_uv_mv = 46800U,
+                                             .battery_uv_recover_mv = 47300U,
+                                             .trickle_exit_mv = 52000U,
+                                             .cv_target_mv = 85800U,
+                                             .cv_min_mv = 85600U,
+                                             .cv_max_mv = 86000U,
+                                             .ov_slow_mv = 89700U,
+                                             .ov_medium_mv = 90400U,
+                                             .ov_fast_mv = 91000U,
+                                             .ov_absolute_mv = 93000U,
+                                             .float_target_mv = 0U,
+                                             .float_min_mv = 0U,
+                                             .float_max_mv = 0U,
+                                             .full_voltage_mv = 85800U,
+                                             .recharge_mv = 80600U,
+                                             .trickle_current_ma = 1000U,
+                                             .cc_current_ma = 3000U,
+                                             .tail_current_ma = 300U,
+                                             .float_end_current_ma = 0U,
+                                             .chemistry = AURORA_CHEM_SODIUM,
+                                             .pack = AURORA_PACK_72V}};
 
 /*---------------------------------------------------------------------------*
  * Name        : static uint32_t elapsed_ms(uint32_t now_ms, uint32_t then_ms)
@@ -211,10 +305,8 @@ static uint32_t clamp_power(int64_t power_mw)
  *---------------------------------------------------------------------------*/
 static uint32_t current_feedforward_mw(uint32_t voltage_mv, uint32_t current_ma)
 {
-    const uint64_t power_mw =
-        ((uint64_t)voltage_mv * current_ma) / AURORA_MV_MA_PER_MW;
-    return (power_mw > AURORA_RATED_POWER_MW) ?
-               AURORA_RATED_POWER_MW : (uint32_t)power_mw;
+    const uint64_t power_mw = ((uint64_t)voltage_mv * current_ma) / AURORA_MV_MA_PER_MW;
+    return (power_mw > AURORA_RATED_POWER_MW) ? AURORA_RATED_POWER_MW : (uint32_t)power_mw;
 }
 
 /*---------------------------------------------------------------------------*
@@ -227,11 +319,17 @@ static uint32_t lead_cell_count(aurora_battery_pack_t pack)
 {
     switch (pack)
     {
-    case AURORA_PACK_48V: return 24U;
-    case AURORA_PACK_60V: return 30U;
-    case AURORA_PACK_72V: return 36U;
-    default: return 0U;
+    case AURORA_PACK_48V:
+        return 24U;
+    case AURORA_PACK_60V:
+        return 30U;
+    case AURORA_PACK_72V:
+        return 36U;
+    case AURORA_PACK_COUNT:
+        break;
     }
+
+    return 0U;
 }
 
 /*---------------------------------------------------------------------------*
@@ -255,10 +353,10 @@ static uint32_t add_mv_clamped(uint32_t base_mv, int64_t delta_mv)
  *               const aurora_measurement_t *sample)
  * Input       : ctx - 充电上下文；sample - 最新测量
  * Output      : 无
- * Description : 继承120W铅酸25°C/-3mV°C/cell温补；锂/钠保持基础档案。正温补受固定Fast OV安全裕量钳制。
+ * Description : 继承120W铅酸25°C/-3mV°C/cell温补；锂/钠保持基础档案。正温补受固定Fast
+ * OV安全裕量钳制。
  *---------------------------------------------------------------------------*/
-static void update_effective_profile(aurora_charger_ctx_t *ctx,
-                                     const aurora_measurement_t *sample)
+static void update_effective_profile(aurora_charger_ctx_t *ctx, const aurora_measurement_t *sample)
 {
     int32_t temp_dC;
     uint32_t cells;
@@ -284,7 +382,8 @@ static void update_effective_profile(aurora_charger_ctx_t *ctx,
 
     cells = lead_cell_count(ctx->base_profile.pack);
     delta_mv = ((int64_t)(temp_dC - AURORA_LEAD_TEMP_COMP_REFERENCE_DC) *
-                AURORA_LEAD_TEMP_COMP_MV_PER_C_PER_CELL * cells) / 10LL;
+                AURORA_LEAD_TEMP_COMP_MV_PER_C_PER_CELL * cells) /
+               10LL;
 
     if (delta_mv > 0LL)
     {
@@ -315,12 +414,12 @@ static void update_effective_profile(aurora_charger_ctx_t *ctx,
 /*---------------------------------------------------------------------------*
  * Name        : static bool condition_held(uint32_t *since_ms, bool condition,
  *               uint32_t hold_ms, uint32_t now_ms)
- * Input       : since_ms - 连续条件起点；condition - 当前条件；hold_ms - 目标时间；now_ms - 当前时间
+ * Input       : since_ms - 连续条件起点；condition - 当前条件；
+ *               hold_ms - 目标时间；now_ms - 当前时间
  * Output      : true表示条件已连续成立足够久
  * Description : 充电状态转移使用真实毫秒而不是一次ADC越阈值就立即切换。
  *---------------------------------------------------------------------------*/
-static bool condition_held(uint32_t *since_ms, bool condition,
-                           uint32_t hold_ms, uint32_t now_ms)
+static bool condition_held(uint32_t *since_ms, bool condition, uint32_t hold_ms, uint32_t now_ms)
 {
     if (!condition)
     {
@@ -342,9 +441,7 @@ static bool condition_held(uint32_t *since_ms, bool condition,
  * Output      : 无
  * Description : 统一记录阶段时间并清尾流计时；进入Float时记录浮充起点。
  *---------------------------------------------------------------------------*/
-static void enter_state(aurora_charger_ctx_t *ctx,
-                        aurora_charge_state_t state,
-                        uint32_t now_ms)
+static void enter_state(aurora_charger_ctx_t *ctx, aurora_charge_state_t state, uint32_t now_ms)
 {
     ctx->state = state;
     ctx->state_since_ms = now_ms;
@@ -366,7 +463,8 @@ static void enter_state(aurora_charger_ctx_t *ctx,
  *               uint32_t now_ms)
  * Input       : ctx - 充电上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 普通复充/Float维持失败只要求撤PWM并重新做电池稳定准入，不冒充PV_I传感器故障重新校零。
+ * Description :
+ * 普通复充/Float维持失败只要求撤PWM并重新做电池稳定准入，不冒充PV_I传感器故障重新校零。
  *---------------------------------------------------------------------------*/
 static void request_restart(aurora_charger_ctx_t *ctx, uint32_t now_ms)
 {
@@ -381,8 +479,7 @@ static void request_restart(aurora_charger_ctx_t *ctx, uint32_t now_ms)
  * Output      : 电池侧目标功率，mW
  * Description : 无BAT_I硬件时以Vbat×Itarget前馈，并用BAT_I_EST做低带宽PI修正。
  *---------------------------------------------------------------------------*/
-static uint32_t current_power_target(aurora_charger_ctx_t *ctx,
-                                     const aurora_measurement_t *sample,
+static uint32_t current_power_target(aurora_charger_ctx_t *ctx, const aurora_measurement_t *sample,
                                      uint32_t target_current_ma)
 {
     const uint32_t feedforward_mw =
@@ -393,11 +490,9 @@ static uint32_t current_power_target(aurora_charger_ctx_t *ctx,
         (sample->battery_current_quality == AURORA_MEAS_QUALITY_ESTIMATED) &&
         (sample->battery_current_est_ma >= 0))
     {
-        const int32_t error_ma =
-            (int32_t)target_current_ma - sample->battery_current_est_ma;
+        const int32_t error_ma = (int32_t)target_current_ma - sample->battery_current_est_ma;
         int64_t candidate_integral =
-            ctx->cc_integral_mw +
-            ((int64_t)error_ma * AURORA_CHARGER_CC_KI_MW_PER_MA_STEP);
+            ctx->cc_integral_mw + ((int64_t)error_ma * AURORA_CHARGER_CC_KI_MW_PER_MA_STEP);
 
         if (candidate_integral > (int64_t)AURORA_RATED_POWER_MW)
         {
@@ -432,16 +527,13 @@ static uint32_t current_power_target(aurora_charger_ctx_t *ctx,
  * Output      : 电池侧目标功率，mW
  * Description : CV/Float共用电池电压PI，采用条件积分避免上下限饱和继续积累。
  *---------------------------------------------------------------------------*/
-static uint32_t voltage_power_target(aurora_charger_ctx_t *ctx,
-                                     const aurora_measurement_t *sample,
+static uint32_t voltage_power_target(aurora_charger_ctx_t *ctx, const aurora_measurement_t *sample,
                                      uint32_t target_mv)
 {
     const int32_t error_mv = (int32_t)target_mv - sample->battery_voltage_mv;
-    const int64_t proportional_mw =
-        (int64_t)error_mv * AURORA_CHARGER_CV_KP_MW_PER_MV;
+    const int64_t proportional_mw = (int64_t)error_mv * AURORA_CHARGER_CV_KP_MW_PER_MV;
     int64_t candidate_integral =
-        ctx->cv_integral_mw +
-        ((int64_t)error_mv * AURORA_CHARGER_CV_KI_MW_PER_MV_STEP);
+        ctx->cv_integral_mw + ((int64_t)error_mv * AURORA_CHARGER_CV_KI_MW_PER_MV_STEP);
     int64_t output_mw;
 
     if (candidate_integral < 0LL)
@@ -469,16 +561,24 @@ static uint32_t voltage_power_target(aurora_charger_ctx_t *ctx,
  * Output      : true表示档案有效；false表示索引或参数错误
  * Description : 从V2.7只读二维表取得档案，禁止越界索引进入充电和保护状态机。
  *---------------------------------------------------------------------------*/
-bool aurora_charge_profile_get(aurora_battery_chem_t chemistry,
-                               aurora_battery_pack_t pack,
+bool aurora_charge_profile_get(aurora_battery_chem_t chemistry, aurora_battery_pack_t pack,
                                aurora_charge_profile_t *out)
 {
-    if ((out == NULL) || (chemistry >= AURORA_CHEM_COUNT) ||
-        (pack >= AURORA_PACK_COUNT))
+    if ((out == NULL) || (chemistry >= AURORA_CHEM_COUNT) || (pack >= AURORA_PACK_COUNT))
     {
         return false;
     }
     *out = k_profiles[chemistry][pack];
+    if ((chemistry == AURORA_CHEM_TERNARY) || (chemistry == AURORA_CHEM_LFP))
+    {
+        out->ambient_low_trip_dC = AURORA_LITHIUM_LOW_TRIP_TEMP_DC;
+        out->ambient_low_recover_dC = AURORA_LITHIUM_LOW_RECOVER_TEMP_DC;
+    }
+    else
+    {
+        out->ambient_low_trip_dC = AURORA_AMB_LOW_TRIP_TEMP_DC;
+        out->ambient_low_recover_dC = AURORA_AMB_LOW_RECOVER_TEMP_DC;
+    }
     return true;
 }
 
@@ -490,10 +590,8 @@ bool aurora_charge_profile_get(aurora_battery_chem_t chemistry,
  * Output      : 无
  * Description : 清零动态控制量并装载电池档案；档案无效时进入FAULT。
  *---------------------------------------------------------------------------*/
-void aurora_charger_init(aurora_charger_ctx_t *ctx,
-                         aurora_battery_chem_t chemistry,
-                         aurora_battery_pack_t pack,
-                         uint32_t now_ms)
+void aurora_charger_init(aurora_charger_ctx_t *ctx, aurora_battery_chem_t chemistry,
+                         aurora_battery_pack_t pack, uint32_t now_ms)
 {
     if (ctx == NULL)
     {
@@ -509,19 +607,47 @@ void aurora_charger_init(aurora_charger_ctx_t *ctx,
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : void aurora_charger_account_active_time(aurora_charger_ctx_t *ctx,
+ *               bool actual_power_transfer, uint32_t elapsed_ms)
+ * Input       : ctx - 充电上下文；actual_power_transfer - 本周期是否真实向电池传能；
+ *               elapsed_ms - 本次推进的真实毫秒数
+ * Output      : 无
+ * Description : 只累计真实RUN/Relay/PWM功率传输时间；等待PV、校零、预充和故障停机不计入15h/180min。
+ *---------------------------------------------------------------------------*/
+void aurora_charger_account_active_time(aurora_charger_ctx_t *ctx, bool actual_power_transfer,
+                                        uint32_t elapsed_ms)
+{
+    if ((ctx == NULL) || !actual_power_transfer || (elapsed_ms == 0U))
+    {
+        return;
+    }
+
+    if ((ctx->state != AURORA_CHARGE_OFF) && (ctx->state != AURORA_CHARGE_COMPLETE) &&
+        (ctx->state != AURORA_CHARGE_FAULT))
+    {
+        const uint32_t remaining = UINT32_MAX - ctx->active_charge_ms;
+        ctx->active_charge_ms += (elapsed_ms < remaining) ? elapsed_ms : remaining;
+    }
+    if ((ctx->state == AURORA_CHARGE_FLOAT) && ctx->float_started)
+    {
+        const uint32_t remaining = UINT32_MAX - ctx->active_float_ms;
+        ctx->active_float_ms += (elapsed_ms < remaining) ? elapsed_ms : remaining;
+    }
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : aurora_charge_output_t aurora_charger_step(
  *               aurora_charger_ctx_t *ctx, const aurora_measurement_t *sample,
  *               bool weak_light, bool thermal_limited, bool input_limited,
  *               uint32_t now_ms)
- * Input       : ctx - 充电上下文；sample - 测量；weak_light/thermal_limited/input_limited - 外部限制；now_ms - 当前毫秒
+ * Input       : ctx - 充电上下文；sample - 测量；
+ *               weak_light/thermal_limited/input_limited - 外部限制；now_ms - 当前毫秒
  * Output      : 充电阶段和电池侧目标
  * Description : 推进TC/CC/CV/Float/Complete；尾流只在真实控制余量充足时累计。
  *---------------------------------------------------------------------------*/
 aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
-                                           const aurora_measurement_t *sample,
-                                           bool weak_light,
-                                           bool thermal_limited,
-                                           bool input_limited,
+                                           const aurora_measurement_t *sample, bool weak_light,
+                                           bool thermal_limited, bool input_limited,
                                            uint32_t now_ms)
 {
     aurora_charge_output_t output;
@@ -529,8 +655,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
 
     memset(&output, 0, sizeof(output));
     if ((ctx == NULL) || (sample == NULL) || !ctx->initialized ||
-        ((sample->valid_mask & required) != required) ||
-        (sample->battery_voltage_mv <= 0))
+        ((sample->valid_mask & required) != required) || (sample->battery_voltage_mv <= 0))
     {
         output.state = AURORA_CHARGE_FAULT;
         return output;
@@ -554,10 +679,8 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
         ctx->restart_since_ms = 0U;
     }
 
-    if ((ctx->state != AURORA_CHARGE_OFF) &&
-        (ctx->state != AURORA_CHARGE_COMPLETE) &&
-        (ctx->state != AURORA_CHARGE_FAULT) &&
-        (elapsed_ms(now_ms, ctx->charge_start_ms) >= AURORA_MAX_CHARGE_TIME_MS))
+    if ((ctx->state != AURORA_CHARGE_OFF) && (ctx->state != AURORA_CHARGE_COMPLETE) &&
+        (ctx->state != AURORA_CHARGE_FAULT) && (ctx->active_charge_ms >= AURORA_MAX_CHARGE_TIME_MS))
     {
         enter_state(ctx, AURORA_CHARGE_COMPLETE, now_ms);
     }
@@ -566,11 +689,14 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     {
     case AURORA_CHARGE_OFF:
         ctx->charge_start_ms = now_ms;
+        ctx->active_charge_ms = 0U;
+        ctx->active_float_ms = 0U;
         ctx->cv_integral_mw = 0LL;
         ctx->cc_integral_mw = 0LL;
         enter_state(ctx,
-                    ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv) ?
-                        AURORA_CHARGE_TRICKLE : AURORA_CHARGE_CC,
+                    ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv)
+                        ? AURORA_CHARGE_TRICKLE
+                        : AURORA_CHARGE_CC,
                     now_ms);
         break;
 
@@ -601,9 +727,8 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
             ctx->cc_to_cv_score = (uint16_t)(ctx->cc_to_cv_score + increment);
             if (ctx->cc_to_cv_score > AURORA_CC_TO_CV_SCORE_THRESHOLD)
             {
-                ctx->cv_integral_mw =
-                    current_feedforward_mw((uint32_t)sample->battery_voltage_mv,
-                                           ctx->profile.cc_current_ma);
+                ctx->cv_integral_mw = current_feedforward_mw((uint32_t)sample->battery_voltage_mv,
+                                                             ctx->profile.cc_current_ma);
                 enter_state(ctx, AURORA_CHARGE_CV, now_ms);
             }
         }
@@ -617,8 +742,8 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     case AURORA_CHARGE_CV:
         if (condition_held(&ctx->transition_since_ms,
                            !weak_light && !thermal_limited && !input_limited &&
-                           (((uint32_t)sample->battery_voltage_mv +
-                             AURORA_CHARGER_CV_RETURN_HYST_MV) < ctx->profile.cv_target_mv),
+                               (((uint32_t)sample->battery_voltage_mv +
+                                 AURORA_CHARGER_CV_RETURN_HYST_MV) < ctx->profile.cv_target_mv),
                            AURORA_CV_TO_CC_HOLD_MS, now_ms))
         {
             ctx->cc_integral_mw = 0LL;
@@ -670,7 +795,7 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
                 ctx->cv_integral_mw = 0LL;
             }
         }
-        else if (elapsed_ms(now_ms, ctx->float_start_ms) >= AURORA_FLOAT_TIME_MS)
+        else if (ctx->active_float_ms >= AURORA_FLOAT_TIME_MS)
         {
             enter_state(ctx, AURORA_CHARGE_COMPLETE, now_ms);
         }
@@ -679,17 +804,18 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
                                 AURORA_FLOAT_LOW_VOLT_HOLD_MS, now_ms))
         {
             ctx->charge_start_ms = now_ms;
+            ctx->active_charge_ms = 0U;
+            ctx->active_float_ms = 0U;
             ctx->cc_integral_mw = 0LL;
             request_restart(ctx, now_ms);
             enter_state(ctx, AURORA_CHARGE_CC, now_ms);
         }
-        else if (((sample->valid_mask & AURORA_MEAS_VALID_BAT_I_EST) != 0U) &&
-                 !weak_light && !thermal_limited && !input_limited &&
+        else if (((sample->valid_mask & AURORA_MEAS_VALID_BAT_I_EST) != 0U) && !weak_light &&
+                 !thermal_limited && !input_limited &&
                  ((uint32_t)sample->battery_voltage_mv >= ctx->profile.float_min_mv) &&
                  ((uint32_t)sample->battery_voltage_mv <= ctx->profile.float_max_mv) &&
                  (sample->battery_current_est_ma >= 0) &&
-                 ((uint32_t)sample->battery_current_est_ma <=
-                  ctx->profile.float_end_current_ma))
+                 ((uint32_t)sample->battery_current_est_ma <= ctx->profile.float_end_current_ma))
         {
             if (ctx->tail_since_ms == 0U)
             {
@@ -712,11 +838,14 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
                            AURORA_RECHARGE_HOLD_MS, now_ms))
         {
             ctx->charge_start_ms = now_ms;
+            ctx->active_charge_ms = 0U;
+            ctx->active_float_ms = 0U;
             ctx->cc_integral_mw = 0LL;
             request_restart(ctx, now_ms);
             enter_state(ctx,
-                        ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv) ?
-                            AURORA_CHARGE_TRICKLE : AURORA_CHARGE_CC,
+                        ((uint32_t)sample->battery_voltage_mv < ctx->profile.trickle_exit_mv)
+                            ? AURORA_CHARGE_TRICKLE
+                            : AURORA_CHARGE_CC,
                         now_ms);
         }
         break;
@@ -758,8 +887,9 @@ aurora_charge_output_t aurora_charger_step(aurora_charger_ctx_t *ctx,
     case AURORA_CHARGE_FLOAT:
         output.allow_charge = ctx->float_started;
         output.voltage_target_mv = ctx->profile.float_target_mv;
-        output.battery_power_target_mw = ctx->float_started ?
-            voltage_power_target(ctx, sample, ctx->profile.float_target_mv) : 0U;
+        output.battery_power_target_mw =
+            ctx->float_started ? voltage_power_target(ctx, sample, ctx->profile.float_target_mv)
+                               : 0U;
         break;
 
     case AURORA_CHARGE_OFF:

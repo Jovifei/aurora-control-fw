@@ -103,9 +103,11 @@
 #define AURORA_ZERO_CAL_PV_STABLE_MS                (2000U)
 /* 使用32个完整DMA块建立运行时zero_code，同时检查块间稳定性。 */
 #define AURORA_ZERO_CAL_BLOCKS                      (32U)
-/* 新300W理论零点接近0；该宽窗口仅用于启动诊断/Host兼容，最终量产边界必须由实板冻结。 */
-#define AURORA_ZERO_CAL_CODE_MIN                    (0U)
-#define AURORA_ZERO_CAL_CODE_MAX                    (3072U)
+/* OPA1使用AVDD/2共模，零电流名义码约2048；候选窗口必须围绕中点而不是0码。 */
+#define AURORA_ZERO_CAL_CODE_MIN                    (1280U)
+#define AURORA_ZERO_CAL_CODE_MAX                    (2816U)
+/* 一次完整零点校准失败后允许重新寻找稳定窗口的次数；超限后锁存传感器故障。 */
+#define AURORA_ZERO_CAL_SESSION_RETRY_MAX           (3U)
 /* 32个块平均码之间允许的最大spread候选；超出视为供电/OPA/噪声不稳定，禁止进入PRECHARGE。 */
 #define AURORA_ZERO_CAL_SPREAD_MAX_CODE             (16U)
 /* 单个DMA块内部PV_I原始码最大允许峰峰值；超出时该块不计入有效零点证据。 */
@@ -133,6 +135,15 @@
 #define AURORA_BAT_STABILITY_MAX_SPAN_MV            (2000L)
 /* 预充超过30s仍无法满足压差条件，判本次启动失败。 */
 #define AURORA_PRECHARGE_TIMEOUT_MS                 (30000U)
+/* BST_U相对BAT_U向上过冲超过该值，立即停止预充并锁存BUS过压。 */
+#define AURORA_BUS_RELATIVE_OVERSHOOT_MV            (2500L)
+/* 绝对母线保护以当前目标加裕量为主，并受现有26:1量程的保守软件上限约束。 */
+#define AURORA_BUS_TARGET_OV_MARGIN_MV              (3000U)
+#define AURORA_BUS_ABSOLUTE_MAX_MV                  (84000U)
+/* 启动失败的有限重试次数；弱光不计入硬件失败。 */
+#define AURORA_PRECHARGE_RETRY_MAX                  (3U)
+#define AURORA_RELAY_VERIFY_RETRY_MAX               (2U)
+#define AURORA_BAT_STABILITY_RETRY_MAX              (3U)
 /* 故障关PWM后至少保持20ms放能，再释放继电器。 */
 #define AURORA_RELAY_FAULT_RELEASE_MS               (20U)
 
@@ -193,11 +204,14 @@
 #define AURORA_MOS_RECOVER_TEMP_DC                  (950)
 #define AURORA_MOS_TEMP_TRIP_DELAY_MS               (1000U)
 #define AURORA_MOS_TEMP_RECOVER_DELAY_MS            (1000U)
-/* V2.7环境高温55/50°C、低温-20/-15°C，均1s确认。 */
+/* V2.7环境高温55/50°C，均1s确认。 */
 #define AURORA_AMB_HIGH_TRIP_TEMP_DC                (550)
 #define AURORA_AMB_HIGH_RECOVER_TEMP_DC             (500)
+/* 铅酸/钠离子沿用-20/-15°C；三元/LFP恢复0/+5°C低温禁充。 */
 #define AURORA_AMB_LOW_TRIP_TEMP_DC                 (-200)
 #define AURORA_AMB_LOW_RECOVER_TEMP_DC              (-150)
+#define AURORA_LITHIUM_LOW_TRIP_TEMP_DC             (0)
+#define AURORA_LITHIUM_LOW_RECOVER_TEMP_DC          (50)
 #define AURORA_AMB_TEMP_TRIP_DELAY_MS               (1000U)
 #define AURORA_AMB_TEMP_RECOVER_DELAY_MS            (1000U)
 /* 铅酸成熟温补：25°C基准，-3mV/°C/2V cell，环境温度钳位-20~55°C。 */
@@ -258,6 +272,8 @@
 #define AURORA_MAX_CHARGE_TIME_MS                   (900UL * 60UL * 1000UL)
 #define AURORA_FLOAT_TIME_MS                        (180UL * 60UL * 1000UL)
 #define AURORA_TAIL_HOLD_MS                         (1000U)
+/* 只有真实RUN+Relay+PWM且PV功率超过该值，才累计15h/180min会话时间。 */
+#define AURORA_ACTUAL_TRANSFER_MIN_POWER_MW         (1000U)
 /* 120W成熟PV_I合理性诊断，阈值按新3.3V/OPA链以mA表达，仍需台架冻结。 */
 #define AURORA_PV_I_RUN_NEGATIVE_TRIP_MA            (-1000L)
 #define AURORA_PV_I_RUN_NEGATIVE_DELAY_MS           (10U)
@@ -278,14 +294,31 @@
 #define AURORA_UI_FAULT_HALF_MS                     (500U)
 #define AURORA_UI_FAULT_GROUP_GAP_MS                (2000U)
 
+/* ---------------- 受限Demo无电池带载模式 ---------------- */
+#define AURORA_DEMO_TARGET_VOLTAGE_MV               (48000U)
+#define AURORA_DEMO_MAX_TARGET_VOLTAGE_MV           (58000U)
+#define AURORA_DEMO_POWER_LIMIT_MW                  (30000U)
+#define AURORA_DEMO_PROBE_POWER_MW                  (5000U)
+#define AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV          (5000L)
+#define AURORA_DEMO_LOAD_MIN_POWER_MW               (2000U)
+#define AURORA_DEMO_PROBE_HOLD_MS                   (1500U)
+#define AURORA_DEMO_PROBE_TIMEOUT_MS                (5000U)
+#define AURORA_DEMO_NO_LOAD_HOLD_MS                 (1500U)
+#define AURORA_DEMO_OVERLOAD_HOLD_MS                (100U)
+#define AURORA_DEMO_CV_POWER_MW_PER_MV             (20U)
+
 /* 主动遥测与存储。 */
 #define AURORA_TELEMETRY_PERIOD_MS                  (1000U)
 #define AURORA_STORAGE_DIRTY_HOLD_MS                (1000U)
+/* 运行中每60s提出一次能量保存请求；真正擦写仍只在PWM OFF且Relay OFF安全窗口。 */
+#define AURORA_ENERGY_PERSIST_REQUEST_MS            (60000U)
 /* 继承120W的49点累计量窗口：每30min一个快照，48个间隔构成24h。 */
 #define AURORA_ENERGY_HISTORY_INTERVAL_MS            (30UL * 60UL * 1000UL)
-#define AURORA_FW_VERSION_MAJOR                     (2U)
-#define AURORA_FW_VERSION_MINOR                     (0U)
-#define AURORA_FW_VERSION_PATCH                     (8U)
+#define AURORA_FW_VERSION_MAJOR                     (0U)
+#define AURORA_FW_VERSION_MINOR                     (10U)
+#define AURORA_FW_VERSION_PATCH                     (2U)
+/* Flash v3中的能量统计语义版本。 */
+#define AURORA_ENERGY_SEMANTICS_VERSION             (3U)
 
 /* 看门狗健康监督。 */
 #define AURORA_WATCHDOG_WINDOW_MS                   (100U)

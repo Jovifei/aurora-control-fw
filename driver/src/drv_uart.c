@@ -77,9 +77,9 @@ bool drv_uart_send(const uint8_t *data, size_t length)
 
     irq = drv_irq_save();
     {
-        const uint16_t used = (g_tx_head >= g_tx_tail) ?
-                                  (uint16_t)(g_tx_head - g_tx_tail) :
-                                  (uint16_t)(BOARD_UART_TX_BUFFER_SIZE - g_tx_tail + g_tx_head);
+        const uint16_t used = (g_tx_head >= g_tx_tail)
+                                  ? (uint16_t)(g_tx_head - g_tx_tail)
+                                  : (uint16_t)(BOARD_UART_TX_BUFFER_SIZE - g_tx_tail + g_tx_head);
         const uint16_t free_bytes = (uint16_t)(BOARD_UART_TX_BUFFER_SIZE - 1U - used);
         if (length > free_bytes)
         {

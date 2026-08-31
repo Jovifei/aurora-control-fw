@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">protection.c 保护链</text>
+<rect x="70" y="120" width="260" height="78" class="box"/><text x="133" y="160" class="txt">快速故障入口</text><text x="105" y="186" class="stxt">COMP / BREAK / ADC overrun / ISR 锁存</text>
+<rect x="450" y="120" width="260" height="78" class="box"/><text x="520" y="160" class="txt">慢速保护入口</text><text x="510" y="186" class="stxt">aurora_protection_step</text>
+<rect x="840" y="120" width="250" height="78" class="box"/><text x="897" y="160" class="txt">fault_mask 锁存</text><text x="868" y="186" class="stxt">软件故障位 + 恢复条件管理</text>
+
+<rect x="90" y="300" width="170" height="80" class="smallbox"/><text x="130" y="340" class="txt">PV 类</text><text x="110" y="364" class="stxt">欠压 / 过压 / 过流 / 过功率</text>
+<rect x="300" y="300" width="170" height="80" class="smallbox"/><text x="335" y="340" class="txt">Battery 类</text><text x="325" y="364" class="stxt">欠压 / 过压</text>
+<rect x="510" y="300" width="170" height="80" class="smallbox"/><text x="552" y="340" class="txt">温度类</text><text x="523" y="364" class="stxt">MOS / 环境 / NTC 开短路</text>
+<rect x="720" y="300" width="170" height="80" class="smallbox"/><text x="760" y="340" class="txt">采样类</text><text x="734" y="364" class="stxt">ADC stale / DMA / 合理性</text>
+<rect x="930" y="300" width="170" height="80" class="smallbox"/><text x="968" y="340" class="txt">系统类</text><text x="960" y="364" class="stxt">Relay / Storage / Internal</text>
+
+<path d="M330,159 L450,159" class="line"/>
+<path d="M710,159 L840,159" class="line"/>
+<path d="M965,198 L965,300" class="line"/>
+<path d="M965,198 L805,300" class="line"/>
+<path d="M965,198 L595,300" class="line"/>
+<path d="M965,198 L385,300" class="line"/>
+<path d="M965,198 L175,300" class="line"/>
+<text x="90" y="470" class="stxt">保护模块不负责点灯、不负责直接写 GPIO。它只维护 fault_mask、恢复窗口和安全许可；灯光由 ui.c，硬件关断由 runtime/driver 完成。</text>
+
+</svg>

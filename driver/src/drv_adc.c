@@ -34,7 +34,8 @@ static void configure_analog_pin(GPIO_TypeDef *port, uint32_t pin)
  * Name        : bool drv_adc_init(void)
  * Input       : 无
  * Output      : true表示ADC规则组、DMA和中断初始化成功；false表示关键配置失败
- * Description : 配置六通道ADC规则序列、ATMR中点触发、DMA双半缓冲和HT/TC/TE中断；任一关键初始化失败即返回。
+ * Description :
+ * 配置六通道ADC规则序列、ATMR中点触发、DMA双半缓冲和HT/TC/TE中断；任一关键初始化失败即返回。
  *---------------------------------------------------------------------------*/
 bool drv_adc_init(void)
 {
@@ -43,16 +44,14 @@ bool drv_adc_init(void)
     DDL_DMA_InitTypeDef dma = {0U};
 
     DDL_RCC_Unlock();
-    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA |
-                             DDL_AHB_GRP1_PERIPH_GPIOB |
+    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA | DDL_AHB_GRP1_PERIPH_GPIOB |
                              DDL_AHB_GRP1_PERIPH_DMA);
     DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_ADC);
     DDL_RCC_SetADCClkDiv(DDL_RCC_ADCCLK_DIVISION_4);
     DDL_RCC_Lock();
 
     configure_analog_pin(GPIOA, DDL_GPIO_PIN_8 | DDL_GPIO_PIN_9);
-    configure_analog_pin(GPIOB, DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 |
-                                DDL_GPIO_PIN_5 | DDL_GPIO_PIN_12);
+    configure_analog_pin(GPIOB, DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 | DDL_GPIO_PIN_5 | DDL_GPIO_PIN_12);
 
     DDL_ADC_Enable(ADC);
     {

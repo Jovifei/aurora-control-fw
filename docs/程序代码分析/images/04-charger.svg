@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="500" viewBox="0 0 1180 500">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">charger.c 充电状态机</text>
+<rect x="40" y="170" width="120" height="70" class="smallbox"/><text x="82" y="213" class="txt">OFF</text>
+<rect x="200" y="170" width="140" height="70" class="smallbox"/><text x="226" y="213" class="txt">TRICKLE</text>
+<rect x="380" y="170" width="110" height="70" class="smallbox"/><text x="423" y="213" class="txt">CC</text>
+<rect x="530" y="170" width="110" height="70" class="smallbox"/><text x="572" y="213" class="txt">CV</text>
+<rect x="680" y="170" width="130" height="70" class="smallbox"/><text x="718" y="213" class="txt">FLOAT</text>
+<rect x="850" y="170" width="150" height="70" class="smallbox"/><text x="880" y="213" class="txt">COMPLETE</text>
+<rect x="1040" y="170" width="100" height="70" class="smallbox"/><text x="1070" y="213" class="txt">FAULT</text>
+<path d="M160,205 L200,205" class="line"/>
+<path d="M340,205 L380,205" class="line"/>
+<path d="M490,205 L530,205" class="line"/>
+<path d="M640,205 L680,205" class="line"/>
+<path d="M810,205 L850,205" class="line"/>
+<path d="M905,240 C905,315 435,315 435,240" class="line"/>
+<path d="M745,240 C745,315 435,315 435,240" class="line"/>
+<text x="56" y="110" class="stxt">职责：根据电池化学体系/电压平台，输出“电池侧目标”。</text>
+<text x="56" y="132" class="stxt">注意：charger 不直接写 PWM；它只输出 allow_charge、battery_power_target、state 等信息。</text>
+<text x="53" y="390" class="stxt">关键函数：aurora_charge_profile_get / aurora_charger_init / aurora_charger_step</text>
+<text x="53" y="420" class="stxt">关键返回：battery_power_target_mw、current_target_ma、voltage_target_mv、allow_charge、restart_required</text>
+
+</svg>

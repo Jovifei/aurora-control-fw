@@ -7,7 +7,7 @@
 #include "system_g32f031.h"
 
 /* 微秒换算毫秒，供PVD Ready超时向1ms SysTick时基取整。 */
-#define DRIVER_US_PER_MS                             (1000UL)
+#define DRIVER_US_PER_MS (1000UL)
 
 /* 当前启动方案明确禁止PVD成为系统复位源或运行期中断保护源。 */
 #if BOARD_MCU_PVD_RESET_ENABLE != 0U
@@ -19,42 +19,42 @@
 
 /* 把board中的名义mV参数映射为G32F031硬件PVD档位。 */
 #if BOARD_MCU_PVD_THRESHOLD_MV == 2000UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_1
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_1
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 2400UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_2
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_2
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 2800UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_3
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_3
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 3200UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_4
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_4
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 3600UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_5
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_5
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 4000UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_6
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_6
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 4400UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_7
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_7
 #elif BOARD_MCU_PVD_THRESHOLD_MV == 4800UL
-#define DRIVER_PVD_THRESHOLD                         DDL_PMU_PVD_THRESHOLD_8
+#define DRIVER_PVD_THRESHOLD DDL_PMU_PVD_THRESHOLD_8
 #else
 #error "Unsupported BOARD_MCU_PVD_THRESHOLD_MV"
 #endif
 
 /* PVD滤波长度以复位后的64MHz HSI系统时钟为依据。 */
 #if BOARD_MCU_PVD_FILTER_US == 1UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_64
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_64
 #elif BOARD_MCU_PVD_FILTER_US == 2UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_128
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_128
 #elif BOARD_MCU_PVD_FILTER_US == 3UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_192
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_192
 #elif BOARD_MCU_PVD_FILTER_US == 5UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_320
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_320
 #elif BOARD_MCU_PVD_FILTER_US == 10UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_640
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_640
 #elif BOARD_MCU_PVD_FILTER_US == 20UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_1280
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_1280
 #elif BOARD_MCU_PVD_FILTER_US == 30UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_1920
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_1920
 #elif BOARD_MCU_PVD_FILTER_US == 50UL
-#define DRIVER_PVD_FILTER_LENGTH                     DDL_PMU_PVD_FILTER_LENGTH_3200
+#define DRIVER_PVD_FILTER_LENGTH DDL_PMU_PVD_FILTER_LENGTH_3200
 #else
 #error "Unsupported BOARD_MCU_PVD_FILTER_US"
 #endif
@@ -69,8 +69,8 @@ static volatile uint32_t g_system_ms;
  *---------------------------------------------------------------------------*/
 static uint32_t pvd_ready_timeout_ms(void)
 {
-    uint32_t timeout_ms = (BOARD_MCU_PVD_READY_TIMEOUT_US + DRIVER_US_PER_MS - 1UL) /
-                          DRIVER_US_PER_MS;
+    uint32_t timeout_ms =
+        (BOARD_MCU_PVD_READY_TIMEOUT_US + DRIVER_US_PER_MS - 1UL) / DRIVER_US_PER_MS;
 
     if (timeout_ms == 0U)
     {
@@ -148,8 +148,7 @@ bool drv_system_supply_qualifier_init(void)
     DDL_PMU_Lock();
 
     /* 配置结果必须满足“PVD开、IRQ关、Reset关”三个硬约束。 */
-    return (DDL_PMU_IsEnabledPVD() != 0U) &&
-           (DDL_PMU_IsEnabledIT_PVD() == 0U) &&
+    return (DDL_PMU_IsEnabledPVD() != 0U) && (DDL_PMU_IsEnabledIT_PVD() == 0U) &&
            (DDL_RCC_IsEnabled_PVDRST() == 0U);
 }
 
@@ -243,10 +242,9 @@ bool drv_system_wait_for_supply_stable(void)
             continue;
         }
 
-        if (BOARD_MCU_SUPPLY_STABLE_TIME_MS == 0U)
-        {
-            break;
-        }
+#if BOARD_MCU_SUPPLY_STABLE_TIME_MS == 0U
+        break;
+#else
         if (!stable_tracking)
         {
             stable_tracking = true;
@@ -256,6 +254,7 @@ bool drv_system_wait_for_supply_stable(void)
         {
             break;
         }
+#endif
 
         __WFI();
     }

@@ -153,7 +153,7 @@ static void test_measurement_and_zero_calibration(void)
     CHECK((out.valid_mask & AURORA_MEAS_VALID_AMB_TEMP) != 0U);
 
     aurora_measurement_zero_cal_reset(&ctx);
-    fill_adc_block(raw, 100U);
+    fill_adc_block(raw, 2048U);
     for (i = 0U; i < (AURORA_ZERO_CAL_BLOCKS - 1U); ++i)
     {
         CHECK(aurora_measurement_zero_cal_accumulate(&ctx, raw,
@@ -165,7 +165,7 @@ static void test_measurement_and_zero_calibration(void)
           AURORA_STATUS_OK);
     CHECK(aurora_measurement_zero_cal_ready(&ctx));
     CHECK(!aurora_measurement_zero_cal_failed(&ctx));
-    CHECK(ctx.calibration.channel[0].zero_code == 100);
+    CHECK(ctx.calibration.channel[0].zero_code == 2048);
 }
 
 /*---------------------------------------------------------------------------*

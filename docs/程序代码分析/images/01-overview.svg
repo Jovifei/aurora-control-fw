@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">300W 工程整体代码关系图</text>
+<rect x="70" y="90" width="230" height="90" class="box"/>
+<text x="110" y="130" class="txt">interrupts.c</text>
+<text x="95" y="156" class="stxt">采集硬件事件，投递 event_flags</text>
+<rect x="370" y="90" width="260" height="90" class="box"/>
+<text x="445" y="130" class="txt">main.c / runtime</text>
+<text x="390" y="156" class="stxt">事件分发、功率命令落实、遥测、存储</text>
+<rect x="715" y="90" width="390" height="90" class="box"/>
+<text x="820" y="130" class="txt">driver/src</text>
+<text x="755" y="156" class="stxt">ADC / PWM / COMP / IO / UART / Flash / System / WDG</text>
+
+<rect x="140" y="280" width="180" height="80" class="smallbox"/>
+<text x="184" y="322" class="txt">measurement</text>
+<rect x="355" y="280" width="160" height="80" class="smallbox"/>
+<text x="410" y="322" class="txt">protection</text>
+<rect x="545" y="280" width="140" height="80" class="smallbox"/>
+<text x="588" y="322" class="txt">charger</text>
+<rect x="720" y="280" width="130" height="80" class="smallbox"/>
+<text x="760" y="322" class="txt">mppt</text>
+<rect x="885" y="280" width="180" height="80" class="smallbox"/>
+<text x="926" y="322" class="txt">power_stage</text>
+
+<rect x="230" y="460" width="150" height="80" class="smallbox"/>
+<text x="280" y="502" class="txt">protocol</text>
+<rect x="450" y="460" width="150" height="80" class="smallbox"/>
+<text x="505" y="502" class="txt">storage</text>
+<rect x="670" y="460" width="120" height="80" class="smallbox"/>
+<text x="712" y="502" class="txt">ui</text>
+
+<path d="M300,135 L370,135" class="line"/>
+<path d="M630,135 L715,135" class="line"/>
+<path d="M500,180 L230,280" class="line"/>
+<path d="M500,180 L430,280" class="line"/>
+<path d="M500,180 L615,280" class="line"/>
+<path d="M500,180 L770,280" class="line"/>
+<path d="M500,180 L970,280" class="line"/>
+<path d="M500,360 L305,460" class="line"/>
+<path d="M500,360 L525,460" class="line"/>
+<path d="M500,360 L730,460" class="line"/>
+<text x="70" y="590" class="stxt">理解方式：中断只“投递事件”，runtime 只“调度与落地”，真正控制算法集中在 app/src 各模块。</text>
+
+</svg>

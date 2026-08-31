@@ -53,8 +53,7 @@ static uint32_t mppt_min_ref_mv(void)
  *---------------------------------------------------------------------------*/
 static uint32_t mppt_max_ref_mv(const aurora_mppt_ctx_t *ctx)
 {
-    uint32_t maximum_mv =
-        (uint32_t)(AURORA_PV_ABSOLUTE_MAX_MV - AURORA_MPPT_ABS_MAX_MARGIN_MV);
+    uint32_t maximum_mv = (uint32_t)(AURORA_PV_ABSOLUTE_MAX_MV - AURORA_MPPT_ABS_MAX_MARGIN_MV);
 
     if ((ctx->open_circuit_voltage_mv > AURORA_MPPT_VOC_MARGIN_MV) &&
         ((ctx->open_circuit_voltage_mv - AURORA_MPPT_VOC_MARGIN_MV) < maximum_mv))
@@ -72,8 +71,7 @@ static uint32_t mppt_max_ref_mv(const aurora_mppt_ctx_t *ctx)
  * Output      : 本次PV参考电压步长，单位mV
  * Description : 根据|ΔP/ΔV|生成有上下限的自适应步长；远离MPP时加快，峰值附近退回最小扰动。
  *---------------------------------------------------------------------------*/
-static uint32_t adaptive_step_mv(int32_t delta_power_mw,
-                                 int32_t delta_voltage_mv)
+static uint32_t adaptive_step_mv(int32_t delta_power_mw, int32_t delta_voltage_mv)
 {
     int64_t slope_abs;
     int64_t step_mv;
@@ -83,15 +81,13 @@ static uint32_t adaptive_step_mv(int32_t delta_power_mw,
         return AURORA_MPPT_STEP_MIN_MV;
     }
 
-    slope_abs = ((int64_t)delta_power_mw * AURORA_MPPT_SLOPE_SCALE) /
-                delta_voltage_mv;
+    slope_abs = ((int64_t)delta_power_mw * AURORA_MPPT_SLOPE_SCALE) / delta_voltage_mv;
     if (slope_abs < 0LL)
     {
         slope_abs = -slope_abs;
     }
 
-    step_mv = AURORA_MPPT_STEP_MIN_MV +
-              (slope_abs / AURORA_MPPT_SLOPE_STEP_DIVISOR);
+    step_mv = AURORA_MPPT_STEP_MIN_MV + (slope_abs / AURORA_MPPT_SLOPE_STEP_DIVISOR);
     if (step_mv > AURORA_MPPT_STEP_MAX_MV)
     {
         step_mv = AURORA_MPPT_STEP_MAX_MV;
@@ -107,8 +103,7 @@ static uint32_t adaptive_step_mv(int32_t delta_power_mw,
  * Output      : 无
  * Description : 按80ms外层节拍更新Vpv_ref；限功率时冻结，启动时快速离开Voc，正常时按P-V斜率移动。
  *---------------------------------------------------------------------------*/
-static void update_reference(aurora_mppt_ctx_t *ctx,
-                             const aurora_measurement_t *sample,
+static void update_reference(aurora_mppt_ctx_t *ctx, const aurora_measurement_t *sample,
                              bool external_limited)
 {
     int32_t delta_voltage_mv;
@@ -139,9 +134,8 @@ static void update_reference(aurora_mppt_ctx_t *ctx,
         {
             ctx->state = AURORA_MPPT_TRACKING;
         }
-        ctx->target_voltage_mv = clamp_u32_i64(next_ref_mv,
-                                              mppt_min_ref_mv(),
-                                              mppt_max_ref_mv(ctx));
+        ctx->target_voltage_mv =
+            clamp_u32_i64(next_ref_mv, mppt_min_ref_mv(), mppt_max_ref_mv(ctx));
         return;
     }
 
@@ -160,13 +154,11 @@ static void update_reference(aurora_mppt_ctx_t *ctx,
     ctx->previous_power_mw = sample->pv_power_mw;
 
     /* 电压或功率变化落在噪声带内时保持参考值，避免MPP附近无意义抖动。 */
-    if ((delta_voltage_mv > -AURORA_MPPT_V_NOISE_MV) &&
-        (delta_voltage_mv < AURORA_MPPT_V_NOISE_MV))
+    if ((delta_voltage_mv > -AURORA_MPPT_V_NOISE_MV) && (delta_voltage_mv < AURORA_MPPT_V_NOISE_MV))
     {
         return;
     }
-    if ((delta_power_mw > -AURORA_MPPT_P_NOISE_MW) &&
-        (delta_power_mw < AURORA_MPPT_P_NOISE_MW))
+    if ((delta_power_mw > -AURORA_MPPT_P_NOISE_MW) && (delta_power_mw < AURORA_MPPT_P_NOISE_MW))
     {
         return;
     }
@@ -188,9 +180,7 @@ static void update_reference(aurora_mppt_ctx_t *ctx,
     }
 
     ctx->state = AURORA_MPPT_TRACKING;
-    ctx->target_voltage_mv = clamp_u32_i64(next_ref_mv,
-                                          mppt_min_ref_mv(),
-                                          mppt_max_ref_mv(ctx));
+    ctx->target_voltage_mv = clamp_u32_i64(next_ref_mv, mppt_min_ref_mv(), mppt_max_ref_mv(ctx));
 }
 
 /*---------------------------------------------------------------------------*
@@ -201,16 +191,13 @@ static void update_reference(aurora_mppt_ctx_t *ctx,
  * Output      : 理论功率请求，单位mW
  * Description : 用Vpv-Vpv_ref误差计算功率请求，并通过条件积分和上下限避免积分饱和。
  *---------------------------------------------------------------------------*/
-static uint32_t voltage_pi(aurora_mppt_ctx_t *ctx,
-                           int32_t actual_voltage_mv,
+static uint32_t voltage_pi(aurora_mppt_ctx_t *ctx, int32_t actual_voltage_mv,
                            uint32_t power_allow_mw)
 {
     const int32_t error_mv = actual_voltage_mv - (int32_t)ctx->target_voltage_mv;
-    const int64_t proportional_mw =
-        (int64_t)error_mv * AURORA_MPPT_VOLTAGE_KP_MW_PER_MV;
+    const int64_t proportional_mw = (int64_t)error_mv * AURORA_MPPT_VOLTAGE_KP_MW_PER_MV;
     const int64_t candidate_integral_mw =
-        ctx->integral_mw +
-        ((int64_t)error_mv * AURORA_MPPT_VOLTAGE_KI_MW_PER_MV_STEP);
+        ctx->integral_mw + ((int64_t)error_mv * AURORA_MPPT_VOLTAGE_KI_MW_PER_MV_STEP);
     int64_t output_mw = proportional_mw + candidate_integral_mw;
 
     /* Vpv高于参考表示Boost拉得太轻，PI应提高功率请求；反之降低。 */
@@ -275,8 +262,7 @@ void aurora_mppt_reset(aurora_mppt_ctx_t *ctx)
  * Output      : 无
  * Description : 记录Voc，从Voc减裕量建立初始参考，并进入快速下降阶段；不直接接触PWM或CCR。
  *---------------------------------------------------------------------------*/
-void aurora_mppt_set_open_circuit_voltage(aurora_mppt_ctx_t *ctx,
-                                          uint32_t voc_mv)
+void aurora_mppt_set_open_circuit_voltage(aurora_mppt_ctx_t *ctx, uint32_t voc_mv)
 {
     if (ctx == NULL)
     {
@@ -284,10 +270,8 @@ void aurora_mppt_set_open_circuit_voltage(aurora_mppt_ctx_t *ctx,
     }
 
     ctx->open_circuit_voltage_mv = voc_mv;
-    ctx->target_voltage_mv =
-        clamp_u32_i64((int64_t)voc_mv - AURORA_MPPT_VOC_MARGIN_MV,
-                      mppt_min_ref_mv(),
-                      mppt_max_ref_mv(ctx));
+    ctx->target_voltage_mv = clamp_u32_i64((int64_t)voc_mv - AURORA_MPPT_VOC_MARGIN_MV,
+                                           mppt_min_ref_mv(), mppt_max_ref_mv(ctx));
     ctx->state = AURORA_MPPT_FAST_DESCENT;
     ctx->previous_valid = false;
     ctx->integral_mw = 0LL;
@@ -300,18 +284,16 @@ void aurora_mppt_set_open_circuit_voltage(aurora_mppt_ctx_t *ctx,
  * Input       : ctx - MPPT上下文；sample - 最新PV测量；power_allow_mw - 外部功率上限；
  *               external_limited - 外部限功率标志；now_ms - 当前毫秒时间戳
  * Output      : PV目标电压、理论功率请求和有效标志
- * Description : 按80ms更新P-V搜索、按10ms更新电压PI；功率许可为0时清动态状态，避免复充带旧积分重发波。
+ * Description :
+ * 按80ms更新P-V搜索、按10ms更新电压PI；功率许可为0时清动态状态，避免复充带旧积分重发波。
  *---------------------------------------------------------------------------*/
-aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
-                                      const aurora_measurement_t *sample,
-                                      uint32_t power_allow_mw,
-                                      bool external_limited,
+aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx, const aurora_measurement_t *sample,
+                                      uint32_t power_allow_mw, bool external_limited,
                                       uint32_t now_ms)
 {
     aurora_mppt_output_t output = {0};
-    const uint32_t required_measurements = AURORA_MEAS_VALID_PV_V |
-                                           AURORA_MEAS_VALID_PV_I |
-                                           AURORA_MEAS_VALID_PV_POWER;
+    const uint32_t required_measurements =
+        AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_PV_I | AURORA_MEAS_VALID_PV_POWER;
 
     if ((ctx == NULL) || (sample == NULL))
     {
@@ -333,9 +315,9 @@ aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
     /* 首次启用时优先使用已测Voc；没有Voc时只以当前PV电压作为候选初值。 */
     if (ctx->state == AURORA_MPPT_DISABLED)
     {
-        const uint32_t initial_voc_mv =
-            (ctx->open_circuit_voltage_mv != 0U) ?
-                ctx->open_circuit_voltage_mv : (uint32_t)sample->pv_voltage_mv;
+        const uint32_t initial_voc_mv = (ctx->open_circuit_voltage_mv != 0U)
+                                            ? ctx->open_circuit_voltage_mv
+                                            : (uint32_t)sample->pv_voltage_mv;
 
         aurora_mppt_set_open_circuit_voltage(ctx, initial_voc_mv);
         ctx->last_search_ms = now_ms;
@@ -350,16 +332,13 @@ aurora_mppt_output_t aurora_mppt_step(aurora_mppt_ctx_t *ctx,
 
     if (elapsed_ms(now_ms, ctx->last_pi_ms) >= AURORA_MPPT_PI_UPDATE_MS)
     {
-        output.theoretical_power_mw = voltage_pi(ctx,
-                                                sample->pv_voltage_mv,
-                                                power_allow_mw);
+        output.theoretical_power_mw = voltage_pi(ctx, sample->pv_voltage_mv, power_allow_mw);
         ctx->last_pi_ms = now_ms;
     }
     else
     {
         /* 两次PI更新之间保持已积累的功率基值，避免高频重复积分。 */
-        output.theoretical_power_mw =
-            clamp_u32_i64(ctx->integral_mw, 0U, power_allow_mw);
+        output.theoretical_power_mw = clamp_u32_i64(ctx->integral_mw, 0U, power_allow_mw);
     }
 
     output.target_voltage_mv = ctx->target_voltage_mv;

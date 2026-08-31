@@ -19,6 +19,7 @@ typedef struct
 bool drv_board_get_adc_calibration(size_t channel,
                                    drv_board_adc_calibration_t *calibration);
 bool drv_board_power_gate_open(void);
+bool drv_board_demo_load_gate_open(void);
 uint32_t drv_board_flash_page_a(void);
 uint32_t drv_board_flash_page_b(void);
 

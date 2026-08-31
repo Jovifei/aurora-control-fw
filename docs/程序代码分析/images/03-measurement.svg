@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="660" viewBox="0 0 1120 660">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">measurement.c 测量处理流程</text>
+<rect x="80" y="90" width="240" height="72" class="box"/><text x="145" y="132" class="txt">DMA 半缓冲原始块</text>
+<rect x="420" y="90" width="260" height="72" class="box"/><text x="494" y="132" class="txt">trimmed_average</text>
+<rect x="780" y="90" width="250" height="72" class="box"/><text x="854" y="132" class="txt">convert_channel</text>
+
+<rect x="70" y="250" width="280" height="92" class="smallbox"/><text x="123" y="288" class="txt">PV_U / BAT_U / BUS_U</text><text x="95" y="314" class="stxt">按 gain / offset / polarity 转成物理量</text>
+<rect x="410" y="250" width="280" height="92" class="smallbox"/><text x="491" y="288" class="txt">PV_I</text><text x="432" y="314" class="stxt">ADC 码减 zero_code，再换算成 mA</text>
+<rect x="760" y="250" width="280" height="92" class="smallbox"/><text x="833" y="288" class="txt">NTC 温度</text><text x="785" y="314" class="stxt">开短路判别 + 表/公式换算 + 方向滤波</text>
+
+<rect x="420" y="450" width="280" height="96" class="smallbox"/><text x="493" y="488" class="txt">measurement snapshot</text><text x="447" y="514" class="stxt">sequence / timestamp / valid_mask / 诊断位</text>
+<path d="M320,126 L420,126" class="line"/>
+<path d="M680,126 L780,126" class="line"/>
+<path d="M210,162 L210,250" class="line"/>
+<path d="M550,162 L550,250" class="line"/>
+<path d="M905,162 L905,250" class="line"/>
+<path d="M210,342 L550,450" class="line"/>
+<path d="M550,342 L550,450" class="line"/>
+<path d="M905,342 L570,450" class="line"/>
+<text x="120" y="610" class="stxt">运行时零点校准：只有在 ZERO_CAL 且 PWM / Relay 都关闭时，aurora_measurement_zero_cal_accumulate 才会更新 PV_I 零点。</text>
+
+</svg>

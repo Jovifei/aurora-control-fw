@@ -3,7 +3,6 @@
 #include "board_config.h"
 #include "g32f031_ddl_flash.h"
 
-
 /*---------------------------------------------------------------------------*
  * Name        : static bool range_in_nvm(uint32_t address, size_t length)
  * Input       : address - Flash地址；length - 数据长度
@@ -51,8 +50,7 @@ bool drv_flash_erase_page(uint32_t address)
 {
     ErrorStatus status;
 
-    if (((address != BOARD_FLASH_PAGE_A_ADDRESS) &&
-         (address != BOARD_FLASH_PAGE_B_ADDRESS)) ||
+    if (((address != BOARD_FLASH_PAGE_A_ADDRESS) && (address != BOARD_FLASH_PAGE_B_ADDRESS)) ||
         drv_pwm_output_active())
     {
         return false;

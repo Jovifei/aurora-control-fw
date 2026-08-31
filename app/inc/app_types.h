@@ -97,6 +97,8 @@ extern "C" {
 #define AURORA_FAULT_PV_CURRENT_PLAUSIBILITY       (1UL << 23)
 /* 故障位：BST_U ADC进入近满量程，当前26:1分压下不允许据此闭合继电器。 */
 #define AURORA_FAULT_BUS_ADC_SATURATION             (1UL << 24)
+/* 故障位：Demo输出端存在外部电源、无持续负载或探测过载。 */
+#define AURORA_FAULT_DEMO_OUTPUT                   (1UL << 25)
 
 /* 通用函数返回状态。 */
 typedef enum
@@ -127,6 +129,14 @@ typedef enum
     AURORA_PACK_72V,                                 /* 72V平台。 */
     AURORA_PACK_COUNT                                /* 枚举数量，仅用于边界检查。 */
 } aurora_battery_pack_t;
+
+/* 产品运行模式与电池电压平台正交；Demo不能伪装成第四个电池档位。 */
+typedef enum
+{
+    AURORA_MODE_BATTERY = 0,                         /* 正常电池充电模式。 */
+    AURORA_MODE_DEMO_LOAD,                           /* 无电池、规定负载的受限演示输出。 */
+    AURORA_MODE_COUNT                                /* 枚举数量，仅用于边界检查。 */
+} aurora_operating_mode_t;
 
 /* 测量值来源质量。 */
 typedef enum
@@ -207,14 +217,32 @@ typedef enum
     AURORA_POWER_WAIT_PV,                            /* 等待PV进入启动窗口。 */
     AURORA_POWER_START_DELAY,                        /* V2.7动态/固定启动延时。 */
     AURORA_POWER_ZERO_CAL,                           /* PWM关闭状态下校准PV_I零点。 */
-    AURORA_POWER_WAIT_BATTERY,                       /* 等待有效电池端电压。 */
-    AURORA_POWER_PRECHARGE,                          /* 继电器断开，小功率Boost建立BST_U。 */
-    AURORA_POWER_RELAY_SETTLE,                       /* 压差满足后吸合继电器并机械稳定。 */
-    AURORA_POWER_BAT_STABILITY,                      /* 继电器闭合、PWM关闭，验证BAT_U 10s稳定性。 */
-    AURORA_POWER_RUN,                                /* 正常MPPT充电。 */
+    AURORA_POWER_WAIT_BATTERY,                       /* Battery模式等待有效电池端电压。 */
+    AURORA_POWER_PRECHARGE,                          /* Relay断开，受限Boost建立BST_U均压。 */
+    AURORA_POWER_RELAY_SETTLE,                       /* Battery模式Relay吸合并机械稳定。 */
+    AURORA_POWER_BAT_STABILITY,                      /* Relay闭合、PWM关闭，验证BAT_U 10s稳定性。 */
+    AURORA_POWER_RUN,                                /* 正常MPPT电池充电。 */
+    AURORA_POWER_DEMO_OUTPUT_CHECK,                  /* Demo模式确认输出端无外部有源电压。 */
+    AURORA_POWER_DEMO_RELAY_SETTLE,                  /* Demo模式在PWM关闭时连接规定负载。 */
+    AURORA_POWER_DEMO_PROBE,                         /* Demo模式低功率主动探测持续负载。 */
+    AURORA_POWER_DEMO_RUN,                           /* Demo模式受限CV/功率输出。 */
     AURORA_POWER_NO_SUN,                             /* 真正无PV后断开继电器。 */
     AURORA_POWER_FAULT                               /* 故障关断与放能。 */
 } aurora_power_state_t;
+
+/* 启动失败内部分类；外部仍映射到既有故障位和三组LED。 */
+typedef uint8_t aurora_start_failure_reason_t;
+#define AURORA_START_FAIL_NONE                     ((aurora_start_failure_reason_t)0U) // 无启动失败。
+#define AURORA_START_FAIL_ZERO_CAL                 ((aurora_start_failure_reason_t)1U) // PV_I零点校准连续失败。
+#define AURORA_START_FAIL_PV_WEAK                  ((aurora_start_failure_reason_t)2U) // PV输入功率不足，属于可等待条件。
+#define AURORA_START_FAIL_BUS_PRECHARGE_TIMEOUT    ((aurora_start_failure_reason_t)3U) // BST_U在限定时间内未完成均压。
+#define AURORA_START_FAIL_BUS_OVERSHOOT            ((aurora_start_failure_reason_t)4U) // BST_U相对BAT_U过冲或绝对过压。
+#define AURORA_START_FAIL_BUS_MEAS_INVALID         ((aurora_start_failure_reason_t)5U) // BST_U测量无效或接近ADC满量程。
+#define AURORA_START_FAIL_RELAY_CLOSE_VERIFY       ((aurora_start_failure_reason_t)6U) // Relay闭合后二次压差验证失败。
+#define AURORA_START_FAIL_BAT_STABILITY            ((aurora_start_failure_reason_t)7U) // Relay闭合后BAT_U稳定窗口失败。
+#define AURORA_START_FAIL_DEMO_EXTERNAL_SOURCE     ((aurora_start_failure_reason_t)8U) // Demo启动前检测到输出端已有外部电压。
+#define AURORA_START_FAIL_DEMO_NO_LOAD             ((aurora_start_failure_reason_t)9U) // Demo探测未获得持续负载证据。
+#define AURORA_START_FAIL_DEMO_OVERLOAD            ((aurora_start_failure_reason_t)10U) // Demo探测或运行出现短路/过载。
 
 /* 由化学体系和电压平台选择的充电及电池软件保护档案。 */
 typedef struct
@@ -238,8 +266,11 @@ typedef struct
     uint32_t cc_current_ma;                          /* 恒流阶段电流目标，mA。 */
     uint32_t tail_current_ma;                        /* CV判满尾流阈值，mA。 */
     uint32_t float_end_current_ma;                   /* 铅酸浮充结束电流，mA。 */
+    int16_t ambient_low_trip_dC;                     /* 当前化学体系低温停充点，0.1°C。 */
+    int16_t ambient_low_recover_dC;                  /* 当前化学体系低温恢复点，0.1°C。 */
     aurora_battery_chem_t chemistry;                 /* 化学体系。 */
     aurora_battery_pack_t pack;                      /* 标称电压平台。 */
+    uint8_t layout_reserved[2];                      /* 显式补齐ARM短枚举后的结构尾部。 */
 } aurora_charge_profile_t;
 
 /* 充电状态机给上层的“电池侧目标”，不直接冒充PV输入功率。 */
@@ -284,17 +315,27 @@ typedef struct
     bool led_fault_on;                               /* FAULT灯逻辑点亮请求。 */
 } aurora_ui_output_t;
 
-/* 需要持久化的用户设置、累计量和24h滚动窗口。 */
+/* 需要持久化的用户设置、双能量账本、Demo参数和24h滚动窗口。 */
 typedef struct
 {
-    uint32_t lifetime_energy_wh;                     /* 生命周期累计充电能量，Wh。 */
-    uint32_t daily_energy_wh;                        /* 最近24h滚动能量，30min分辨率，Wh。 */
+    uint64_t pv_energy_remainder_mw_ms;              /* PV发电量不足1Wh的余数，mW·ms。 */
+    uint64_t charge_est_energy_remainder_mw_ms;      /* 电池侧估算充电量不足1Wh余数，mW·ms。 */
+    uint32_t lifetime_energy_wh;                     /* PV实测生命周期发电量，Wh；保留旧字段名兼容协议。 */
+    uint32_t daily_energy_wh;                        /* PV实测最近24h发电量，Wh。 */
+    uint32_t charge_est_lifetime_energy_wh;          /* 电池侧估算生命周期充电量，Wh。 */
+    uint32_t charge_est_daily_energy_wh;             /* 电池侧估算最近24h充电量，Wh。 */
     uint32_t settings_revision;                      /* 每次有效设置变更递增。 */
-    uint32_t energy_history_wh[AURORA_ENERGY_HISTORY_POINT_COUNT]; /* 累计Wh历史快照。 */
+    uint32_t history_interval_elapsed_ms;            /* 当前30min窗口已累计时间，ms。 */
+    uint32_t demo_target_voltage_mv;                 /* Demo输出目标电压，mV。 */
+    uint32_t demo_power_limit_mw;                    /* Demo输入功率上限，mW。 */
+    uint32_t energy_history_wh[AURORA_ENERGY_HISTORY_POINT_COUNT]; /* PV累计Wh历史快照。 */
+    uint32_t charge_est_history_wh[AURORA_ENERGY_HISTORY_POINT_COUNT]; /* 电池侧估算累计Wh历史。 */
     aurora_battery_chem_t chemistry;                 /* 用户选择的电池化学体系。 */
     aurora_battery_pack_t pack;                      /* 用户选择的电压平台。 */
-    uint8_t energy_history_count;                    /* 已建立的有效快照数量，1~49。 */
-    uint8_t layout_reserved[3];                      /* 显式补齐到32位边界。 */
+    aurora_operating_mode_t operating_mode;          /* Battery或受限Demo模式。 */
+    uint8_t energy_history_count;                    /* 两套历史共用的有效点数，1~49。 */
+    uint8_t energy_semantics_version;                /* 能量字段物理语义版本。 */
+    uint8_t layout_reserved[3];                      /* 显式补齐到uint64_t对齐边界。 */
 } aurora_persistent_settings_t;
 
 #ifdef __cplusplus

@@ -75,25 +75,21 @@ static void put_u32_le(uint8_t *destination, uint32_t value)
  *---------------------------------------------------------------------------*/
 static uint8_t legacy_fault_code(uint32_t fault_mask)
 {
-    if ((fault_mask & (AURORA_FAULT_AMB_TEMP |
-                       AURORA_FAULT_AMB_NTC_OPEN |
-                       AURORA_FAULT_AMB_NTC_SHORT)) != 0U)
+    if ((fault_mask &
+         (AURORA_FAULT_AMB_TEMP | AURORA_FAULT_AMB_NTC_OPEN | AURORA_FAULT_AMB_NTC_SHORT)) != 0U)
     {
         return 21U;
     }
-    if ((fault_mask & (AURORA_FAULT_MOS_OVERTEMP |
-                       AURORA_FAULT_MOS_NTC_OPEN |
+    if ((fault_mask & (AURORA_FAULT_MOS_OVERTEMP | AURORA_FAULT_MOS_NTC_OPEN |
                        AURORA_FAULT_MOS_NTC_SHORT)) != 0U)
     {
         return 22U;
     }
-    if ((fault_mask & (AURORA_FAULT_ADC_STALE |
-                       AURORA_FAULT_ADC_DMA |
-                       AURORA_FAULT_ADC_OVERRUN |
-                       AURORA_FAULT_RELAY |
-                       AURORA_FAULT_STORAGE |
-                       AURORA_FAULT_INTERNAL |
-                       AURORA_FAULT_FAST_BREAK)) != 0U)
+    if ((fault_mask & (AURORA_FAULT_ADC_STALE | AURORA_FAULT_ADC_DMA | AURORA_FAULT_ADC_OVERRUN |
+                       AURORA_FAULT_RELAY | AURORA_FAULT_STORAGE | AURORA_FAULT_INTERNAL |
+                       AURORA_FAULT_FAST_BREAK | AURORA_FAULT_PV_CURRENT_PLAUSIBILITY |
+                       AURORA_FAULT_BUS_ADC_SATURATION | AURORA_FAULT_BUS_OVERVOLT |
+                       AURORA_FAULT_DEMO_OUTPUT)) != 0U)
     {
         return 23U;
     }
@@ -113,8 +109,7 @@ static uint8_t legacy_fault_code(uint32_t fault_mask)
     {
         return 1U;
     }
-    if ((fault_mask & (AURORA_FAULT_FAST_PV_OCP |
-                       AURORA_FAULT_PV_OVERCURRENT |
+    if ((fault_mask & (AURORA_FAULT_FAST_PV_OCP | AURORA_FAULT_PV_OVERCURRENT |
                        AURORA_FAULT_PV_OVERPOWER)) != 0U)
     {
         return 2U;
@@ -123,7 +118,8 @@ static uint8_t legacy_fault_code(uint32_t fault_mask)
     {
         return 3U;
     }
-    return 0U;
+    // 任意未知非零故障必须回退到硬件/内部故障码，绝不能上报“无故障”。
+    return (fault_mask != 0U) ? 23U : 0U;
 }
 
 /*---------------------------------------------------------------------------*
@@ -162,9 +158,7 @@ void aurora_protocol_init(aurora_protocol_ctx_t *ctx)
  * Output      : 无
  * Description : 用有界状态机逐字节解析帧头、长度、字段、载荷和校验和；超时或错误时重同步。
  *---------------------------------------------------------------------------*/
-void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
-                               uint8_t byte,
-                               uint32_t now_ms)
+void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx, uint8_t byte, uint32_t now_ms)
 {
     if (ctx == NULL)
     {
@@ -228,8 +222,7 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
             ctx->length |= byte;
             ctx->item = 0U;
             if ((ctx->length < AURORA_PROTOCOL_BODY_OVERHEAD) ||
-                (ctx->length > (AURORA_PROTOCOL_MAX_DATA +
-                                AURORA_PROTOCOL_BODY_OVERHEAD)))
+                (ctx->length > (AURORA_PROTOCOL_MAX_DATA + AURORA_PROTOCOL_BODY_OVERHEAD)))
             {
                 ctx->error_count++;
                 parser_reset(ctx);
@@ -285,16 +278,15 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
             ctx->frame.data_length |= byte;
             ctx->item = 0U;
             if ((ctx->frame.data_length > AURORA_PROTOCOL_MAX_DATA) ||
-                ((uint16_t)(ctx->frame.data_length +
-                            AURORA_PROTOCOL_BODY_OVERHEAD) != ctx->length))
+                ((uint16_t)(ctx->frame.data_length + AURORA_PROTOCOL_BODY_OVERHEAD) != ctx->length))
             {
                 ctx->error_count++;
                 parser_reset(ctx);
             }
             else
             {
-                ctx->step = (ctx->frame.data_length == 0U) ?
-                                PROTOCOL_STEP_CHECKSUM : PROTOCOL_STEP_DATA;
+                ctx->step =
+                    (ctx->frame.data_length == 0U) ? PROTOCOL_STEP_CHECKSUM : PROTOCOL_STEP_DATA;
             }
         }
         break;
@@ -320,7 +312,6 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
         }
         parser_reset(ctx);
         break;
-
     }
 }
 
@@ -331,8 +322,7 @@ void aurora_protocol_feed_byte(aurora_protocol_ctx_t *ctx,
  * Output      : true - 已取出一帧；false - 参数错误或当前无完整帧
  * Description : 复制并领取已校验帧，然后清除ready标志，避免后续接收覆盖未处理数据。
  *---------------------------------------------------------------------------*/
-bool aurora_protocol_take_frame(aurora_protocol_ctx_t *ctx,
-                                aurora_protocol_frame_t *out)
+bool aurora_protocol_take_frame(aurora_protocol_ctx_t *ctx, aurora_protocol_frame_t *out)
 {
     if ((ctx == NULL) || (out == NULL) || !ctx->frame_ready)
     {
@@ -352,17 +342,14 @@ bool aurora_protocol_take_frame(aurora_protocol_ctx_t *ctx,
  * Output      : 实际编码字节数；0表示参数、长度或容量错误
  * Description : 按旧协议大端头字段、小端业务载荷约定编码线格式，并在末尾生成累加校验和。
  *---------------------------------------------------------------------------*/
-size_t aurora_protocol_encode(const aurora_protocol_frame_t *frame,
-                              uint8_t *wire,
-                              size_t capacity)
+size_t aurora_protocol_encode(const aurora_protocol_frame_t *frame, uint8_t *wire, size_t capacity)
 {
     uint16_t body_length;
     size_t total_length;
     size_t index;
     uint8_t checksum = 0U;
 
-    if ((frame == NULL) || (wire == NULL) ||
-        (frame->data_length > AURORA_PROTOCOL_MAX_DATA))
+    if ((frame == NULL) || (wire == NULL) || (frame->data_length > AURORA_PROTOCOL_MAX_DATA))
     {
         return 0U;
     }
@@ -398,7 +385,7 @@ size_t aurora_protocol_encode(const aurora_protocol_frame_t *frame,
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame,
+ * Name        : void aurora_protocol_fill_telemetry_ex(aurora_protocol_frame_t *frame,
  *               uint32_t message_id, const aurora_measurement_t *sample,
  *               aurora_charge_state_t charge_state, uint32_t fault_mask,
  *               const aurora_persistent_settings_t *settings)
@@ -407,12 +394,11 @@ size_t aurora_protocol_encode(const aurora_protocol_frame_t *frame,
  * Output      : 无
  * Description : 按旧产品30字节字段位置填充遥测，保持现有APP/面板兼容性和字段字节序。
  *---------------------------------------------------------------------------*/
-void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame,
-                                    uint32_t message_id,
-                                    const aurora_measurement_t *sample,
-                                    aurora_charge_state_t charge_state,
-                                    uint32_t fault_mask,
-                                    const aurora_persistent_settings_t *settings)
+void aurora_protocol_fill_telemetry_ex(aurora_protocol_frame_t *frame, uint32_t message_id,
+                                       const aurora_measurement_t *sample,
+                                       aurora_charge_state_t charge_state,
+                                       bool actual_power_transfer, uint32_t fault_mask,
+                                       const aurora_persistent_settings_t *settings)
 {
     uint8_t stage = 0U;
 
@@ -428,45 +414,53 @@ void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame,
     frame->data_length = AURORA_PROTOCOL_TELEMETRY_DATA_LENGTH;
 
     put_u16_le(&frame->data[TELEMETRY_OFFSET_PV_VOLTAGE],
-               (uint16_t)((sample->pv_voltage_mv > 0) ?
-                              sample->pv_voltage_mv / 10 : 0));
+               (uint16_t)((sample->pv_voltage_mv > 0) ? sample->pv_voltage_mv / 10 : 0));
     put_u16_le(&frame->data[TELEMETRY_OFFSET_PV_CURRENT],
-               (uint16_t)((sample->pv_current_ma > 0) ?
-                              sample->pv_current_ma / 10 : 0));
-    put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_0],
-               (uint16_t)settings->daily_energy_wh);
+               (uint16_t)((sample->pv_current_ma > 0) ? sample->pv_current_ma / 10 : 0));
+    put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_0], (uint16_t)settings->daily_energy_wh);
     put_u16_le(&frame->data[TELEMETRY_OFFSET_BAT_VOLTAGE],
-               (uint16_t)((sample->battery_voltage_mv > 0) ?
-                              sample->battery_voltage_mv / 10 : 0));
-    put_u16_le(&frame->data[TELEMETRY_OFFSET_BAT_CURRENT],
-               (uint16_t)((sample->battery_current_est_ma > 0) ?
-                              sample->battery_current_est_ma / 10 : 0));
-    frame->data[TELEMETRY_OFFSET_AMBIENT_TEMP] =
-        (uint8_t)(sample->ambient_temp_dC / 10);
+               (uint16_t)((sample->battery_voltage_mv > 0) ? sample->battery_voltage_mv / 10 : 0));
+    put_u16_le(
+        &frame->data[TELEMETRY_OFFSET_BAT_CURRENT],
+        (uint16_t)((sample->battery_current_est_ma > 0) ? sample->battery_current_est_ma / 10 : 0));
+    frame->data[TELEMETRY_OFFSET_AMBIENT_TEMP] = (uint8_t)(sample->ambient_temp_dC / 10);
     frame->data[TELEMETRY_OFFSET_CHEMISTRY] = (uint8_t)settings->chemistry;
     frame->data[TELEMETRY_OFFSET_PACK] = (uint8_t)settings->pack;
 
-    if ((charge_state >= AURORA_CHARGE_TRICKLE) &&
-        (charge_state <= AURORA_CHARGE_FLOAT))
+    if ((charge_state >= AURORA_CHARGE_TRICKLE) && (charge_state <= AURORA_CHARGE_FLOAT))
     {
         stage = (uint8_t)(charge_state - AURORA_CHARGE_TRICKLE);
     }
     frame->data[TELEMETRY_OFFSET_CHARGE_STAGE] = stage;
-    frame->data[TELEMETRY_OFFSET_CHARGING] =
-        ((charge_state != AURORA_CHARGE_OFF) &&
-         (charge_state != AURORA_CHARGE_COMPLETE) &&
-         (charge_state != AURORA_CHARGE_FAULT)) ? 1U : 0U;
-    put_u32_le(&frame->data[TELEMETRY_OFFSET_LIFETIME_ENERGY],
-               settings->lifetime_energy_wh);
-    frame->data[TELEMETRY_OFFSET_MOS_TEMP] =
-        (uint8_t)(sample->mos_temp_dC / 10);
-    put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_1],
-               (uint16_t)settings->daily_energy_wh);
+    frame->data[TELEMETRY_OFFSET_CHARGING] = actual_power_transfer ? 1U : 0U;
+    put_u32_le(&frame->data[TELEMETRY_OFFSET_LIFETIME_ENERGY], settings->lifetime_energy_wh);
+    frame->data[TELEMETRY_OFFSET_MOS_TEMP] = (uint8_t)(sample->mos_temp_dC / 10);
+    put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_1], (uint16_t)settings->daily_energy_wh);
     frame->data[TELEMETRY_OFFSET_FAULT] = legacy_fault_code(fault_mask);
     frame->data[TELEMETRY_OFFSET_FW_MAJOR] = AURORA_FW_VERSION_MAJOR;
     frame->data[TELEMETRY_OFFSET_FW_MINOR] = AURORA_FW_VERSION_MINOR;
     frame->data[TELEMETRY_OFFSET_FW_PATCH] = AURORA_FW_VERSION_PATCH;
-    memcpy(&frame->data[TELEMETRY_OFFSET_MODEL],
-           AURORA_PRODUCT_MODEL,
+    memcpy(&frame->data[TELEMETRY_OFFSET_MODEL], AURORA_PRODUCT_MODEL,
            sizeof(AURORA_PRODUCT_MODEL) - 1U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame,
+ *               uint32_t message_id, const aurora_measurement_t *sample,
+ *               aurora_charge_state_t charge_state, uint32_t fault_mask,
+ *               const aurora_persistent_settings_t *settings)
+ * Input       : 与历史遥测接口一致
+ * Output      : 无
+ * Description : 兼容旧调用方；按充电状态推导旧式charging标志，正式运行链使用扩展入口。
+ *---------------------------------------------------------------------------*/
+void aurora_protocol_fill_telemetry(aurora_protocol_frame_t *frame, uint32_t message_id,
+                                    const aurora_measurement_t *sample,
+                                    aurora_charge_state_t charge_state, uint32_t fault_mask,
+                                    const aurora_persistent_settings_t *settings)
+{
+    const bool legacy_charging = (charge_state != AURORA_CHARGE_OFF) &&
+                                 (charge_state != AURORA_CHARGE_COMPLETE) &&
+                                 (charge_state != AURORA_CHARGE_FAULT);
+    aurora_protocol_fill_telemetry_ex(frame, message_id, sample, charge_state, legacy_charging,
+                                      fault_mask, settings);
 }

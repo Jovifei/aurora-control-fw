@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520">
+<style>
+    .title { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 12; ry: 12; }
+    .smallbox { fill: #ffffff; stroke: #64748b; stroke-width: 1.8; rx: 10; ry: 10; }
+    .txt { font: 16px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #0f172a; }
+    .stxt { font: 14px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 7 5; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+  </marker>
+</defs>
+
+<text x="40" y="40" class="title">mppt.c 逻辑图</text>
+<rect x="70" y="140" width="220" height="86" class="box"/><text x="135" y="182" class="txt">输入：测量快照</text><text x="109" y="206" class="stxt">PV_U、PV_I、PV_P、时间戳</text>
+<rect x="360" y="140" width="200" height="86" class="box"/><text x="405" y="182" class="txt">扰动观察 / 步长自适应</text><text x="395" y="206" class="stxt">adaptive_step_mv</text>
+<rect x="640" y="140" width="180" height="86" class="box"/><text x="690" y="182" class="txt">PV 电压 PI</text><text x="673" y="206" class="stxt">voltage_pi</text>
+<rect x="890" y="140" width="170" height="86" class="box"/><text x="928" y="182" class="txt">输出请求</text><text x="905" y="206" class="stxt">target_voltage + theoretical_power</text>
+<path d="M290,183 L360,183" class="line"/>
+<path d="M560,183 L640,183" class="line"/>
+<path d="M820,183 L890,183" class="line"/>
+<text x="70" y="300" class="stxt">aurora_mppt_step 的真实作用：生成“理论 PV 侧功率请求”，仍会被 charger / protection / power_stage 再次裁决。</text>
+<text x="70" y="330" class="stxt">当 external_limited=true 时，MPPT 会看到外部限制存在，避免在保护、热限幅、输入限流时盲目继续上调。</text>
+
+</svg>

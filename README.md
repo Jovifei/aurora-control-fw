@@ -110,3 +110,11 @@ BOARD_POWER_OUTPUT_ALLOWED == 0
 ```
 
 真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流和低压到额定功率验收。
+
+## v0.10.2 本地交接
+
+- [本地合并说明](HANDOFF_README.md)
+- [程序代码分析](docs/程序代码分析/00-阅读索引.md)
+- [v0.10.2实现说明](docs/41-v0.10.2-成熟行为二次审计与实现说明.md)
+- [Demo安全边界](docs/42-v0.10.2-Demo无电池带载模式与安全边界.md)
+- [Keil AC6修复与发布边界](docs/43-v0.10.2-Keil_AC6修复与发布边界.md)

@@ -19,8 +19,7 @@ static volatile uint32_t g_applied_sequence;
  *---------------------------------------------------------------------------*/
 static uint32_t duty_to_compare(uint16_t duty_q15)
 {
-    uint32_t compare = ((uint32_t)duty_q15 * BOARD_PWM_PERIOD_COUNTS) /
-                       DRV_DUTY_Q15_ONE;
+    uint32_t compare = ((uint32_t)duty_q15 * BOARD_PWM_PERIOD_COUNTS) / DRV_DUTY_Q15_ONE;
     if (compare >= BOARD_PWM_PERIOD_COUNTS)
     {
         compare = BOARD_PWM_PERIOD_COUNTS - 1U;
@@ -56,7 +55,8 @@ static void connect_glc_to_atmr(void)
  * Name        : bool drv_pwm_init(void)
  * Input       : 无
  * Output      : true表示ATMR、preload和Break初始化成功；false表示关键配置失败
- * Description : 配置50 kHz单路异步Boost PWM、CCR/ARR预装载、ADC触发、低有效Break和一次性零CCR装载；默认MOE与通道关闭。
+ * Description : 配置50 kHz单路异步Boost
+ * PWM、CCR/ARR预装载、ADC触发、低有效Break和一次性零CCR装载；默认MOE与通道关闭。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_init(void)
 {
@@ -264,8 +264,7 @@ bool drv_pwm_output_active(void)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_break_source_active(void)
 {
-    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) ||
-           (DDL_COMP1_ReadOutputLevel(COMP2) != 0U);
+    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) || (DDL_COMP1_ReadOutputLevel(COMP2) != 0U);
 }
 
 /*---------------------------------------------------------------------------*

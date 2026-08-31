@@ -93,13 +93,14 @@
 #define BOARD_NTC_AMB_R25_OHM                       (100000L)
 #define BOARD_NTC_AMB_BETA_KELVIN                   (3950L)
 /*
- * PV_I：3mΩ分流器×内部16倍OPA，3.3V/12bit下理论约16.79mA/码。
- * 300W新板没有旧120W的VDDA/2电流偏置，零电流理论码接近0；实际零点必须在PWM/Relay关闭时运行时校准。
- * 正向电流使内部OPA输出升高，因此极性候选为+1；BOARD_GATE_ANALOG_CALIBRATED保持0直到实板方向和比例校准完成。
+ * PV_I：3mΩ分流器×内部16倍OPA；drv_comp.c将OPA VCM配置为AVDD/2。
+ * 因此0A名义输出约1.65V、12位ADC码约2048；启动时仍必须在PWM/Relay关闭状态执行运行时零点校准。
+ * 正向电流使OPA输出升高，极性候选为+1；BOARD_GATE_ANALOG_CALIBRATED保持0直到实板方向、增益和温漂冻结。
  */
 #define BOARD_ADC_PV_I_GAIN_NUM                     (16790L)
 #define BOARD_ADC_PV_I_GAIN_DEN                     (1000L)
-#define BOARD_ADC_PV_I_ZERO_CODE                    (0)
+#define BOARD_ADC_PV_I_VCM_MV                       (1650L)
+#define BOARD_ADC_PV_I_ZERO_CODE                    (2048)
 #define BOARD_ADC_PV_I_POLARITY                     (1)
 /* 12bit ADC接近满量程判据；BST_U达到该区间时视为量程不可信，不允许据此吸合Relay。 */
 #define BOARD_ADC_NEAR_FULL_SCALE_CODE              (4080U)
@@ -151,6 +152,8 @@
 #define BOARD_GATE_KEIL_LINKED                      (0U)
 /* 低压功率台架尚未完成。 */
 #define BOARD_GATE_LOW_VOLTAGE_BENCH                (0U)
+/* Demo真实负载、空载、短路与外部电源误接台架尚未完成。 */
+#define BOARD_GATE_DEMO_LOAD_VALIDATED              (0U)
 /* 最终人工功率总门，当前必须保持0。 */
 #define BOARD_POWER_OUTPUT_ALLOWED                  (0U)
 

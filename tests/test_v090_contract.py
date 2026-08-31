@@ -5,10 +5,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class V090Contracts(unittest.TestCase):
-    def test_board_current_model_is_3v3_unbiased(self):
+    def test_board_current_model_is_3v3_midpoint_biased(self):
         text = (ROOT / "driver/inc/board_config.h").read_text(encoding="utf-8")
         self.assertIn("BOARD_ADC_REFERENCE_MV                      (3300L)", text)
-        self.assertIn("BOARD_ADC_PV_I_ZERO_CODE                    (0)", text)
+        self.assertIn("BOARD_ADC_PV_I_VCM_MV                       (1650L)", text)
+        self.assertIn("BOARD_ADC_PV_I_ZERO_CODE                    (2048)", text)
         self.assertIn("BOARD_ADC_PV_I_POLARITY                     (1)", text)
         self.assertIn("85.8V", text)
         self.assertIn("BOARD_POWER_OUTPUT_ALLOWED                  (0U)", text)
@@ -79,6 +80,11 @@ class V090Contracts(unittest.TestCase):
         self.assertIn("AURORA_RELAY_CLOSE_DELTA_MV", power)
         self.assertIn("relay_close_still_safe", runtime)
         self.assertIn("drv_board_power_gate_open", runtime)
+        self.assertIn("drv_board_demo_load_gate_open", runtime)
+        board = (ROOT / "driver/src/drv_board.c").read_text(encoding="utf-8")
+        power_gate_fn, _, demo_gate_fn = board.partition("bool drv_board_demo_load_gate_open")
+        self.assertIn("BOARD_GATE_DEMO_LOAD_VALIDATED", demo_gate_fn)
+        self.assertNotIn("BOARD_GATE_DEMO_LOAD_VALIDATED", power_gate_fn)
 
 
 if __name__ == "__main__":

@@ -27,8 +27,7 @@ static void clear_calibration(drv_board_adc_calibration_t *calibration)
  * Output      : 无
  * Description : 根据ADC参考电压、满量程码和分压比生成单极性电压通道标定参数。
  *---------------------------------------------------------------------------*/
-static void set_voltage_calibration(drv_board_adc_calibration_t *calibration,
-                                    int32_t divider_num,
+static void set_voltage_calibration(drv_board_adc_calibration_t *calibration, int32_t divider_num,
                                     int32_t divider_den)
 {
     calibration->gain_num = BOARD_ADC_REFERENCE_MV * divider_num;
@@ -45,8 +44,7 @@ static void set_voltage_calibration(drv_board_adc_calibration_t *calibration,
  * Output      : true表示索引合法；false表示参数错误或索引越界
  * Description : 返回电压/电流通道线性标定；NTC由Measurement直接使用原始码查100K/B3950表。
  *---------------------------------------------------------------------------*/
-bool drv_board_get_adc_calibration(size_t channel,
-                                   drv_board_adc_calibration_t *calibration)
+bool drv_board_get_adc_calibration(size_t channel, drv_board_adc_calibration_t *calibration)
 {
     if ((calibration == NULL) || (channel >= 6U))
     {
@@ -58,7 +56,7 @@ bool drv_board_get_adc_calibration(size_t channel,
     switch (channel)
     {
     case BOARD_ADC_INDEX_PV_I:
-        /* 300W新板内部OPA×16没有旧VDDA/2偏置；正向PV电流候选为ADC码上升，最终以低流实测冻结极性。 */
+        /* 内部OPA×16使用AVDD/2共模，零电流码按BOARD_ADC_PV_I_ZERO_CODE装载。 */
         calibration->gain_num = BOARD_ADC_PV_I_GAIN_NUM;
         calibration->gain_den = BOARD_ADC_PV_I_GAIN_DEN;
         calibration->zero_code = BOARD_ADC_PV_I_ZERO_CODE;
@@ -67,20 +65,17 @@ bool drv_board_get_adc_calibration(size_t channel,
         break;
 
     case BOARD_ADC_INDEX_PV_U:
-        set_voltage_calibration(calibration,
-                                BOARD_ADC_PV_U_DIVIDER_NUM,
+        set_voltage_calibration(calibration, BOARD_ADC_PV_U_DIVIDER_NUM,
                                 BOARD_ADC_PV_U_DIVIDER_DEN);
         break;
 
     case BOARD_ADC_INDEX_BAT_U:
-        set_voltage_calibration(calibration,
-                                BOARD_ADC_BAT_U_DIVIDER_NUM,
+        set_voltage_calibration(calibration, BOARD_ADC_BAT_U_DIVIDER_NUM,
                                 BOARD_ADC_BAT_U_DIVIDER_DEN);
         break;
 
     case BOARD_ADC_INDEX_BUS_U:
-        set_voltage_calibration(calibration,
-                                BOARD_ADC_BUS_U_DIVIDER_NUM,
+        set_voltage_calibration(calibration, BOARD_ADC_BUS_U_DIVIDER_NUM,
                                 BOARD_ADC_BUS_U_DIVIDER_DEN);
         break;
 
@@ -101,12 +96,20 @@ bool drv_board_get_adc_calibration(size_t channel,
  *---------------------------------------------------------------------------*/
 bool drv_board_power_gate_open(void)
 {
-    return (BOARD_POWER_OUTPUT_ALLOWED != 0U) &&
-           (BOARD_GATE_PINMAP_REVIEWED != 0U) &&
-           (BOARD_GATE_COMP_ROUTE_VALIDATED != 0U) &&
-           (BOARD_GATE_ANALOG_CALIBRATED != 0U) &&
-           (BOARD_GATE_KEIL_LINKED != 0U) &&
-           (BOARD_GATE_LOW_VOLTAGE_BENCH != 0U);
+    return (BOARD_POWER_OUTPUT_ALLOWED != 0U) && (BOARD_GATE_PINMAP_REVIEWED != 0U) &&
+           (BOARD_GATE_COMP_ROUTE_VALIDATED != 0U) && (BOARD_GATE_ANALOG_CALIBRATED != 0U) &&
+           (BOARD_GATE_KEIL_LINKED != 0U) && (BOARD_GATE_LOW_VOLTAGE_BENCH != 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_board_demo_load_gate_open(void)
+ * Input       : 无
+ * Output      : true表示Demo负载/空载/短路/外部电源台架已人工验收
+ * Description : 仅供Demo模式PWM放行复核；不得并入总功率门，避免挡住Battery充电。
+ *---------------------------------------------------------------------------*/
+bool drv_board_demo_load_gate_open(void)
+{
+    return (BOARD_GATE_DEMO_LOAD_VALIDATED != 0U);
 }
 
 /*---------------------------------------------------------------------------*

@@ -56,7 +56,9 @@ static void configure_comp0_output_pb10(void)
  * Name        : bool drv_comp_init(void)
  * Input       : 无
  * Output      : true表示OPA、COMP、PB10输出和中断配置成功；false表示初始化失败
- * Description : 配置两路内部OPA、MOS/PV快速比较器、PB10低有效COMP0_OUT及比较器中断；保持硬件保护极性与ATMR Break一致。
+ * Description :
+ * 配置两路内部OPA、MOS/PV快速比较器、PB10低有效COMP0_OUT及比较器中断；保持硬件保护极性与ATMR
+ * Break一致。
  *---------------------------------------------------------------------------*/
 bool drv_comp_init(void)
 {
@@ -65,10 +67,8 @@ bool drv_comp_init(void)
     DDL_COMP1_InitTypeDef comp2;
 
     DDL_RCC_Unlock();
-    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA |
-                             DDL_AHB_GRP1_PERIPH_GPIOB);
-    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_OPA |
-                             DDL_APB_GRP1_PERIPH_COMP0 |
+    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA | DDL_AHB_GRP1_PERIPH_GPIOB);
+    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_OPA | DDL_APB_GRP1_PERIPH_COMP0 |
                              DDL_APB_GRP1_PERIPH_COMP1);
     DDL_RCC_Lock();
 
@@ -76,9 +76,8 @@ bool drv_comp_init(void)
      * PA0~PA5：两组内部OPA的输出/差分输入；PA7：COMP0参考。
      * PB2/PB6：COMP2差分输入。模拟引脚不配置数字上下拉。
      */
-    configure_analog(GPIOA, DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 | DDL_GPIO_PIN_2 |
-                            DDL_GPIO_PIN_3 | DDL_GPIO_PIN_4 | DDL_GPIO_PIN_5 |
-                            DDL_GPIO_PIN_7);
+    configure_analog(GPIOA, DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 | DDL_GPIO_PIN_2 | DDL_GPIO_PIN_3 |
+                                DDL_GPIO_PIN_4 | DDL_GPIO_PIN_5 | DDL_GPIO_PIN_7);
     configure_analog(GPIOB, DDL_GPIO_PIN_2 | DDL_GPIO_PIN_6);
     configure_comp0_output_pb10();
 
@@ -148,13 +147,11 @@ bool drv_comp_init(void)
 uint32_t drv_comp_fault_mask(void)
 {
     uint32_t mask = 0U;
-    if ((DDL_COMP0_IsActiveFlag_IT(COMP0) != 0U) ||
-        (DDL_COMP0_ReadOutputLevel(COMP0) == 0U))
+    if ((DDL_COMP0_IsActiveFlag_IT(COMP0) != 0U) || (DDL_COMP0_ReadOutputLevel(COMP0) == 0U))
     {
         mask |= DRV_FAULT_MOS_OCP;
     }
-    if ((DDL_COMP1_IsActiveFlag_IT(COMP2) != 0U) ||
-        (DDL_COMP1_ReadOutputLevel(COMP2) != 0U))
+    if ((DDL_COMP1_IsActiveFlag_IT(COMP2) != 0U) || (DDL_COMP1_ReadOutputLevel(COMP2) != 0U))
     {
         mask |= DRV_FAULT_PV_OCP;
     }

@@ -7,7 +7,8 @@
  * Name        : static void handle_fast_comparator_fault(void)
  * Input       : 无
  * Output      : 无
- * Description : 映射COMP故障原因并交给应用运行层按“PWM是否实际输出”决定诊断或锁存；ISR本身不做恢复。
+ * Description :
+ * 映射COMP故障原因并交给应用运行层按“PWM是否实际输出”决定诊断或锁存；ISR本身不做恢复。
  *---------------------------------------------------------------------------*/
 static void handle_fast_comparator_fault(void)
 {

@@ -32,7 +32,8 @@ typedef struct
     aurora_mppt_ctx_t mppt;                          /* PV参考电压搜索与PI状态。 */
     aurora_charger_ctx_t charger;                    /* 电池档案与TC/CC/CV/Float状态机。 */
     aurora_power_stage_ctx_t power_stage;            /* 启动、预充、继电器和Duty执行器。 */
-    uint64_t energy_accumulator_mw_ms;               /* 尚未折算为整Wh的能量余数。 */
+    uint64_t energy_accumulator_mw_ms;               /* PV实测能量尚未折算为整Wh的余数。 */
+    uint64_t charge_energy_accumulator_mw_ms;        /* 电池侧估算能量尚未折算为整Wh的余数。 */
     aurora_measurement_ctx_t measurement;            /* ADC数据处理、NTC与运行时零点。 */
     aurora_protection_ctx_t protection;              /* 毫秒级保护、锁存和恢复状态。 */
     aurora_storage_ctx_t storage;                    /* 双页Flash Journal状态。 */
@@ -40,7 +41,7 @@ typedef struct
     aurora_measurement_t sample;                     /* 最近一次可供控制使用的测量快照。 */
     uint32_t last_step_ms;                           /* 上一次1ms应用调度时间。 */
     uint32_t last_10ms;                              /* 上一次10ms控制链运行时间。 */
-    uint32_t last_energy_history_ms;                 /* 上一次30min滚动能量快照时间。 */
+    uint32_t last_energy_history_ms;                 /* 上一次能量持久化请求时间；30min相位保存在Flash v3。 */
     uint32_t telemetry_message_id;                   /* 主动遥测消息序号。 */
     aurora_mppt_output_t mppt_output;                /* 最近一次MPPT输出。 */
     aurora_charge_output_t charge_output;            /* 最近一次充电目标与PV包络。 */
@@ -48,7 +49,8 @@ typedef struct
     aurora_ui_ctx_t ui;                              /* LED相位状态。 */
     aurora_ui_output_t ui_output;                    /* 待运行层落实的LED命令。 */
     bool link_request;                               /* V2.7 Link逻辑请求。 */
-    uint8_t layout_reserved[7];                      /* 显式补齐应用组合根。 */
+    bool actual_power_transfer;                      /* 真实RUN+Relay+PWM+有效功率传输判据。 */
+    uint8_t layout_reserved[6];                      /* 显式补齐应用组合根。 */
 } aurora_app_t;
 
 /*
