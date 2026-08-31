@@ -1,6 +1,8 @@
 # Keil / compiler outputs
 Objects/
 Listings/
+build-keil.log
+*.zip
 *.axf
 *.elf
 *.hex
