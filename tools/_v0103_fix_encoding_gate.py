@@ -62,7 +62,6 @@ elif new not in contract:
     raise SystemExit("v0.10.3 Relay holdoff contract pattern not found")
 contract_path.write_text(contract, encoding="utf-8", newline="\n")
 
-# 旧Host测试只用于兼容历史断言；同步到Relay generation与两个关波后发布代次。
 compat_path = root / "tests/app.h"
 compat = compat_path.read_text(encoding="utf-8")
 compat = compat.replace(
@@ -74,8 +73,33 @@ compat = compat.replace(
     "zero_cal_failed, true, ctx->relay_generation,\n            AURORA_MODE_BATTERY",
 )
 compat = compat.replace("fresh.sequence++;", "fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;")
+old_holdoff = '''    if (command.state == AURORA_POWER_RELAY_HOLD_OFF)
+    {
+        aurora_measurement_t fresh = *sample;
+        fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;
+        fresh.timestamp_ms = now_ms + AURORA_RELAY_PWM_OFF_DECAY_MS;'''
+new_holdoff = '''    if (command.state == AURORA_POWER_RELAY_HOLD_OFF)
+    {
+        aurora_measurement_t fresh = *sample;
+        // 历史夹具没有Runtime，这里显式模拟“物理关PWM后记录基准”的生产握手。
+        ctx->relay_holdoff_sequence = sample->sequence;
+        ctx->state_since_ms = now_ms;
+        fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;
+        fresh.timestamp_ms = now_ms + AURORA_RELAY_PWM_OFF_DECAY_MS;'''
+if old_holdoff in compat:
+    compat = compat.replace(old_holdoff, new_holdoff, 1)
+elif new_holdoff not in compat:
+    raise SystemExit("tests/app.h: HOLD_OFF compatibility block not found")
 if compat.count("true, ctx->relay_generation") < 2:
     raise SystemExit("tests/app.h: Relay generation compatibility update incomplete")
 compat_path.write_text(compat, encoding="utf-8", newline="\n")
 
-print("UTF-8 gate, Relay contract and legacy Host helper normalized")
+# 过期generation应在100ms超时前保持SETTLE但不计时；到超时才转失败。
+test_path = root / "tests/test_v0103.c"
+test = test_path.read_text(encoding="utf-8")
+test = test.replace("sample.timestamp_ms = 1122U;", "sample.timestamp_ms = 1070U;")
+test = test.replace("AURORA_MODE_BATTERY, 48000U, 30000U, 1122U);",
+                    "AURORA_MODE_BATTERY, 48000U, 30000U, 1070U);")
+test_path.write_text(test, encoding="utf-8", newline="\n")
+
+print("UTF-8 gate and Relay Host timing contracts normalized")
