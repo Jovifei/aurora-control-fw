@@ -18,7 +18,9 @@ jobs:
           ref: codex/v0.10.3-safety-handshake-closeout
           fetch-depth: 0
       - name: Apply reviewed source fixes
-        run: python tools/_v0103_reviewed_closeout.py
+        run: |
+          python tools/_v0103_reviewed_closeout.py
+          python tools/_v0103_fix_test_comments.py
       - name: Validate all firmware gates
         run: |
           git diff --check
