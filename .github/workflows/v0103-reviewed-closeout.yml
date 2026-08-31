@@ -20,6 +20,7 @@ jobs:
       - name: Apply reviewed source fixes
         run: |
           python tools/_v0103_reviewed_closeout.py
+          python tools/_v0103_fix_main_regions.py
           python tools/_v0103_fix_test_comments.py
           python tools/_v0103_fix_encoding_gate.py
       - name: Validate all firmware gates
