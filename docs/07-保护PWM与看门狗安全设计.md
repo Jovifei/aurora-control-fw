@@ -23,20 +23,35 @@ COMP2用于PV快速过流，走最高优先级比较器中断；ISR第一动作�
 - AOE关闭，Break解除后不会自动恢复；
 - Break锁存清除和重新arm是两个独立操作。
 
-## 3. 防止故障ISR后旧代码重开PWM
+## 3. 运行期Break必须依据故障前的软件授权分类
 
-每次arm或更新Duty均检查：
+硬件Break可能先清MOE，CPU随后才进入COMP/Break ISR。因此，故障后的：
 
-```text
-pending fault == 0
-active/latched fault == 0
-COMP源无故障
-Break未锁存
-safety epoch未变化
-板级功率门已打开
+```c
+drv_pwm_output_active()
 ```
 
-快速故障ISR（例如 COMP 中断）第一动作永远是物理关PWM。如果触发时 PWM 确实在输出，则增加 epoch 导致低优先级代码恢复执行时校验失败并保持关波；如果此时 PWM 未在输出，则仅计入启动期诊断而不锁存，防止上电瞬态扰动引发误保护。
+不能单独证明故障发生前是否已经发波。v0.10.3把软件授权分成：
+
+```text
+ARM_OFF       未申请发波
+ARM_WAIT_ZERO 已提交0 CCR、等待自然UEV；仍属于启动瞬态窗口
+ARM_ACTIVE    已进入MOE申请窗口或已确认输出；任何Break都按运行故障锁存
+```
+
+运行层在调用`drv_pwm_arm()`之前先把状态发布为`ARM_ACTIVE`。这样即使硬件Break立即清MOE，ISR仍能依据故障前的软件授权完成：
+
+```text
+物理关PWM
+→ safety_epoch递增
+→ pending快速故障置位
+→ 主循环active/latched锁存
+→ 禁止低优先级旧授权重新发波
+```
+
+`ARM_WAIT_ZERO`期间没有申请MOE，比较器瞬态只记录启动诊断，不自动提升为运行OCP。若硬件仍报告PWM有效，即使软件状态异常，也按运行故障锁存，作为失配兜底。
+
+启动遗留Break只允许在PWM未获授权、实时故障源消失、没有pending/Protection快速故障时显式清除。一旦进入过`ARM_ACTIVE`，恢复必须等待硬件源连续消失30s并重新走完整准入。
 
 ## 4. 软件多级保护网络
 
@@ -44,33 +59,35 @@ safety epoch未变化
 |---|---|---|---|---|
 | **PV 输入** | 欠压保护 (UV) | < 8V / 1s | > 9V / 1s | 自动恢复 |
 | | 过压保护 (OV) | > 55V / 1s | < 54V / 1s | 自动恢复 |
-| | 一级软过流 | 1.2× 限流 (14.4A) / 10s | $\le$ 基础限流 / 30s | 硬锁存 (latch) |
-| | 二级软过流 | 1.35× 限流 (16.2A) / 1s | $\le$ 基础限流 / 30s | 硬锁存 (latch) |
-| | 三级软过流 | 1.5× 限流 (18.0A) / 100ms | $\le$ 基础限流 / 30s | 硬锁存 (latch) |
-| | 持续过功率 | 1.2× 额定 (360W) / 5s | 恢复正常 / 30s | 硬锁存 (latch) |
-| | 电流合理性 | 运行期 $\le -1\text{A}$ / 10ms 或 停机期 $\ge 3\text{A}$ / 1.5s | 停机下 $\le 0.5\text{A}$ / 30s | 硬锁存 (latch) |
-| **电池端** | 欠压保护 (UV) | 按当前档案 $V_{uv}$ / 1s | 按当前档案 $V_{uv\_rec}$ / 1s | 自动恢复 |
-| | 一级过压 | 档案 $V_{ov\_slow}$ / 5s | $< V_{cv\_max}$ / 2.5s | 自动恢复 |
-| | 二级过压 | 档案 $V_{ov\_slow} + 0.7\text{V}$ / 1s | $< V_{cv\_max}$ / 2.5s | 自动恢复 |
-| | 快速过压 (Fast) | 61.8V / 76.4V / 91.0V / **3ms** | $< V_{cv\_max}$ / 2.5s | 自动恢复 |
-| | 绝对过压 (Abs) | 统一 93.0V / 1s | $< V_{cv\_max}$ / 2.5s | 自动恢复 |
-| **温度与传感器** | MOS 过温 | 105°C / 1s (95~104°C 线性降额) | 95°C / 1s | 自动恢复 |
+| | 一级软过流 | 1.2× 限流 (14.4A) / 10s | ≤基础限流 / 30s | 硬锁存 |
+| | 二级软过流 | 1.35× 限流 (16.2A) / 1s | ≤基础限流 / 30s | 硬锁存 |
+| | 三级软过流 | 1.5× 限流 (18.0A) / 100ms | ≤基础限流 / 30s | 硬锁存 |
+| | 持续过功率 | 1.2×额定 (360W) / 5s | 恢复正常 / 30s | 硬锁存 |
+| | 电流合理性 | 运行期≤-1A / 10ms，或停机期绝对值≥3A / 1.5s | 停机下绝对值≤0.5A / 30s | 硬锁存 |
+| **电池端** | 欠压保护 | 按当前档案Vuv / 1s | 按档案Vuv_rec / 1s | 自动恢复 |
+| | 一级过压 | 档案Vov_slow / 5s | <Vcv_max / 2.5s | 自动恢复 |
+| | 二级过压 | 档案Vov_slow+0.7V / 1s | <Vcv_max / 2.5s | 自动恢复 |
+| | 快速过压 | 61.8V / 76.4V / 91.0V / 3ms | <Vcv_max / 2.5s | 自动恢复 |
+| | 绝对过压 | 统一93.0V / 1s | <Vcv_max / 2.5s | 自动恢复 |
+| **温度与传感器** | MOS过温 | 105°C / 1s；95~104°C线性降额 | 95°C / 1s | 自动恢复 |
 | | 环境高温 | 55°C / 1s | 50°C / 1s | 自动恢复 |
-| | 环境低温 | 铅酸/钠 -20°C / 1s；锂电 0°C / 1s | 铅酸/钠 -15°C；锂电 +5°C / 1s | 自动恢复 |
-| | NTC 开路 | ADC 码 $\ge 4093$ / 1s | 码正常 / 1s | 自动恢复 |
-| | NTC 短路 | ADC 码 $\le 64$ / 1s | 码正常 / 1s | 自动恢复 |
-| **母线与硬件** | 母线 ADC 饱和 | ADC 码 $\ge 4080$ | 码正常 / 1s | 自动恢复 |
-| | 硬件 COMP0/2 | 硬件瞬时触发 | 硬件源消失 30s + 清锁存 | 硬锁存 (latch) |
+| | 环境低温 | 铅酸/钠 -20°C；三元/LFP 0°C / 1s | 铅酸/钠 -15°C；三元/LFP +5°C / 1s | 自动恢复 |
+| | NTC开路 | ADC码≥4093 / 1s | 码正常 / 1s | 自动恢复 |
+| | NTC短路 | ADC码≤64 / 1s | 码正常 / 1s | 自动恢复 |
+| **母线与硬件** | 母线ADC饱和 | ADC码≥4080 | 码正常 / 1s | 独立故障路径 |
+| | 硬件COMP0/2 | 硬件瞬时触发 | 源消失30s + 显式清锁存 | 硬锁存 |
 
 ## 5. 看门狗健康监督
 
-只有 `main.c` 中的 `runtime_watchdog()` 可以喂 IWDT：
+只有`main.c`中的`runtime_watchdog()`可以喂IWDT：
 
-- **票据管理**：核对 `RUNTIME_WDG_TICKET_MAIN`（主循环轮询）与 `RUNTIME_WDG_TICKET_CONTROL`（1ms 控制调度）；
-- **功率状态增强票据**：`PRECHARGE`、`RELAY_SETTLE`、`BAT_STABILITY`、`RUN` 以及 Demo 各阶段还必须核对 `RUNTIME_WDG_TICKET_ADC`（DMA 块处理完整性）；
-- **时间窗口**：启动提供 500ms 宽限期，运行期每 100ms 窗口核验一次全套票据，齐全才调用 `drv_watchdog_feed()`；
-- **故障阻断**：任何任务卡死、DMA overrun 或未处理异常均导致票据缺失，触发 1000ms 硬件复位。
+- 核对`RUNTIME_WDG_TICKET_MAIN`与`RUNTIME_WDG_TICKET_CONTROL`；
+- `ZERO_CAL`、`PRECHARGE`、`RELAY_HOLD_OFF`、`RELAY_SETTLE`、`BAT_STABILITY`、`RUN`及Demo各阶段还必须核对ADC票据；
+- 启动提供500ms宽限期，运行期每100ms核验一次，齐全才调用`drv_watchdog_feed()`；
+- 任务卡死、DMA overrun或ADC长期未处理会导致票据缺失，最终由1000ms硬件看门狗复位。
 
 ## 6. Flash与故障恢复
 
-功率运行或继电器吸合时禁止 Flash 擦写。故障恢复后必须重新从 `WAIT_BATTERY` 和预充开始，不能直接回到 RUN。
+功率运行或继电器吸合时禁止Flash擦写。故障恢复后必须重新从`WAIT_PV`、PV_I零点校准、Battery预充或Demo输出检查开始，不能直接恢复旧Duty或回到RUN。
+
+Host故障注入能够验证软件状态与锁存行为，但不能证明COMP→Break→U6 EN→实际Vgs的板级延迟和极性；该门禁必须由示波器强制触发验收。
