@@ -94,7 +94,6 @@ if compat.count("true, ctx->relay_generation") < 2:
     raise SystemExit("tests/app.h: Relay generation compatibility update incomplete")
 compat_path.write_text(compat, encoding="utf-8", newline="\n")
 
-# 过期generation应在100ms超时前保持SETTLE但不计时；到超时才转失败。
 test_path = root / "tests/test_v0103.c"
 test = test_path.read_text(encoding="utf-8")
 test = test.replace("sample.timestamp_ms = 1122U;", "sample.timestamp_ms = 1070U;")
@@ -102,4 +101,23 @@ test = test.replace("AURORA_MODE_BATTERY, 48000U, 30000U, 1122U);",
                     "AURORA_MODE_BATTERY, 48000U, 30000U, 1070U);")
 test_path.write_text(test, encoding="utf-8", newline="\n")
 
-print("UTF-8 gate and Relay Host timing contracts normalized")
+# 普通Host目标保持真实生产门禁=0；正向Relay闭合由专用v0.10.3目标使用Host-only门禁覆盖验证。
+legacy_path = root / "tests/test_main.c"
+legacy = legacy_path.read_text(encoding="utf-8")
+old_block = '''    aurora_service_poll(&service);
+    CHECK(mock_relay());
+    CHECK(!mock_pwm_active());
+
+    /* 重新断开后制造18V压差；即使APP错误请求闭合，Service也必须拒绝。 */'''
+new_block = '''    aurora_service_poll(&service);
+    CHECK(!mock_relay()); // 生产功率门仍为0，即使压差合格也禁止物理吸合。
+    CHECK(!mock_pwm_active());
+
+    /* 继续制造18V压差；无论门禁还是压差均应保持Relay断开。 */'''
+if old_block in legacy:
+    legacy = legacy.replace(old_block, new_block, 1)
+elif new_block not in legacy:
+    raise SystemExit("tests/test_main.c: production Relay gate assertion block not found")
+legacy_path.write_text(legacy, encoding="utf-8", newline="\n")
+
+print("UTF-8 gate, Relay Host timing and production gate contracts normalized")
