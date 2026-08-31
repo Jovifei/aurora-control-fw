@@ -9,7 +9,7 @@ COMP/Break ISR    → 硬关PWM → fault mask → EVENT_FAST_FAULT
 ATMR Update ISR   → 仅首次arm时确认0占空比已由自然UEV装载
 USART ISR         → 最多搬运32字节 → EVENT_UART_RX
                          ↓
-                    aurora_app_runtime_poll()
+                    aurora_runtime_poll()
                          ↓
                     APP算法与状态机
 ```
