@@ -61,4 +61,21 @@ if old in contract:
 elif new not in contract:
     raise SystemExit("v0.10.3 Relay holdoff contract pattern not found")
 contract_path.write_text(contract, encoding="utf-8", newline="\n")
-print("UTF-8 gate and Relay holdoff contract normalized")
+
+# 旧Host测试只用于兼容历史断言；同步到Relay generation与两个关波后发布代次。
+compat_path = root / "tests/app.h"
+compat = compat_path.read_text(encoding="utf-8")
+compat = compat.replace(
+    "zero_cal_failed, true,\n        AURORA_MODE_BATTERY",
+    "zero_cal_failed, true, ctx->relay_generation,\n        AURORA_MODE_BATTERY",
+)
+compat = compat.replace(
+    "zero_cal_failed, true,\n            AURORA_MODE_BATTERY",
+    "zero_cal_failed, true, ctx->relay_generation,\n            AURORA_MODE_BATTERY",
+)
+compat = compat.replace("fresh.sequence++;", "fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;")
+if compat.count("true, ctx->relay_generation") < 2:
+    raise SystemExit("tests/app.h: Relay generation compatibility update incomplete")
+compat_path.write_text(compat, encoding="utf-8", newline="\n")
+
+print("UTF-8 gate, Relay contract and legacy Host helper normalized")
