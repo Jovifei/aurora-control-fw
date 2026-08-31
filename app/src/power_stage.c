@@ -104,7 +104,7 @@ static void register_start_failure(aurora_power_stage_ctx_t *ctx,
 
     if (reason == AURORA_START_FAIL_PV_WEAK)
     {
-        // 弱光不是硬件故障，不消耗零点、母线或继电器重试额度。
+        /* 弱光不是硬件故障，不消耗零点、母线或继电器重试额度。 */
         ctx->relay_closed = false;
         enter_state(ctx, AURORA_POWER_WAIT_PV, now_ms);
         return;
@@ -149,12 +149,12 @@ static void register_start_failure(aurora_power_stage_ctx_t *ctx,
     case AURORA_START_FAIL_BUS_MEAS_INVALID:
     case AURORA_START_FAIL_DEMO_EXTERNAL_SOURCE:
     case AURORA_START_FAIL_DEMO_OVERLOAD:
-        // 过压、量程不可信、外部有源电压和过载不能通过“多试几次”解决。
+        /* 过压、量程不可信、外部有源电压和过载不能通过“多试几次”解决。 */
         ctx->startup_locked = true;
         break;
 
     case AURORA_START_FAIL_DEMO_NO_LOAD:
-        // 无负载是正常停止条件，不锁死硬件；保留原因供调试和协议扩展使用。
+        /* 无负载是正常停止条件，不锁死硬件；保留原因供调试和协议扩展使用。 */
         ctx->startup_locked = false;
         ctx->relay_closed = false;
         enter_state(ctx, AURORA_POWER_NO_SUN, now_ms);
@@ -216,7 +216,7 @@ static uint16_t power_to_duty(aurora_power_stage_ctx_t *ctx, const aurora_measur
 
     if (sample->bus_voltage_mv <= sample->pv_voltage_mv)
     {
-        // 预充初期BST_U较低时从最小Duty爬升，避免理想Boost公式失效后永远不启动。
+        /* 预充初期BST_U较低时从最小Duty爬升，避免理想Boost公式失效后永远不启动。 */
         feedforward_q15 = AURORA_DUTY_MIN_Q15;
     }
     else
@@ -273,7 +273,7 @@ static uint32_t bus_absolute_limit_mv(aurora_operating_mode_t operating_mode,
     if (operating_mode == AURORA_MODE_BATTERY)
     {
         target_mv = charger->voltage_target_mv;
-        // 准入早期Charger可能尚未发布CV目标，至少以实测BAT_U作为母线安全参考。
+        /* 准入早期Charger可能尚未发布CV目标，至少以实测BAT_U作为母线安全参考。 */
         if ((sample->battery_voltage_mv > 0) && ((uint32_t)sample->battery_voltage_mv > target_mv))
         {
             target_mv = (uint32_t)sample->battery_voltage_mv;
@@ -366,21 +366,22 @@ void aurora_power_stage_init(aurora_power_stage_ctx_t *ctx, uint32_t now_ms)
  *               aurora_power_stage_ctx_t *ctx, const aurora_measurement_t *sample,
  *               const aurora_mppt_output_t *mppt, const aurora_charge_output_t *charger,
  *               bool protection_safe, bool zero_cal_ready, bool zero_cal_failed,
- *               aurora_operating_mode_t operating_mode,
+ *               bool relay_applied, aurora_operating_mode_t operating_mode,
  *               uint32_t demo_target_voltage_mv, uint32_t demo_power_limit_mw,
  *               uint32_t now_ms)
  * Input       : ctx/sample/mppt/charger - 控制上下文；protection_safe - 软件保护许可；
- *               zero_cal_ready/failed - PV_I运行时零点状态；operating_mode - Battery/Demo；
- *               demo_target_voltage_mv/demo_power_limit_mw - Demo限制；now_ms - 当前毫秒
+ *               zero_cal_ready/failed - PV_I运行时零点状态；relay_applied - Runtime已写Relay GPIO；
+ *               operating_mode - Battery/Demo；Demo限制；now_ms - 当前毫秒
  * Output      : PWM/Relay/Duty命令和功率级状态
- * Description : Battery严格执行均压→Relay→BAT稳定；Demo执行外部电源检查→低功率探测→受限输出。
+ * Description : Battery严格执行均压→关波20ms→新ADC→Relay→BAT稳定；Demo使用独立闭合条件。
  *---------------------------------------------------------------------------*/
 aurora_power_command_t
 aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measurement_t *sample,
                            const aurora_mppt_output_t *mppt, const aurora_charge_output_t *charger,
                            bool protection_safe, bool zero_cal_ready, bool zero_cal_failed,
-                           aurora_operating_mode_t operating_mode, uint32_t demo_target_voltage_mv,
-                           uint32_t demo_power_limit_mw, uint32_t now_ms)
+                           bool relay_applied, aurora_operating_mode_t operating_mode,
+                           uint32_t demo_target_voltage_mv, uint32_t demo_power_limit_mw,
+                           uint32_t now_ms)
 {
     aurora_power_command_t command;
     uint32_t requested_power_mw = 0U;
@@ -402,7 +403,8 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
     {
         demo_target_voltage_mv = AURORA_DEMO_TARGET_VOLTAGE_MV;
     }
-    if ((demo_power_limit_mw == 0U) || (demo_power_limit_mw > AURORA_RATED_POWER_MW))
+    if ((demo_power_limit_mw == 0U) ||
+        (demo_power_limit_mw > AURORA_DEMO_HARD_POWER_CAP_MW))
     {
         demo_power_limit_mw = AURORA_DEMO_POWER_LIMIT_MW;
     }
@@ -416,7 +418,7 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         enter_state(ctx, AURORA_POWER_FAULT, now_ms);
     }
 
-    // 严重保护触发时动态启动延时回到1s，恢复后必须重新完整启动。
+    /* 严重保护触发时动态启动延时回到1s，恢复后必须重新完整启动。 */
     if (!protection_safe && (ctx->state != AURORA_POWER_FAULT))
     {
         ctx->dynamic_start_delay_ms = AURORA_START_DELAY_MIN_MS;
@@ -549,11 +551,8 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         }
         if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_PRECHARGE_TIMEOUT_MS)
         {
-            register_start_failure(ctx,
-                                   (sample->pv_power_mw < (int32_t)(AURORA_PRECHARGE_POWER_MW / 2U))
-                                       ? AURORA_START_FAIL_PV_WEAK
-                                       : AURORA_START_FAIL_BUS_PRECHARGE_TIMEOUT,
-                                   now_ms);
+            /* 已进入PRECHARGE且PV电压仍合格，低Ppv也不能掩盖Boost功率路径失效。 */
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_PRECHARGE_TIMEOUT, now_ms);
             break;
         }
         if (relay_delta_mv <= AURORA_RELAY_CLOSE_DELTA_MV)
@@ -564,11 +563,11 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
             }
             else if (elapsed_ms(now_ms, ctx->delta_ok_since_ms) >= AURORA_RELAY_DELTA_HOLD_MS)
             {
-                // 先把软件Duty清零；运行层还会先物理关PWM，再真正吸合Relay。
                 ctx->duty_q15 = 0U;
                 ctx->power_integral = 0LL;
-                ctx->relay_closed = true;
-                enter_state(ctx, AURORA_POWER_RELAY_SETTLE, now_ms);
+                ctx->relay_closed = false;
+                ctx->relay_holdoff_sequence = sample->sequence;
+                enter_state(ctx, AURORA_POWER_RELAY_HOLD_OFF, now_ms);
                 break;
             }
         }
@@ -584,13 +583,76 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         command.pwm_enable = true;
         break;
 
+    case AURORA_POWER_RELAY_HOLD_OFF:
+        ctx->relay_closed = false;
+        ctx->duty_q15 = 0U;
+        if (sample->pv_voltage_mv < AURORA_PV_START_MIN_MV)
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_PV_WEAK, now_ms);
+            break;
+        }
+        if (bus_measurement_invalid(sample))
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_MEAS_INVALID, now_ms);
+            break;
+        }
+        if (bus_overvoltage(sample, absolute_bus_limit_mv,
+                            operating_mode == AURORA_MODE_BATTERY))
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_OVERSHOOT, now_ms);
+            break;
+        }
+        if ((elapsed_ms(now_ms, ctx->state_since_ms) < AURORA_RELAY_PWM_OFF_DECAY_MS) ||
+            (sample->sequence == ctx->relay_holdoff_sequence))
+        {
+            break;
+        }
+
+        if (operating_mode == AURORA_MODE_BATTERY)
+        {
+            if (relay_delta_mv <= AURORA_RELAY_CLOSE_DELTA_MV)
+            {
+                ctx->relay_closed = true;
+                enter_state(ctx, AURORA_POWER_RELAY_SETTLE, now_ms);
+            }
+            else
+            {
+                enter_state(ctx, AURORA_POWER_PRECHARGE, now_ms);
+            }
+        }
+        else if (sample->battery_voltage_mv > AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV)
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_DEMO_EXTERNAL_SOURCE, now_ms);
+        }
+        else
+        {
+            ctx->relay_closed = true;
+            enter_state(ctx, AURORA_POWER_DEMO_RELAY_SETTLE, now_ms);
+        }
+        break;
+
     case AURORA_POWER_RELAY_SETTLE:
         ctx->relay_closed = true;
         ctx->duty_q15 = 0U;
-        if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_RELAY_SETTLE_MS)
+        if (!relay_applied)
+        {
+            ctx->delta_ok_since_ms = 0U;
+            if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_RELAY_APPLY_TIMEOUT_MS)
+            {
+                register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
+            }
+            break;
+        }
+        if (ctx->delta_ok_since_ms == 0U)
+        {
+            ctx->delta_ok_since_ms = now_ms;
+        }
+        else if (elapsed_ms(now_ms, ctx->delta_ok_since_ms) >= AURORA_RELAY_SETTLE_MS)
         {
             if (relay_delta_mv <= AURORA_RELAY_VERIFY_DELTA_MV)
             {
+                /* 2.5V闭合后复核证明预充和Relay阶段均成功，本会话失败计数在此清零。 */
+                ctx->precharge_failure_count = 0U;
                 ctx->relay_failure_count = 0U;
                 ctx->bat_stability_since_ms = now_ms;
                 ctx->bat_stability_min_mv = sample->battery_voltage_mv;
@@ -607,6 +669,11 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
     case AURORA_POWER_BAT_STABILITY:
         ctx->relay_closed = true;
         ctx->duty_q15 = 0U;
+        if (!relay_applied)
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
+            break;
+        }
         if (sample->battery_voltage_mv < ctx->bat_stability_min_mv)
         {
             ctx->bat_stability_min_mv = sample->battery_voltage_mv;
@@ -633,10 +700,9 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
 
     case AURORA_POWER_RUN:
         ctx->relay_closed = true;
-        if (operating_mode != AURORA_MODE_BATTERY)
+        if ((operating_mode != AURORA_MODE_BATTERY) || !relay_applied)
         {
-            ctx->relay_closed = false;
-            enter_state(ctx, AURORA_POWER_WAIT_PV, now_ms);
+            register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
             break;
         }
         if (bus_measurement_invalid(sample))
@@ -732,16 +798,29 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         }
         else
         {
-            // 当前PCB无独立探测支路，只能在PWM关闭、输出端无外部电压时连接规定负载。
-            ctx->relay_closed = true;
-            enter_state(ctx, AURORA_POWER_DEMO_RELAY_SETTLE, now_ms);
+            /* 先进入共享关波放能状态；Demo闭合条件不复用Battery均压判据。 */
+            ctx->relay_holdoff_sequence = sample->sequence;
+            enter_state(ctx, AURORA_POWER_RELAY_HOLD_OFF, now_ms);
         }
         break;
 
     case AURORA_POWER_DEMO_RELAY_SETTLE:
         ctx->relay_closed = true;
         ctx->duty_q15 = 0U;
-        if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_RELAY_SETTLE_MS)
+        if (!relay_applied)
+        {
+            ctx->delta_ok_since_ms = 0U;
+            if (elapsed_ms(now_ms, ctx->state_since_ms) >= AURORA_RELAY_APPLY_TIMEOUT_MS)
+            {
+                register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
+            }
+            break;
+        }
+        if (ctx->delta_ok_since_ms == 0U)
+        {
+            ctx->delta_ok_since_ms = now_ms;
+        }
+        else if (elapsed_ms(now_ms, ctx->delta_ok_since_ms) >= AURORA_RELAY_SETTLE_MS)
         {
             ctx->demo_probe_since_ms = now_ms;
             enter_state(ctx, AURORA_POWER_DEMO_PROBE, now_ms);
@@ -750,10 +829,9 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
 
     case AURORA_POWER_DEMO_PROBE:
         ctx->relay_closed = true;
-        if (operating_mode != AURORA_MODE_DEMO_LOAD)
+        if ((operating_mode != AURORA_MODE_DEMO_LOAD) || !relay_applied)
         {
-            ctx->relay_closed = false;
-            enter_state(ctx, AURORA_POWER_WAIT_PV, now_ms);
+            register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
             break;
         }
         if (bus_measurement_invalid(sample) ||
@@ -796,10 +874,9 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
 
     case AURORA_POWER_DEMO_RUN:
         ctx->relay_closed = true;
-        if (operating_mode != AURORA_MODE_DEMO_LOAD)
+        if ((operating_mode != AURORA_MODE_DEMO_LOAD) || !relay_applied)
         {
-            ctx->relay_closed = false;
-            enter_state(ctx, AURORA_POWER_WAIT_PV, now_ms);
+            register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
             break;
         }
         if (bus_measurement_invalid(sample) ||
@@ -894,7 +971,7 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
  *               uint32_t now_ms)
  * Input       : 与历史Battery模式接口一致
  * Output      : PWM、Relay、Duty命令和功率级状态
- * Description : 保留旧调用方和Host回归兼容；内部固定选择Battery模式并转入扩展入口。
+ * Description : 保留旧调用方和Host回归兼容；直接单测视为Relay执行已确认。
  *---------------------------------------------------------------------------*/
 aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
                                                const aurora_measurement_t *sample,
@@ -904,6 +981,6 @@ aurora_power_command_t aurora_power_stage_step(aurora_power_stage_ctx_t *ctx,
                                                bool zero_cal_failed, uint32_t now_ms)
 {
     return aurora_power_stage_step_ex(
-        ctx, sample, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed,
+        ctx, sample, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed, true,
         AURORA_MODE_BATTERY, AURORA_DEMO_TARGET_VOLTAGE_MV, AURORA_DEMO_POWER_LIMIT_MW, now_ms);
 }

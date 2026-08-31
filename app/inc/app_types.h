@@ -219,6 +219,7 @@ typedef enum
     AURORA_POWER_ZERO_CAL,                           /* PWM关闭状态下校准PV_I零点。 */
     AURORA_POWER_WAIT_BATTERY,                       /* Battery模式等待有效电池端电压。 */
     AURORA_POWER_PRECHARGE,                          /* Relay断开，受限Boost建立BST_U均压。 */
+    AURORA_POWER_RELAY_HOLD_OFF,                     /* 关PWM放能20ms并等待关波后的新ADC快照。 */
     AURORA_POWER_RELAY_SETTLE,                       /* Battery模式Relay吸合并机械稳定。 */
     AURORA_POWER_BAT_STABILITY,                      /* Relay闭合、PWM关闭，验证BAT_U 10s稳定性。 */
     AURORA_POWER_RUN,                                /* 正常MPPT电池充电。 */

@@ -124,9 +124,13 @@
 #define AURORA_BATTERY_DETECT_MIN_MV                (10000L)
 
 /* ---------------- 继电器预充：硬性安全顺序 ---------------- */
-/* BST_U必须先由Boost充到与BAT_U压差<=1.5V，并连续稳定1s，才允许吸合继电器。 */
+/* BST_U必须先由Boost充到与BAT_U压差<=1.5V，并连续稳定1s，才允许进入关波放能。 */
 #define AURORA_RELAY_CLOSE_DELTA_MV                 (1500L)
 #define AURORA_RELAY_DELTA_HOLD_MS                  (1000U)
+/* 关PWM后沿用现有20ms故障放能窗口，并等待至少一份更新的ADC快照。 */
+#define AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)
+/* Runtime未在100ms内落实Relay GPIO，按闭合验证失败处理。 */
+#define AURORA_RELAY_APPLY_TIMEOUT_MS               (100U)
 /* 吸合后机械稳定100ms，再复核压差不得超过2.5V。 */
 #define AURORA_RELAY_SETTLE_MS                      (100U)
 #define AURORA_RELAY_VERIFY_DELTA_MV                (2500L)
@@ -297,7 +301,9 @@
 /* ---------------- 受限Demo无电池带载模式 ---------------- */
 #define AURORA_DEMO_TARGET_VOLTAGE_MV               (48000U)
 #define AURORA_DEMO_MAX_TARGET_VOLTAGE_MV           (58000U)
-#define AURORA_DEMO_POWER_LIMIT_MW                  (30000U)
+/* 无输出电流传感器，v0.10.3把Demo物理功率硬顶固定为30W。 */
+#define AURORA_DEMO_HARD_POWER_CAP_MW               (30000U)
+#define AURORA_DEMO_POWER_LIMIT_MW                  AURORA_DEMO_HARD_POWER_CAP_MW
 #define AURORA_DEMO_PROBE_POWER_MW                  (5000U)
 #define AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV          (5000L)
 #define AURORA_DEMO_LOAD_MIN_POWER_MW               (2000U)
@@ -316,7 +322,7 @@
 #define AURORA_ENERGY_HISTORY_INTERVAL_MS            (30UL * 60UL * 1000UL)
 #define AURORA_FW_VERSION_MAJOR                     (0U)
 #define AURORA_FW_VERSION_MINOR                     (10U)
-#define AURORA_FW_VERSION_PATCH                     (2U)
+#define AURORA_FW_VERSION_PATCH                     (3U)
 /* Flash v3中的能量统计语义版本。 */
 #define AURORA_ENERGY_SEMANTICS_VERSION             (3U)
 

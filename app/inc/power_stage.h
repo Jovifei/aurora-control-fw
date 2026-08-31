@@ -14,7 +14,7 @@ typedef struct
     uint32_t state_since_ms;                         /* 当前状态进入时间。 */
     uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点，兼作100ms启动资格与2s零点稳定依据。 */
     uint32_t pv_fast_valid_since_ms;                 /* PV持续>=15V的起点，用于动态1~10s快速启动资格。 */
-    uint32_t delta_ok_since_ms;                      /* BST_U/BAT_U压差持续满足起点。 */
+    uint32_t delta_ok_since_ms;                      /* 压差稳定或Relay应用后的局部计时起点。 */
     uint32_t no_sun_since_ms;                        /* 真正无PV持续起点。 */
     uint32_t bat_stability_since_ms;                 /* 10s电池稳定窗口起点。 */
     uint32_t start_success_since_ms;                 /* Ibat_est>=80mA成功启动计时。 */
@@ -22,6 +22,7 @@ typedef struct
     uint32_t demo_no_load_since_ms;                  /* Demo持续无负载证据起点。 */
     uint32_t selected_start_delay_ms;                /* 本次1~10s或15s启动等待。 */
     uint32_t dynamic_start_delay_ms;                 /* >15V启动的自适应1~10s延时。 */
+    uint32_t relay_holdoff_sequence;                 /* 进入20ms关波放能窗口时的ADC快照序号。 */
     int32_t bat_stability_min_mv;                    /* 10s窗口BAT_U最小值。 */
     int32_t bat_stability_max_mv;                    /* 10s窗口BAT_U最大值。 */
     uint16_t duty_q15;                               /* 最近一次物理占空比命令。 */
@@ -55,10 +56,11 @@ aurora_power_command_t aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx,
                                                   bool protection_safe,
                                                   bool zero_cal_ready,
                                                   bool zero_cal_failed,
+                                                  bool relay_applied,
                                                   aurora_operating_mode_t operating_mode,
                                                   uint32_t demo_target_voltage_mv,
                                                   uint32_t demo_power_limit_mw,
-                                                  uint32_t now_ms); // 支持Battery/Demo模式的扩展入口
+                                                  uint32_t now_ms); // 支持Battery/Demo和Relay执行反馈的扩展入口
 
 #ifdef __cplusplus
 }

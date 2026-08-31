@@ -20,6 +20,15 @@ set(APP_SOURCES
     app/src/storage.c
 )
 
+function(aurora_enable_strict_warnings target_name)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target_name} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
+            -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Werror
+        )
+    endif()
+endfunction()
+
 add_executable(aurora_host_tests
     ${APP_SOURCES}
     driver/src/drv_board.c
@@ -35,13 +44,7 @@ target_compile_definitions(aurora_host_tests PRIVATE
     AURORA_HOST_TEST=1
 )
 
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(aurora_host_tests PRIVATE
-        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
-        -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Werror
-    )
-endif()
-
+aurora_enable_strict_warnings(aurora_host_tests)
 add_test(NAME aurora_host_tests COMMAND aurora_host_tests)
 
 add_executable(aurora_host_debug_tests
@@ -62,11 +65,23 @@ target_compile_definitions(aurora_host_debug_tests PRIVATE
     BOARD_USART_MODE=BOARD_USART_MODE_DEBUG
 )
 
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(aurora_host_debug_tests PRIVATE
-        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
-        -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Werror
-    )
-endif()
-
+aurora_enable_strict_warnings(aurora_host_debug_tests)
 add_test(NAME aurora_host_debug_tests COMMAND aurora_host_debug_tests)
+
+add_executable(aurora_v0103_tests
+    ${APP_SOURCES}
+    driver/src/drv_board.c
+    tests/mock_driver.c
+    tests/test_v0103.c
+)
+
+target_include_directories(aurora_v0103_tests PRIVATE
+    app/inc driver/inc tests
+)
+
+target_compile_definitions(aurora_v0103_tests PRIVATE
+    AURORA_HOST_TEST=1
+)
+
+aurora_enable_strict_warnings(aurora_v0103_tests)
+add_test(NAME aurora_v0103_tests COMMAND aurora_v0103_tests)

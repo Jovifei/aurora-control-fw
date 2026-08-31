@@ -26,6 +26,13 @@ extern "C" {
 /* USART ISR单次最多搬运的RX字节数，保证中断有界。 */
 #define AURORA_RUNTIME_UART_ISR_RX_BUDGET           (32U)
 
+/* PWM尚未获得软件发波授权。 */
+#define AURORA_RUNTIME_PWM_ARM_OFF                  (0U)
+/* 已提交零CCR，等待自然UEV确认；该阶段不视为运行期过流。 */
+#define AURORA_RUNTIME_PWM_ARM_WAIT_ZERO            (1U)
+/* 软件已经进入MOE申请窗口或确认输出，Break必须按运行故障锁存。 */
+#define AURORA_RUNTIME_PWM_ARM_ACTIVE               (2U)
+
 /* 纯业务组合根：不保存寄存器对象，只保存测量、充电、保护、MPPT等产品状态。 */
 typedef struct
 {
@@ -50,7 +57,8 @@ typedef struct
     aurora_ui_output_t ui_output;                    /* 待运行层落实的LED命令。 */
     bool link_request;                               /* V2.7 Link逻辑请求。 */
     bool actual_power_transfer;                      /* 真实RUN+Relay+PWM+有效功率传输判据。 */
-    uint8_t layout_reserved[6];                      /* 显式补齐应用组合根。 */
+    bool relay_applied_feedback;                     /* Runtime最近一次已写出的Relay GPIO状态。 */
+    uint8_t layout_reserved[5];                      /* 显式补齐应用组合根。 */
 } aurora_app_t;
 
 /*
@@ -78,7 +86,7 @@ typedef struct
     volatile uint16_t uart_tail;                     /* RX读索引。 */
     volatile uint8_t adc_completed_mask;             /* ISR已发布的DMA半块。 */
     volatile uint8_t adc_processing_mask;            /* 主循环正在读取的DMA半块。 */
-    uint8_t pwm_arm_state;                           /* PWM零CCR/放行握手状态。 */
+    volatile uint8_t pwm_arm_state;                  /* ISR/主循环共享的PWM软件授权状态。 */
     uint8_t uart_rx[AURORA_RUNTIME_UART_RX_BUFFER_SIZE]; /* ISR写、主循环读的RX缓冲。 */
     bool relay_applied;                              /* 物理继电器最近实际状态。 */
     bool initialized;                                /* 完整运行初始化完成。 */
