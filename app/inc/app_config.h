@@ -129,6 +129,10 @@
 #define AURORA_RELAY_DELTA_HOLD_MS                  (1000U)
 /* 关PWM后沿用现有20ms故障放能窗口，并等待至少一份更新的ADC快照。 */
 #define AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)
+// 至少跨过两个完整DMA发布代次，避免接受横跨关PWM边沿的混合采样块。
+#define AURORA_RELAY_POST_OFF_MIN_BLOCKS            (2U)
+// 关波后500ms仍不能建立安全闭合条件，本次启动按有限重试失败处理。
+#define AURORA_RELAY_HOLDOFF_TIMEOUT_MS             (500U)
 /* Runtime未在100ms内落实Relay GPIO，按闭合验证失败处理。 */
 #define AURORA_RELAY_APPLY_TIMEOUT_MS               (100U)
 /* 吸合后机械稳定100ms，再复核压差不得超过2.5V。 */
@@ -139,6 +143,10 @@
 #define AURORA_BAT_STABILITY_MAX_SPAN_MV            (2000L)
 /* 预充超过30s仍无法满足压差条件，判本次启动失败。 */
 #define AURORA_PRECHARGE_TIMEOUT_MS                 (30000U)
+// 低功率必须同时伴随明显PV压降并持续2s，才归类为真实弱光。
+#define AURORA_PRECHARGE_WEAK_POWER_MW              (3000U)
+#define AURORA_PRECHARGE_WEAK_PV_DROOP_MV           (1000L)
+#define AURORA_PRECHARGE_WEAK_HOLD_MS               (2000U)
 /* BST_U相对BAT_U向上过冲超过该值，立即停止预充并锁存BUS过压。 */
 #define AURORA_BUS_RELATIVE_OVERSHOOT_MV            (2500L)
 /* 绝对母线保护以当前目标加裕量为主，并受现有26:1量程的保守软件上限约束。 */
@@ -306,6 +314,8 @@
 #define AURORA_DEMO_POWER_LIMIT_MW                  AURORA_DEMO_HARD_POWER_CAP_MW
 #define AURORA_DEMO_PROBE_POWER_MW                  (5000U)
 #define AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV          (5000L)
+// Demo机械合闸前BST_U也必须处于低残压区，运行目标电压不能作为合闸许可。
+#define AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV          (5000L)
 #define AURORA_DEMO_LOAD_MIN_POWER_MW               (2000U)
 #define AURORA_DEMO_PROBE_HOLD_MS                   (1500U)
 #define AURORA_DEMO_PROBE_TIMEOUT_MS                (5000U)

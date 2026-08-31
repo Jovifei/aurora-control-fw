@@ -81,6 +81,7 @@ target_include_directories(aurora_v0103_tests PRIVATE
 
 target_compile_definitions(aurora_v0103_tests PRIVATE
     AURORA_HOST_TEST=1
+    AURORA_HOST_TEST_POWER_GATES_OPEN=1
 )
 
 aurora_enable_strict_warnings(aurora_v0103_tests)

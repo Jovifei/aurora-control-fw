@@ -28,7 +28,8 @@
 
 /* 会使缓存PV功率失去可信度的ADC故障集合。 */
 #define RUNTIME_ADC_ENERGY_FAULT_MASK                                                              \
-    (AURORA_FAULT_ADC_STALE | AURORA_FAULT_ADC_DMA | AURORA_FAULT_ADC_OVERRUN)
+    (AURORA_FAULT_ADC_STALE | AURORA_FAULT_ADC_DMA | AURORA_FAULT_ADC_OVERRUN |                    \
+     AURORA_FAULT_PV_CURRENT_PLAUSIBILITY)
 
 /* 目标中断桥接与主循环共享的唯一运行实例。 */
 aurora_runtime_t g_aurora_runtime;
@@ -169,9 +170,13 @@ static bool pv_energy_sample_qualified(const aurora_app_t *app, uint32_t now_ms,
 {
     const uint32_t faults = aurora_protection_fault_mask(&app->protection);
     const aurora_measurement_t *sample = &app->sample;
+    const aurora_power_state_t state = app->power_stage.state;
+    const bool state_allows_energy =
+        (state == AURORA_POWER_PRECHARGE) || (state == AURORA_POWER_RUN) ||
+        (state == AURORA_POWER_DEMO_PROBE) || (state == AURORA_POWER_DEMO_RUN);
 
-    return boost_output_active && (sample->sequence != 0U) &&
-           ((sample->valid_mask & AURORA_MEAS_VALID_PV_POWER) != 0U) &&
+    return boost_output_active && state_allows_energy && aurora_protection_is_safe(&app->protection) &&
+           (sample->sequence != 0U) && ((sample->valid_mask & AURORA_MEAS_VALID_PV_POWER) != 0U) &&
            ((now_ms - sample->timestamp_ms) <= AURORA_MEASUREMENT_STALE_MS) &&
            ((faults & RUNTIME_ADC_ENERGY_FAULT_MASK) == 0U) && (sample->pv_power_mw > 0);
 }
@@ -225,12 +230,11 @@ static bool relay_close_still_safe(const aurora_runtime_t *runtime)
     const uint32_t required = AURORA_MEAS_VALID_BAT_V | AURORA_MEAS_VALID_BUS_V;
     const uint32_t now_ms = drv_time_now_ms();
     int64_t delta_mv;
-    uint32_t demo_target_mv;
-    uint32_t demo_bus_limit_mv;
 
     if ((!battery_request && !demo_request) || runtime->app.power_command.pwm_enable ||
-        (runtime->pending_fault_mask != 0U) ||
-        !aurora_protection_is_safe(&runtime->app.protection) || drv_pwm_output_active() ||
+        (runtime->pending_fault_mask != 0U) || !aurora_protection_is_safe(&runtime->app.protection) ||
+        drv_pwm_output_active() || !drv_board_power_gate_open() ||
+        (demo_request && !drv_board_demo_load_gate_open()) ||
         ((sample->valid_mask & required) != required) || (sample->sequence == 0U) ||
         ((now_ms - sample->timestamp_ms) > AURORA_MEASUREMENT_STALE_MS) ||
         ((sample->diagnostic_mask & AURORA_MEAS_DIAG_BUS_ADC_SATURATED) != 0U))
@@ -248,21 +252,10 @@ static bool relay_close_still_safe(const aurora_runtime_t *runtime)
         return delta_mv <= AURORA_RELAY_CLOSE_DELTA_MV;
     }
 
-    if ((sample->battery_voltage_mv < 0) ||
-        (sample->battery_voltage_mv > AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV) ||
-        (sample->bus_voltage_mv < 0))
-    {
-        return false;
-    }
-
-    demo_target_mv = runtime->app.storage.settings.demo_target_voltage_mv;
-    if ((demo_target_mv == 0U) || (demo_target_mv > AURORA_DEMO_MAX_TARGET_VOLTAGE_MV))
-    {
-        demo_target_mv = AURORA_DEMO_TARGET_VOLTAGE_MV;
-    }
-    demo_bus_limit_mv = min_u32(demo_target_mv + AURORA_BUS_TARGET_OV_MARGIN_MV,
-                                AURORA_BUS_ABSOLUTE_MAX_MV);
-    return (uint32_t)sample->bus_voltage_mv <= demo_bus_limit_mv;
+    return (sample->battery_voltage_mv >= 0) &&
+           (sample->battery_voltage_mv <= AURORA_DEMO_EXTERNAL_SOURCE_MAX_MV) &&
+           (sample->bus_voltage_mv >= 0) &&
+           (sample->bus_voltage_mv <= AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV);
 }
 
 /*---------------------------------------------------------------------------*
@@ -308,7 +301,8 @@ static void clear_startup_break_if_safe(aurora_runtime_t *runtime)
     const uint32_t faults = aurora_protection_fault_mask(&runtime->app.protection);
 
     if ((runtime->pwm_arm_state != AURORA_RUNTIME_PWM_ARM_ACTIVE) &&
-        !drv_pwm_output_active() && drv_pwm_break_latched() && !drv_pwm_break_source_active() &&
+        (runtime->pending_fault_mask == 0U) && !drv_pwm_output_active() &&
+        drv_pwm_break_latched() && !drv_pwm_break_source_active() &&
         ((faults & RUNTIME_FAST_OCP_MASK) == 0U))
     {
         (void)drv_pwm_clear_break_latch();
@@ -369,20 +363,50 @@ static void apply_power_command(aurora_runtime_t *runtime)
     aurora_irq_state_t irq;
     bool arm_ok;
 
+    // HOLD_OFF基准由Runtime在物理关PWM之后记录，PowerStage不得提前使用关波前样本。
+    if (command->state == AURORA_POWER_RELAY_HOLD_OFF)
+    {
+        force_safe_off(runtime);
+        if (runtime->relay_applied)
+        {
+            drv_io_set_relay(false);
+            runtime->relay_applied = false;
+            runtime->relay_applied_generation = 0U;
+        }
+        if (!runtime->relay_holdoff_baseline_captured)
+        {
+            runtime->app.power_stage.relay_holdoff_sequence = runtime->app.sample.sequence;
+            runtime->app.power_stage.state_since_ms = drv_time_now_ms();
+            runtime->relay_holdoff_baseline_captured = true;
+        }
+        return;
+    }
+    runtime->relay_holdoff_baseline_captured = false;
+
+    // 当前物理Relay属于旧事务时先断开，禁止旧true反馈授权新请求。
+    if (command->relay_enable && runtime->relay_applied &&
+        (command->relay_generation != runtime->relay_applied_generation))
+    {
+        force_safe_off(runtime);
+        drv_io_set_relay(false);
+        runtime->relay_applied = false;
+        runtime->relay_applied_generation = 0U;
+        return;
+    }
+
     if (command->relay_enable != runtime->relay_applied)
     {
-        /* 任何继电器切换先物理关PWM；闭合时按Battery/Demo规则复核最新测量。 */
         force_safe_off(runtime);
-
         if (command->relay_enable && !relay_close_still_safe(runtime))
         {
             drv_io_set_relay(false);
             runtime->relay_applied = false;
+            runtime->relay_applied_generation = 0U;
             return;
         }
-
         drv_io_set_relay(command->relay_enable);
         runtime->relay_applied = command->relay_enable;
+        runtime->relay_applied_generation = command->relay_enable ? command->relay_generation : 0U;
         return;
     }
 
@@ -393,7 +417,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
     }
 
     clear_startup_break_if_safe(runtime);
-
     if (runtime->pwm_arm_state == AURORA_RUNTIME_PWM_ARM_OFF)
     {
         drv_pwm_disarm();
@@ -410,7 +433,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
         {
             return;
         }
-
         token = runtime->safety_epoch;
         irq = drv_irq_save();
         if (!safety_still_clear(runtime, token))
@@ -419,12 +441,9 @@ static void apply_power_command(aurora_runtime_t *runtime)
             force_safe_off(runtime);
             return;
         }
-
-        /* 在申请MOE前先发布ACTIVE；硬件Break先清MOE、ISR后到时仍能识别运行期故障。 */
         runtime->pwm_arm_state = AURORA_RUNTIME_PWM_ARM_ACTIVE;
         arm_ok = drv_pwm_arm();
         drv_irq_restore(irq);
-
         if (!arm_ok)
         {
             if (runtime->pwm_arm_state == AURORA_RUNTIME_PWM_ARM_ACTIVE)
@@ -434,7 +453,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
             force_safe_off(runtime);
             return;
         }
-
         if (!safety_still_clear(runtime, token) || !drv_pwm_output_active())
         {
             if ((runtime->pwm_arm_state == AURORA_RUNTIME_PWM_ARM_ACTIVE) &&
@@ -454,8 +472,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
         force_safe_off(runtime);
         return;
     }
-
-    /* 只写CCR shadow；运行期禁止软件UG，Duty必须在下一自然UPDATE边界生效。 */
     if (!drv_pwm_stage_duty(command->duty_q15, NULL) || !safety_still_clear(runtime, token))
     {
         force_safe_off(runtime);
@@ -756,6 +772,9 @@ void aurora_app_init(aurora_app_t *app, const aurora_measurement_calibration_t *
     app->last_step_ms = now_ms;
     app->last_10ms = now_ms;
     app->last_energy_history_ms = now_ms;
+    app->last_energy_sample_sequence = 0U;
+    app->last_energy_sample_timestamp_ms = 0U;
+    app->relay_applied_generation_feedback = 0U;
     app->relay_applied_feedback = false;
 }
 
@@ -804,6 +823,9 @@ void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settin
     memset(&app->power_command, 0, sizeof(app->power_command));
     app->link_request = false;
     app->actual_power_transfer = false;
+    app->last_energy_sample_sequence = 0U;
+    app->last_energy_sample_timestamp_ms = 0U;
+    app->relay_applied_generation_feedback = 0U;
     app->relay_applied_feedback = false;
 
     if (demo_power_clamped)
@@ -862,11 +884,12 @@ void aurora_app_on_fast_fault(aurora_app_t *app, uint32_t fault_mask, uint32_t n
  * Input       : app - 应用总上下文；now_ms - 当前毫秒；
  *               boost_output_active - Driver报告的PWM实际状态
  * Output      : 无
- * Description : 1ms执行保护和Power Stage；10ms更新Charger/MPPT/UI。
+ * Description : 先更新测量/保护，再按ADC时间轴统计有效传能；1ms执行Power Stage，10ms更新Charger/MPPT/UI。
  *---------------------------------------------------------------------------*/
 void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_active)
 {
     uint32_t elapsed_step_ms;
+    uint32_t sample_elapsed_ms;
     aurora_power_state_t previous_power_state;
     bool pv_energy_qualified;
 
@@ -887,24 +910,51 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
     app->last_step_ms = now_ms;
 
     (void)aurora_measurement_read(&app->measurement, &app->sample);
+
+    // 先更新本轮电池电流估算和Protection，禁止先对已经失效的样本做时间/能量积分。
+    aurora_measurement_estimate_battery_current(
+        &app->sample, estimate_efficiency_q15(&app->sample), app->relay_applied_feedback,
+        (app->power_stage.state == AURORA_POWER_RELAY_SETTLE) ||
+            (app->power_stage.state == AURORA_POWER_BAT_STABILITY));
+    aurora_protection_step_ex(
+        &app->protection, &app->sample, &app->charger.profile, app->storage.settings.operating_mode,
+        aurora_measurement_zero_cal_ready(&app->measurement), boost_output_active, now_ms);
+
+    // 只使用两个真实ADC发布时间戳之间的间隔；首个样本只建立时间基准，不外推墙上时间。
+    sample_elapsed_ms = 0U;
+    if ((app->sample.sequence != 0U) &&
+        (app->sample.sequence != app->last_energy_sample_sequence))
+    {
+        if (app->last_energy_sample_sequence != 0U)
+        {
+            const uint32_t measured_delta_ms =
+                app->sample.timestamp_ms - app->last_energy_sample_timestamp_ms;
+            if (measured_delta_ms <= AURORA_MEASUREMENT_STALE_MS)
+            {
+                sample_elapsed_ms = measured_delta_ms;
+            }
+        }
+        app->last_energy_sample_sequence = app->sample.sequence;
+        app->last_energy_sample_timestamp_ms = app->sample.timestamp_ms;
+    }
+
     pv_energy_qualified = pv_energy_sample_qualified(app, now_ms, boost_output_active);
 
-    /*
-     * 真实充电会话必须同时具备Battery模式、RUN、已写Relay GPIO、物理PWM、Charger许可和新鲜PV功率。
-     */
+    // Battery实际传能必须同时匹配当前Relay事务，不能让上一次闭合反馈继续授权新的会话。
     app->actual_power_transfer =
         (app->storage.settings.operating_mode == AURORA_MODE_BATTERY) &&
         (app->power_stage.state == AURORA_POWER_RUN) && app->relay_applied_feedback &&
+        (app->relay_applied_generation_feedback == app->power_command.relay_generation) &&
         boost_output_active && app->charge_output.allow_charge && app->power_command.pwm_enable &&
         pv_energy_qualified &&
         (app->sample.pv_power_mw >= (int32_t)AURORA_ACTUAL_TRANSFER_MIN_POWER_MW);
-    aurora_charger_account_active_time(&app->charger, app->actual_power_transfer, elapsed_step_ms);
+    aurora_charger_account_active_time(&app->charger, app->actual_power_transfer, sample_elapsed_ms);
 
-    /* PV实测发电量在Battery和Demo均累计，但必须来自新鲜有效样本且物理PWM正在输出。 */
-    if (pv_energy_qualified)
+    // PV实测能量只在新鲜有效样本间隔内累计，PRECHARGE/Battery RUN/Demo Probe或Run才有资格。
+    if (pv_energy_qualified && (sample_elapsed_ms != 0U))
     {
         app->energy_accumulator_mw_ms +=
-            (uint64_t)(uint32_t)app->sample.pv_power_mw * elapsed_step_ms;
+            (uint64_t)(uint32_t)app->sample.pv_power_mw * sample_elapsed_ms;
         while (app->energy_accumulator_mw_ms >= AURORA_ONE_WH_MW_MS)
         {
             app->energy_accumulator_mw_ms -= AURORA_ONE_WH_MW_MS;
@@ -914,13 +964,13 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
         }
     }
 
-    /* 电池侧能量没有BAT_I实测，只在真实充电会话中按Ppv×η累计并保持ESTIMATED语义。 */
-    if (app->actual_power_transfer)
+    // 新板没有BAT_I，电池侧账本仍为Ppv×η估算，只在真实Battery传能会话累计。
+    if (app->actual_power_transfer && (sample_elapsed_ms != 0U))
     {
         const uint64_t charge_power_mw =
             ((uint64_t)(uint32_t)app->sample.pv_power_mw * estimate_efficiency_q15(&app->sample)) /
             AURORA_DUTY_Q15_ONE;
-        app->charge_energy_accumulator_mw_ms += charge_power_mw * elapsed_step_ms;
+        app->charge_energy_accumulator_mw_ms += charge_power_mw * sample_elapsed_ms;
         while (app->charge_energy_accumulator_mw_ms >= AURORA_ONE_WH_MW_MS)
         {
             app->charge_energy_accumulator_mw_ms -= AURORA_ONE_WH_MW_MS;
@@ -932,7 +982,7 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
     app->storage.settings.pv_energy_remainder_mw_ms = app->energy_accumulator_mw_ms;
     app->storage.settings.charge_est_energy_remainder_mw_ms = app->charge_energy_accumulator_mw_ms;
 
-    /* Flash v3保存当前30min相位，重启后不再把窗口起点重置为启动时刻。 */
+    // 24h窗口相位跟随系统时间；即使暂时无发电，也需要继续推进窗口边界。
     {
         uint64_t interval_ms =
             (uint64_t)app->storage.settings.history_interval_elapsed_ms + elapsed_step_ms;
@@ -949,15 +999,6 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
         aurora_storage_mark_dirty(&app->storage, now_ms);
         app->last_energy_history_ms = now_ms;
     }
-
-    aurora_measurement_estimate_battery_current(
-        &app->sample, estimate_efficiency_q15(&app->sample), app->relay_applied_feedback,
-        (app->power_stage.state == AURORA_POWER_RELAY_SETTLE) ||
-            (app->power_stage.state == AURORA_POWER_BAT_STABILITY));
-
-    aurora_protection_step_ex(
-        &app->protection, &app->sample, &app->charger.profile, app->storage.settings.operating_mode,
-        aurora_measurement_zero_cal_ready(&app->measurement), boost_output_active, now_ms);
 
     if ((now_ms - app->last_10ms) >= AURORA_CONTROL_PERIOD_MS)
     {
@@ -1033,8 +1074,9 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
         aurora_protection_is_safe(&app->protection),
         aurora_measurement_zero_cal_ready(&app->measurement),
         aurora_measurement_zero_cal_failed(&app->measurement), app->relay_applied_feedback,
-        app->storage.settings.operating_mode, app->storage.settings.demo_target_voltage_mv,
-        app->storage.settings.demo_power_limit_mw, now_ms);
+        app->relay_applied_generation_feedback, app->storage.settings.operating_mode,
+        app->storage.settings.demo_target_voltage_mv, app->storage.settings.demo_power_limit_mw,
+        now_ms);
 
     if (app->power_stage.startup_locked)
     {
@@ -1197,6 +1239,8 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
         app->storage.settings.charge_est_energy_remainder_mw_ms = 0U;
         app->energy_accumulator_mw_ms = 0U;
         app->charge_energy_accumulator_mw_ms = 0U;
+        app->last_energy_sample_sequence = 0U;
+        app->last_energy_sample_timestamp_ms = 0U;
         app->last_energy_history_ms = now_ms;
         aurora_storage_mark_dirty(&app->storage, now_ms);
 
@@ -1234,6 +1278,8 @@ bool aurora_runtime_init(aurora_runtime_t *runtime)
     drv_io_set_link(false);
     drv_io_set_leds(false, false);
     runtime->relay_applied = false;
+    runtime->relay_applied_generation = 0U;
+    runtime->relay_holdoff_baseline_captured = false;
 
     now_ms = drv_time_now_ms();
     if (!drv_watchdog_init(AURORA_WATCHDOG_TIMEOUT_MS))
@@ -1318,6 +1364,7 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
     if ((events & RUNTIME_EVENT_TICK) != 0U)
     {
         runtime->app.relay_applied_feedback = runtime->relay_applied;
+        runtime->app.relay_applied_generation_feedback = runtime->relay_applied_generation;
         aurora_app_step_1ms(&runtime->app, now_ms, drv_pwm_output_active());
         drv_io_set_leds(runtime->app.ui_output.led_run_on, runtime->app.ui_output.led_fault_on);
         drv_io_set_link(runtime->app.link_request);

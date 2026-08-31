@@ -13,7 +13,8 @@ class V0103Contracts(unittest.TestCase):
         self.assertIn("AURORA_POWER_RELAY_HOLD_OFF", types)
         self.assertIn("AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)", config)
         self.assertIn("relay_holdoff_sequence", power)
-        self.assertIn("sample->sequence == ctx->relay_holdoff_sequence", power)
+        self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power)
+        self.assertIn("sample->sequence - ctx->relay_holdoff_sequence", power)
         self.assertIn("bool relay_applied", power)
 
     def test_break_uses_software_arm_state(self):
@@ -47,6 +48,22 @@ class V0103Contracts(unittest.TestCase):
         config = (ROOT / "app/inc/app_config.h").read_text(encoding="utf-8")
         self.assertNotIn("AURORA_OTA", config)
         self.assertNotIn("AURORA_IAP", config)
+
+    def test_reviewed_closeout_contracts(self):
+        main_c = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
+        power_c = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")
+        config = (ROOT / "app/inc/app_config.h").read_text(encoding="utf-8")
+        protocol = (ROOT / "app/src/protocol.c").read_text(encoding="utf-8")
+        self.assertIn("drv_board_power_gate_open()", main_c)
+        self.assertIn("drv_board_demo_load_gate_open()", main_c)
+        self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV", main_c)
+        self.assertIn("runtime->pending_fault_mask == 0U", main_c)
+        self.assertIn("relay_applied_generation", main_c)
+        self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power_c)
+        self.assertIn("AURORA_PRECHARGE_WEAK_PV_DROOP_MV", power_c)
+        self.assertIn("AURORA_RELAY_HOLDOFF_TIMEOUT_MS", power_c)
+        self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV          (5000L)", config)
+        self.assertIn("settings->charge_est_lifetime_energy_wh", protocol)
 
 
 if __name__ == "__main__":

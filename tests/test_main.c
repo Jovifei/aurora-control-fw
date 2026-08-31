@@ -724,10 +724,10 @@ static void test_service_relay_transition_forces_pwm_off(void)
     service.app.power_command.relay_enable = true;
     service.app.power_command.pwm_enable = false;
     aurora_service_poll(&service);
-    CHECK(mock_relay());
+    CHECK(!mock_relay()); // 生产功率门仍为0，即使压差合格也禁止物理吸合。
     CHECK(!mock_pwm_active());
 
-    /* 重新断开后制造18V压差；即使APP错误请求闭合，Service也必须拒绝。 */
+    /* 继续制造18V压差；无论门禁还是压差均应保持Relay断开。 */
     service.app.power_command.relay_enable = false;
     aurora_service_poll(&service);
     CHECK(!mock_relay());

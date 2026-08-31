@@ -20,16 +20,19 @@ aurora_test_power_stage_step(aurora_power_stage_ctx_t *ctx,
                              uint32_t now_ms)
 {
     aurora_power_command_t command = aurora_power_stage_step_ex(
-        ctx, sample, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed, true,
+        ctx, sample, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed, true, ctx->relay_generation,
         AURORA_MODE_BATTERY, AURORA_DEMO_TARGET_VOLTAGE_MV, AURORA_DEMO_POWER_LIMIT_MW, now_ms);
 
     if (command.state == AURORA_POWER_RELAY_HOLD_OFF)
     {
         aurora_measurement_t fresh = *sample;
-        fresh.sequence++;
+        // 历史夹具没有Runtime，这里显式模拟“物理关PWM后记录基准”的生产握手。
+        ctx->relay_holdoff_sequence = sample->sequence;
+        ctx->state_since_ms = now_ms;
+        fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;
         fresh.timestamp_ms = now_ms + AURORA_RELAY_PWM_OFF_DECAY_MS;
         command = aurora_power_stage_step_ex(
-            ctx, &fresh, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed, true,
+            ctx, &fresh, mppt, charger, protection_safe, zero_cal_ready, zero_cal_failed, true, ctx->relay_generation,
             AURORA_MODE_BATTERY, AURORA_DEMO_TARGET_VOLTAGE_MV, AURORA_DEMO_POWER_LIMIT_MW,
             fresh.timestamp_ms);
         if (command.state == AURORA_POWER_RELAY_SETTLE)

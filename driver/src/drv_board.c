@@ -96,20 +96,29 @@ bool drv_board_get_adc_calibration(size_t channel, drv_board_adc_calibration_t *
  *---------------------------------------------------------------------------*/
 bool drv_board_power_gate_open(void)
 {
+#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
+    // 仅v0.10.3端到端Host目标使用；生产目标仍完全由BOARD_GATE_*与总门控制。
+    return true;
+#else
     return (BOARD_POWER_OUTPUT_ALLOWED != 0U) && (BOARD_GATE_PINMAP_REVIEWED != 0U) &&
            (BOARD_GATE_COMP_ROUTE_VALIDATED != 0U) && (BOARD_GATE_ANALOG_CALIBRATED != 0U) &&
            (BOARD_GATE_KEIL_LINKED != 0U) && (BOARD_GATE_LOW_VOLTAGE_BENCH != 0U);
+#endif
 }
 
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_board_demo_load_gate_open(void)
  * Input       : 无
  * Output      : true表示Demo负载/空载/短路/外部电源台架已人工验收
- * Description : 仅供Demo模式PWM放行复核；不得并入总功率门，避免挡住Battery充电。
+ * Description : 仅供Demo模式PWM和Relay闭合复核；Host覆盖只允许存在于专用测试目标。
  *---------------------------------------------------------------------------*/
 bool drv_board_demo_load_gate_open(void)
 {
+#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
+    return true;
+#else
     return (BOARD_GATE_DEMO_LOAD_VALIDATED != 0U);
+#endif
 }
 
 /*---------------------------------------------------------------------------*

@@ -49,6 +49,9 @@ typedef struct
     uint32_t last_step_ms;                           /* 上一次1ms应用调度时间。 */
     uint32_t last_10ms;                              /* 上一次10ms控制链运行时间。 */
     uint32_t last_energy_history_ms;                 /* 上一次能量持久化请求时间；30min相位保存在Flash v3。 */
+    uint32_t last_energy_sample_sequence;            // 上次参与能量时间轴的ADC发布序号。
+    uint32_t last_energy_sample_timestamp_ms;        // 上次参与能量时间轴的ADC时间戳。
+    uint32_t relay_applied_generation_feedback;      // Runtime最近一次实际写出Relay GPIO对应的事务代次。
     uint32_t telemetry_message_id;                   /* 主动遥测消息序号。 */
     aurora_mppt_output_t mppt_output;                /* 最近一次MPPT输出。 */
     aurora_charge_output_t charge_output;            /* 最近一次充电目标与PV包络。 */
@@ -79,6 +82,7 @@ typedef struct
     uint32_t watchdog_started_ms;                    /* IWDT启动时间。 */
     uint32_t last_telemetry_ms;                      /* 上次主动遥测时间。 */
     uint32_t fast_ocp_recover_since_ms;              /* 快速OCP硬件源消失后的恢复计时。 */
+    uint32_t relay_applied_generation;               // 当前物理Relay GPIO状态对应的闭合事务代次。
     volatile uint32_t adc_overrun_count;             /* ADC半缓冲覆盖计数。 */
     volatile uint32_t uart_rx_overrun_count;         /* RX环形缓冲溢出计数。 */
     volatile uint32_t startup_comp_ignored_count;    /* PWM未输出阶段CMP诊断次数。 */
@@ -89,8 +93,9 @@ typedef struct
     volatile uint8_t pwm_arm_state;                  /* ISR/主循环共享的PWM软件授权状态。 */
     uint8_t uart_rx[AURORA_RUNTIME_UART_RX_BUFFER_SIZE]; /* ISR写、主循环读的RX缓冲。 */
     bool relay_applied;                              /* 物理继电器最近实际状态。 */
+    bool relay_holdoff_baseline_captured;            // Runtime已在物理关PWM后记录ADC基准序号。
     bool initialized;                                /* 完整运行初始化完成。 */
-    uint8_t layout_reserved[2];                      /* 显式补齐。 */
+    uint8_t layout_reserved[1];                      /* 显式补齐。 */
 } aurora_runtime_t;
 
 /* 目标中断桥接使用的唯一应用运行实例。 */
