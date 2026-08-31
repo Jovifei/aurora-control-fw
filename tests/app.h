@@ -40,6 +40,6 @@ aurora_test_power_stage_step(aurora_power_stage_ctx_t *ctx,
     return command;
 }
 
-#define aurora_power_stage_step aurora_test_power_stage_step
+#define aurora_power_stage_step aurora_test_power_stage_step /* 旧Host回归兼容入口。 */
 
 #endif
