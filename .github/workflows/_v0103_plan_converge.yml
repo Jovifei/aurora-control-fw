@@ -21,5 +21,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Normalize temporary convergence helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/_v0103_plan_converge.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'p = replace_once(p, "            ctx->precharge_low_power_since_ms = 0U;\\n", "", "precharge low timer init")'
+          new = 'p = p.replace("            ctx->precharge_low_power_since_ms = 0U;\\n", "")'
+          if old not in text:
+              raise SystemExit('temporary helper normalization pattern missing')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+          PY
       - name: Apply approved v0.10.3 scope convergence and verify
         run: python tools/_v0103_plan_converge.py
