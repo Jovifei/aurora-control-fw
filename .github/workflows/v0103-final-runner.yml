@@ -29,6 +29,27 @@ jobs:
           end = workflow.index('\n          PY\n', start)
           raw = workflow[start:end]
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in raw.splitlines())
+
+          section_start = code.index('# 2) Host专用功率门覆盖宏禁止泄漏到目标固件。')
+          section_end = code.index('# 3) 明确最终验收Gate不是Bring-up阶段的临时使能开关。', section_start)
+          corrected = r'''# 2) Host专用功率门覆盖宏禁止泄漏到目标固件。
+replace_once(
+    'driver/src/drv_board.c',
+    '''#include "board_config.h"\n\n/*---------------------------------------------------------------------------*''',
+    '''#include "board_config.h"\n\n#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN) && !defined(AURORA_HOST_TEST)\n#error "AURORA_HOST_TEST_POWER_GATES_OPEN is forbidden in target firmware"\n#endif\n\n/*---------------------------------------------------------------------------*''')
+
+replace_once(
+    'driver/src/drv_board.c',
+    '''#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)\n    // 仅v0.10.3端到端Host目标使用；生产目标仍完全由BOARD_GATE_*与总门控制。''',
+    '''#if defined(AURORA_HOST_TEST) && defined(AURORA_HOST_TEST_POWER_GATES_OPEN)\n    // 仅v0.10.3端到端Host目标使用；生产目标仍完全由BOARD_GATE_*与总门控制。''')
+
+replace_once(
+    'driver/src/drv_board.c',
+    '''#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)\n    return true;\n#else\n    return (BOARD_GATE_DEMO_LOAD_VALIDATED != 0U);''',
+    '''#if defined(AURORA_HOST_TEST) && defined(AURORA_HOST_TEST_POWER_GATES_OPEN)\n    return true;\n#else\n    return (BOARD_GATE_DEMO_LOAD_VALIDATED != 0U);''')
+
+'''
+          code = code[:section_start] + corrected + code[section_end:]
           exec(compile(code, 'v0103-final-closeout-extracted.py', 'exec'), {'__name__': '__main__'})
           PY
 
