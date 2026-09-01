@@ -23,12 +23,12 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/v0103-final-closeout.yml').read_text(encoding='utf-8')
           start = workflow.index('          from pathlib import Path\n')
           end = workflow.index('\n          PY\n', start)
-          code = textwrap.dedent(workflow[start:end])
+          raw = workflow[start:end]
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in raw.splitlines())
           exec(compile(code, 'v0103-final-closeout-extracted.py', 'exec'), {'__name__': '__main__'})
           PY
 
