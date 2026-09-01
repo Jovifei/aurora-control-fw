@@ -538,6 +538,11 @@
               <FilePath>..\vendor\ddl\Source\g32f031_ddl_gpio.c</FilePath>
             </File>
             <File>
+              <FileName>g32f031_ddl_gtmr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\vendor\ddl\Source\g32f031_ddl_gtmr.c</FilePath>
+            </File>
+            <File>
               <FileName>g32f031_ddl_opa.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\vendor\ddl\Source\g32f031_ddl_opa.c</FilePath>
