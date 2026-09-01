@@ -1,0 +1,49 @@
+name: v0.10.3 final closeout runner
+
+on:
+  push:
+    branches:
+      - codex/v0.10.3-safety-handshake-closeout
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    if: "${{ !contains(github.event.head_commit.message, '[v0103-final-closeout]') }}"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v0.10.3-safety-handshake-closeout
+          fetch-depth: 0
+
+      - name: 执行最终收尾修复
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/v0103-final-closeout.yml').read_text(encoding='utf-8')
+          start = workflow.index('          from pathlib import Path\n')
+          end = workflow.index('\n          PY\n', start)
+          code = textwrap.dedent(workflow[start:end])
+          exec(compile(code, 'v0103-final-closeout-extracted.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: 验证完整质量门
+        shell: bash
+        run: |
+          git diff --check
+          python tools/run_checks.py
+
+      - name: 提交已验证修改
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "修复：关闭 v0.10.3 序号回绕与测试门禁配置隐患 [v0103-final-closeout]"
+          git push origin HEAD:codex/v0.10.3-safety-handshake-closeout
