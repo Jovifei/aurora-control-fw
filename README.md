@@ -1,15 +1,26 @@
-# Aurora MPPT Charger 300W
+# Aurora Control Firmware
 
-Aurora 是基于 GigaDevice G32F031 的 300W Boost MPPT 充电器固件。工程以两层架构组织：
+> 当前候选基线：**v0.10.3**。在 v0.10.2 真实源码集成基础上，关闭快速 Break 误判、Relay 关波后新鲜采样、Relay 执行反馈、Demo Relay 和陈旧能量累计等软件缺口；所有物理功率门仍保持关闭。
+
+单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
+
+## 目录
 
 ```text
-app/        产品行为、状态机、保护、MPPT、充电、协议和参数保存
-driver/     MCU/GPIO/ADC/PWM/COMP/Flash/UART/Watchdog 驱动
+app/
+├─ inc/      应用层公共.h、类型、参数和运行时接口
+└─ src/      应用逻辑、主入口、中断桥接和Debug实现
+driver/
+├─ inc/      驱动模块头、板级配置和公共驱动契约
+└─ src/      G32F031外设及板级驱动实现
+vendor/      目标构建实际需要的CMSIS / Device / DDL
+project/     Keil ARM Compiler 6工程、scatter和用户工程配置
+docs/        工程事实、设计边界、验证状态与台架清单
+tests/       Host回归与故障注入，不进入目标镜像
+tools/       架构、代码规范、GCC/Clang、Sanitizer和目标语法门禁
 ```
 
-主功率级为单 Boost；Battery 模式支持 48V / 60V / 72V 电池档案，Demo 模式用于受限无电池带载演示。当前硬件没有 BAT_I，因此电池侧电流和充电能量只能按 PV 侧实测功率与保守效率模型估算。
-
-## 代码入口
+`app/src/`中的应用模块：
 
 ```text
 main         应用入口、运行时调度、事件邮箱和安全功率提交
