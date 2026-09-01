@@ -302,7 +302,6 @@ typedef struct
 /* 应用层提交给Service的硬件无关功率命令。 */
 typedef struct
 {
-    uint32_t relay_generation;                       // Relay闭合事务代次；0表示当前没有有效闭合事务。
     uint16_t duty_q15;                               /* 低侧MOS物理占空比，Q15。 */
     aurora_power_state_t state;                      /* 命令对应的功率级状态。 */
     bool pwm_enable;                                 /* true表示请求发波。 */

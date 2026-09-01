@@ -371,7 +371,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
         {
             drv_io_set_relay(false);
             runtime->relay_applied = false;
-            runtime->relay_applied_generation = 0U;
         }
         if (!runtime->relay_holdoff_baseline_captured)
         {
@@ -384,16 +383,6 @@ static void apply_power_command(aurora_runtime_t *runtime)
     }
     runtime->relay_holdoff_baseline_captured = false;
 
-    // 当前物理Relay属于旧事务时先断开，禁止旧true反馈授权新请求。
-    if (command->relay_enable && runtime->relay_applied &&
-        (command->relay_generation != runtime->relay_applied_generation))
-    {
-        force_safe_off(runtime);
-        drv_io_set_relay(false);
-        runtime->relay_applied = false;
-        runtime->relay_applied_generation = 0U;
-        return;
-    }
 
     if (command->relay_enable != runtime->relay_applied)
     {
@@ -402,12 +391,10 @@ static void apply_power_command(aurora_runtime_t *runtime)
         {
             drv_io_set_relay(false);
             runtime->relay_applied = false;
-            runtime->relay_applied_generation = 0U;
             return;
         }
         drv_io_set_relay(command->relay_enable);
         runtime->relay_applied = command->relay_enable;
-        runtime->relay_applied_generation = command->relay_enable ? command->relay_generation : 0U;
         return;
     }
 
@@ -775,7 +762,6 @@ void aurora_app_init(aurora_app_t *app, const aurora_measurement_calibration_t *
     app->last_energy_history_ms = now_ms;
     app->last_energy_sample_sequence = 0U;
     app->last_energy_sample_timestamp_ms = 0U;
-    app->relay_applied_generation_feedback = 0U;
     app->relay_applied_feedback = false;
 }
 
@@ -826,7 +812,6 @@ void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settin
     app->actual_power_transfer = false;
     app->last_energy_sample_sequence = 0U;
     app->last_energy_sample_timestamp_ms = 0U;
-    app->relay_applied_generation_feedback = 0U;
     app->relay_applied_feedback = false;
 
     if (demo_power_clamped)
@@ -941,11 +926,10 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
 
     pv_energy_qualified = pv_energy_sample_qualified(app, now_ms, boost_output_active);
 
-    // Battery实际传能必须同时匹配当前Relay事务，不能让上一次闭合反馈继续授权新的会话。
+    // HOLD_OFF会在任何新闭合请求前物理断Relay；单线程Runtime因此只需确认当前GPIO已落实。
     app->actual_power_transfer =
         (app->storage.settings.operating_mode == AURORA_MODE_BATTERY) &&
         (app->power_stage.state == AURORA_POWER_RUN) && app->relay_applied_feedback &&
-        (app->relay_applied_generation_feedback == app->power_command.relay_generation) &&
         boost_output_active && app->charge_output.allow_charge && app->power_command.pwm_enable &&
         pv_energy_qualified &&
         (app->sample.pv_power_mw >= (int32_t)AURORA_ACTUAL_TRANSFER_MIN_POWER_MW);
@@ -1075,7 +1059,7 @@ void aurora_app_step_1ms(aurora_app_t *app, uint32_t now_ms, bool boost_output_a
         aurora_protection_is_safe(&app->protection),
         aurora_measurement_zero_cal_ready(&app->measurement),
         aurora_measurement_zero_cal_failed(&app->measurement), app->relay_applied_feedback,
-        app->relay_applied_generation_feedback, app->storage.settings.operating_mode,
+        app->storage.settings.operating_mode,
         app->storage.settings.demo_target_voltage_mv, app->storage.settings.demo_power_limit_mw,
         now_ms);
 
@@ -1279,7 +1263,6 @@ bool aurora_runtime_init(aurora_runtime_t *runtime)
     drv_io_set_link(false);
     drv_io_set_leds(false, false);
     runtime->relay_applied = false;
-    runtime->relay_applied_generation = 0U;
     runtime->relay_holdoff_baseline_captured = false;
 
     now_ms = drv_time_now_ms();
@@ -1365,7 +1348,6 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
     if ((events & RUNTIME_EVENT_TICK) != 0U)
     {
         runtime->app.relay_applied_feedback = runtime->relay_applied;
-        runtime->app.relay_applied_generation_feedback = runtime->relay_applied_generation;
         aurora_app_step_1ms(&runtime->app, now_ms, drv_pwm_output_active());
         drv_io_set_leds(runtime->app.ui_output.led_run_on, runtime->app.ui_output.led_fault_on);
         drv_io_set_link(runtime->app.link_request);

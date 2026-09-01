@@ -18,6 +18,7 @@ class V0103Contracts(unittest.TestCase):
         self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power)
         self.assertIn("sample->sequence - ctx->relay_holdoff_sequence", power)
         self.assertIn("bool relay_applied", power)
+        self.assertNotIn("relay_generation", power)
 
     def test_break_uses_software_arm_state(self):
         main_h = (ROOT / "app/inc/main.h").read_text(encoding="utf-8")
@@ -61,12 +62,12 @@ class V0103Contracts(unittest.TestCase):
         self.assertIn("drv_board_demo_load_gate_open()", main_c)
         self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV", main_c)
         self.assertIn("runtime->pending_fault_mask == 0U", main_c)
-        self.assertIn("relay_applied_generation", main_c)
         self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power_c)
-        self.assertIn("AURORA_PRECHARGE_WEAK_PV_DROOP_MV", power_c)
+        self.assertNotIn("AURORA_PRECHARGE_WEAK_PV_DROOP_MV", config)
         self.assertIn("AURORA_RELAY_HOLDOFF_TIMEOUT_MS", power_c)
         self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV          (5000L)", config)
-        self.assertIn("settings->charge_est_lifetime_energy_wh", protocol)
+        self.assertIn("settings->lifetime_energy_wh", protocol)
+        self.assertNotIn("settings->charge_est_lifetime_energy_wh", protocol)
         self.assertIn(
             "#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN) && !defined(AURORA_HOST_TEST)",
             board_driver,

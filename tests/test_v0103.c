@@ -120,12 +120,12 @@ static void test_runtime_captures_post_pwm_off_baseline(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static void test_holdoff_requires_two_new_blocks_and_matching_generation(void)
+ * Name        : static void test_holdoff_requires_two_new_blocks_and_applied_feedback(void)
  * Input       : 无
  * Output      : 无
- * Description : 验证Relay闭合需两个关波后新ADC发布，并拒绝过期Relay事务反馈。
+ * Description : 验证Relay闭合需两个关波后新ADC发布，且只有Runtime已落实GPIO后才开始100ms稳定计时。
  *---------------------------------------------------------------------------*/
-static void test_holdoff_requires_two_new_blocks_and_matching_generation(void)
+static void test_holdoff_requires_two_new_blocks_and_applied_feedback(void)
 {
     aurora_power_stage_ctx_t ctx;
     aurora_measurement_t sample = valid_sample(1U, 1U);
@@ -144,25 +144,27 @@ static void test_holdoff_requires_two_new_blocks_and_matching_generation(void)
 
     sample.sequence = 2U;
     sample.timestamp_ms = 1021U;
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false, false, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
     CHECK(command.state == AURORA_POWER_RELAY_HOLD_OFF);
     CHECK(!command.relay_enable);
 
     sample.sequence = 3U;
     sample.timestamp_ms = 1022U;
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1022U);
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false, false, AURORA_MODE_BATTERY, 48000U, 30000U, 1022U);
     CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
     CHECK(command.relay_enable);
-    CHECK(command.relay_generation != 0U);
 
     sample.timestamp_ms = 1070U;
     command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         true, command.relay_generation - 1U,
-                                         AURORA_MODE_BATTERY, 48000U, 30000U, 1070U);
+                                         false, AURORA_MODE_BATTERY, 48000U, 30000U, 1070U);
     CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
     CHECK(ctx.delta_ok_since_ms == 0U);
+
+    sample.timestamp_ms = 1071U;
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         true, AURORA_MODE_BATTERY, 48000U, 30000U, 1071U);
+    CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
+    CHECK(ctx.delta_ok_since_ms == 1071U);
 }
 
 /*---------------------------------------------------------------------------*
@@ -186,15 +188,13 @@ static void test_holdoff_sequence_wrap_zero_is_valid(void)
     ctx.relay_holdoff_sequence = 0U;
     ctx.relay_holdoff_sequence_valid = true;
 
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false, false, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
     CHECK(command.state == AURORA_POWER_RELAY_HOLD_OFF);
     CHECK(!command.relay_enable);
 
     sample.sequence = 2U;
     sample.timestamp_ms = 1022U;
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1022U);
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false, false, AURORA_MODE_BATTERY, 48000U, 30000U, 1022U);
     CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
     CHECK(command.relay_enable);
 }
@@ -218,50 +218,49 @@ static void test_holdoff_delta_loss_is_bounded(void)
     ctx.relay_holdoff_sequence = 10U;
     ctx.relay_holdoff_sequence_valid = true;
     sample.bus_voltage_mv = sample.battery_voltage_mv - AURORA_RELAY_CLOSE_DELTA_MV - 1000L;
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 600U);
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false, false, AURORA_MODE_BATTERY, 48000U, 30000U, 600U);
     CHECK(command.state == AURORA_POWER_FAULT);
     CHECK(ctx.last_failure_reason == AURORA_START_FAIL_BUS_PRECHARGE_TIMEOUT);
     CHECK(ctx.precharge_failure_count == 1U);
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static void test_weak_light_requires_voltage_droop(void)
+ * Name        : static void test_precharge_timeout_and_weak_pv_are_separate(void)
  * Input       : 无
  * Output      : 无
- * Description : 验证高Voc低Ppv不直接视为弱光；低功率需伴随明确PV压降并持续成立。
+ * Description : PV仍>=13V时30s预充失败必须算BUS路径失败；只有跌出13V才归类弱光且不耗重试。
  *---------------------------------------------------------------------------*/
-static void test_weak_light_requires_voltage_droop(void)
+static void test_precharge_timeout_and_weak_pv_are_separate(void)
 {
     aurora_power_stage_ctx_t ctx;
-    aurora_measurement_t sample = valid_sample(1U, 1U);
+    aurora_measurement_t sample = valid_sample(1U, AURORA_PRECHARGE_TIMEOUT_MS);
     aurora_mppt_output_t mppt = {0};
     aurora_charge_output_t charger = {0};
     aurora_power_command_t command;
+
     aurora_power_stage_init(&ctx, 0U);
     ctx.state = AURORA_POWER_PRECHARGE;
     ctx.state_since_ms = 0U;
-    ctx.precharge_pv_entry_mv = 16000;
-    ctx.precharge_pv_min_mv = 16000;
-    ctx.precharge_bus_start_mv = 30000;
-    ctx.precharge_bus_max_mv = 30000;
     sample.bus_voltage_mv = 30000;
-    sample.pv_power_mw = 1000;
-
-    sample.pv_voltage_mv = 15800;
-    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 2500U);
-    CHECK(command.state == AURORA_POWER_PRECHARGE);
-    CHECK(ctx.precharge_low_power_since_ms == 0U);
-
     sample.pv_voltage_mv = 14000;
+    sample.pv_power_mw = 1000;
     command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 3000U);
-    CHECK(command.state == AURORA_POWER_PRECHARGE);
+                                         false, AURORA_MODE_BATTERY, 48000U, 30000U,
+                                         AURORA_PRECHARGE_TIMEOUT_MS);
+    CHECK(command.state == AURORA_POWER_FAULT);
+    CHECK(ctx.last_failure_reason == AURORA_START_FAIL_BUS_PRECHARGE_TIMEOUT);
+    CHECK(ctx.precharge_failure_count == 1U);
+
+    aurora_power_stage_init(&ctx, 0U);
+    ctx.state = AURORA_POWER_PRECHARGE;
+    ctx.state_since_ms = 0U;
+    sample.pv_voltage_mv = AURORA_PV_START_MIN_MV - 1L;
+    sample.timestamp_ms++;
     command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
-                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U,
-                                         3000U + AURORA_PRECHARGE_WEAK_HOLD_MS);
+                                         false, AURORA_MODE_BATTERY, 48000U, 30000U,
+                                         sample.timestamp_ms);
     CHECK(command.state == AURORA_POWER_WAIT_PV);
+    CHECK(ctx.last_failure_reason == AURORA_START_FAIL_PV_WEAK);
     CHECK(ctx.precharge_failure_count == 0U);
 }
 
@@ -282,7 +281,6 @@ static void test_demo_low_residual_bus_and_gate_path(void)
     runtime.app.sample.bus_voltage_mv = AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV + 1L;
     runtime.app.power_command.state = AURORA_POWER_DEMO_RELAY_SETTLE;
     runtime.app.power_command.relay_enable = true;
-    runtime.app.power_command.relay_generation = 1U;
     aurora_runtime_poll(&runtime);
     CHECK(!runtime.relay_applied);
     CHECK(!mock_relay());
@@ -291,7 +289,6 @@ static void test_demo_low_residual_bus_and_gate_path(void)
     runtime.app.sample.timestamp_ms = drv_time_now_ms();
     aurora_runtime_poll(&runtime);
     CHECK(runtime.relay_applied);
-    CHECK(runtime.relay_applied_generation == 1U);
     CHECK(mock_relay());
 }
 
@@ -352,12 +349,12 @@ static void test_stale_energy_and_adc_timebase(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static void test_legacy_energy_fields_keep_charge_semantics(void)
+ * Name        : static void test_legacy_energy_fields_keep_v0102_pv_semantics(void)
  * Input       : 无
  * Output      : 无
- * Description : 验证旧30字节布局不变，daily/lifetime字段继续表达电池侧ESTIMATED充电量。
+ * Description : 验证旧30字节布局与v0.10.2 PV发电量语义均保持不变；charge_est继续作为内部独立账本。
  *---------------------------------------------------------------------------*/
-static void test_legacy_energy_fields_keep_charge_semantics(void)
+static void test_legacy_energy_fields_keep_v0102_pv_semantics(void)
 {
     aurora_protocol_frame_t frame;
     aurora_measurement_t sample = valid_sample(1U, 1U);
@@ -368,13 +365,13 @@ static void test_legacy_energy_fields_keep_charge_semantics(void)
     settings.charge_est_daily_energy_wh = 33U;
     settings.charge_est_lifetime_energy_wh = 44U;
     aurora_protocol_fill_telemetry_ex(&frame, 1U, &sample, AURORA_CHARGE_CC, true, 0U, &settings);
-    CHECK(frame.data[4] == 33U);
+    CHECK(frame.data[4] == 111U);
     CHECK(frame.data[5] == 0U);
-    CHECK(frame.data[15] == 44U);
+    CHECK(frame.data[15] == 222U);
     CHECK(frame.data[16] == 0U);
     CHECK(frame.data[17] == 0U);
     CHECK(frame.data[18] == 0U);
-    CHECK(frame.data[20] == 33U);
+    CHECK(frame.data[20] == 111U);
     CHECK(frame.data[21] == 0U);
 }
 
@@ -388,14 +385,14 @@ int main(void)
 {
     test_break_uses_software_arm_state();
     test_runtime_captures_post_pwm_off_baseline();
-    test_holdoff_requires_two_new_blocks_and_matching_generation();
+    test_holdoff_requires_two_new_blocks_and_applied_feedback();
     test_holdoff_sequence_wrap_zero_is_valid();
     test_holdoff_delta_loss_is_bounded();
-    test_weak_light_requires_voltage_droop();
+    test_precharge_timeout_and_weak_pv_are_separate();
     test_demo_low_residual_bus_and_gate_path();
     test_pending_fault_keeps_break_latched();
     test_stale_energy_and_adc_timebase();
-    test_legacy_energy_fields_keep_charge_semantics();
+    test_legacy_energy_fields_keep_v0102_pv_semantics();
     printf("Aurora v0.10.3 reviewed closeout tests: %u assertions passed.\n", g_assertions);
     return 0;
 }

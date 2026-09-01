@@ -22,13 +22,11 @@ typedef struct
     uint32_t demo_no_load_since_ms;                  /* Demo持续无负载证据起点。 */
     uint32_t selected_start_delay_ms;                /* 本次1~10s或15s启动等待。 */
     uint32_t dynamic_start_delay_ms;                 /* >15V启动的自适应1~10s延时。 */
-    uint32_t relay_generation;                       // 当前Relay闭合事务代次，0保留为无事务。
     uint32_t relay_holdoff_sequence;                 // Runtime确认物理关PWM时记录的ADC发布序号。
-    uint32_t precharge_low_power_since_ms;           // 低功率且PV明显压降的连续起点。
-    int32_t precharge_pv_entry_mv;                   // 本轮PRECHARGE入口PV电压，mV。
-    int32_t precharge_pv_min_mv;                     // 本轮PRECHARGE最低PV电压，mV。
-    int32_t precharge_bus_start_mv;                  // 本轮PRECHARGE入口BST_U，mV。
-    int32_t precharge_bus_max_mv;                    // 本轮PRECHARGE最高BST_U，mV。
+    int32_t precharge_pv_entry_mv;                   // PRECHARGE入口PV电压，仅诊断，等待G8台架冻结规则。
+    int32_t precharge_pv_min_mv;                     // PRECHARGE最低PV电压，仅诊断。
+    int32_t precharge_bus_start_mv;                  // PRECHARGE入口BST_U，仅诊断。
+    int32_t precharge_bus_max_mv;                    // PRECHARGE最高BST_U，仅诊断。
     int32_t bat_stability_min_mv;                    /* 10s窗口BAT_U最小值。 */
     int32_t bat_stability_max_mv;                    /* 10s窗口BAT_U最大值。 */
     uint16_t duty_q15;                               /* 最近一次物理占空比命令。 */
@@ -64,11 +62,10 @@ aurora_power_command_t aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx,
                                                   bool zero_cal_ready,
                                                   bool zero_cal_failed,
                                                   bool relay_applied,
-                                                  uint32_t relay_applied_generation,
                                                   aurora_operating_mode_t operating_mode,
                                                   uint32_t demo_target_voltage_mv,
                                                   uint32_t demo_power_limit_mw,
-                                                  uint32_t now_ms); // 支持Battery/Demo和Relay代次反馈的扩展入口
+                                                  uint32_t now_ms); /* Battery/Demo扩展入口；Relay执行反馈使用单一bool。 */
 
 #ifdef __cplusplus
 }
