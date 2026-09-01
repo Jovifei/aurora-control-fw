@@ -1,0 +1,25 @@
+name: v0.10.3 plan converge temporary
+
+on:
+  push:
+    branches:
+      - codex/v0.10.3-safety-handshake-closeout
+
+permissions:
+  contents: write
+
+jobs:
+  converge:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v0.10.3-safety-handshake-closeout
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Apply approved v0.10.3 scope convergence and verify
+        run: python tools/_v0103_plan_converge.py
