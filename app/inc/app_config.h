@@ -127,7 +127,7 @@
 /* BST_U必须先由Boost充到与BAT_U压差<=1.5V，并连续稳定1s，才允许进入关波放能。 */
 #define AURORA_RELAY_CLOSE_DELTA_MV                 (1500L)
 #define AURORA_RELAY_DELTA_HOLD_MS                  (1000U)
-/* 关PWM后沿用现有20ms故障放能窗口，并等待至少一份更新的ADC快照。 */
+/* 关PWM后沿用现有20ms故障放能窗口，并至少跨两个新的完整DMA发布代次。 */
 #define AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)
 // 至少跨过两个完整DMA发布代次，避免接受横跨关PWM边沿的混合采样块。
 #define AURORA_RELAY_POST_OFF_MIN_BLOCKS            (2U)
@@ -143,10 +143,6 @@
 #define AURORA_BAT_STABILITY_MAX_SPAN_MV            (2000L)
 /* 预充超过30s仍无法满足压差条件，判本次启动失败。 */
 #define AURORA_PRECHARGE_TIMEOUT_MS                 (30000U)
-// 低功率必须同时伴随明显PV压降并持续2s，才归类为真实弱光。
-#define AURORA_PRECHARGE_WEAK_POWER_MW              (3000U)
-#define AURORA_PRECHARGE_WEAK_PV_DROOP_MV           (1000L)
-#define AURORA_PRECHARGE_WEAK_HOLD_MS               (2000U)
 /* BST_U相对BAT_U向上过冲超过该值，立即停止预充并锁存BUS过压。 */
 #define AURORA_BUS_RELATIVE_OVERSHOOT_MV            (2500L)
 /* 绝对母线保护以当前目标加裕量为主，并受现有26:1量程的保守软件上限约束。 */

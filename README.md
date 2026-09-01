@@ -132,6 +132,6 @@ PRODUCTION BUILD POWER GATES STILL LOCKED
 OTA/IAP OUT OF SCOPE
 ```
 
-本版本不修改3A CC、12A PV限流和BST_U分压BOM，也不新增OTA/IAP代码。旧30字节遥测**布局不变**；daily/lifetime能量字段恢复120W兼容的电池侧充电量语义，当前硬件无BAT_I，因此该值明确为ESTIMATED。
+本版本不修改3A CC、12A PV限流和BST_U分压BOM，也不新增OTA/IAP代码。旧30字节遥测**布局与v0.10.2 PV能量字段语义均保持不变**；`charge_est_*`继续作为Flash v3内部独立估算账本，后续如需对外提供应使用新资源或明确版本化协议。
 
 当前`BOARD_GATE_*`与`BOARD_POWER_OUTPUT_ALLOWED`是最终验收证据门，不作为低压Bring-up的临时使能开关。当前生产配置本身不会直接解锁Relay/PWM；低压验证应按`docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md`使用独立受限Bring-up构建，只开放当前阶段所需的最小能力，不能提前把尚未验收的最终Gate置1。

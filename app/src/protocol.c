@@ -418,7 +418,7 @@ void aurora_protocol_fill_telemetry_ex(aurora_protocol_frame_t *frame, uint32_t 
     put_u16_le(&frame->data[TELEMETRY_OFFSET_PV_CURRENT],
                (uint16_t)((sample->pv_current_ma > 0) ? sample->pv_current_ma / 10 : 0));
     put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_0],
-               (uint16_t)settings->charge_est_daily_energy_wh);
+               (uint16_t)settings->daily_energy_wh);
     put_u16_le(&frame->data[TELEMETRY_OFFSET_BAT_VOLTAGE],
                (uint16_t)((sample->battery_voltage_mv > 0) ? sample->battery_voltage_mv / 10 : 0));
     put_u16_le(
@@ -435,10 +435,10 @@ void aurora_protocol_fill_telemetry_ex(aurora_protocol_frame_t *frame, uint32_t 
     frame->data[TELEMETRY_OFFSET_CHARGE_STAGE] = stage;
     frame->data[TELEMETRY_OFFSET_CHARGING] = actual_power_transfer ? 1U : 0U;
     put_u32_le(&frame->data[TELEMETRY_OFFSET_LIFETIME_ENERGY],
-               settings->charge_est_lifetime_energy_wh);
+               settings->lifetime_energy_wh);
     frame->data[TELEMETRY_OFFSET_MOS_TEMP] = (uint8_t)(sample->mos_temp_dC / 10);
     put_u16_le(&frame->data[TELEMETRY_OFFSET_DAILY_ENERGY_1],
-               (uint16_t)settings->charge_est_daily_energy_wh);
+               (uint16_t)settings->daily_energy_wh);
     frame->data[TELEMETRY_OFFSET_FAULT] = legacy_fault_code(fault_mask);
     frame->data[TELEMETRY_OFFSET_FW_MAJOR] = AURORA_FW_VERSION_MAJOR;
     frame->data[TELEMETRY_OFFSET_FW_MINOR] = AURORA_FW_VERSION_MINOR;
