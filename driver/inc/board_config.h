@@ -142,6 +142,11 @@
 /* 双页Journal B页地址。 */
 #define BOARD_FLASH_PAGE_B_ADDRESS                  (0x0000FE00UL)
 
+/*
+ * 以下BOARD_GATE_*与BOARD_POWER_OUTPUT_ALLOWED是最终验收证据门，不是Bring-up阶段使能开关。
+ * 低压/分阶段台架必须使用独立受限Bring-up构建，只开放当阶段最小能力；
+ * 禁止为了“能跑台架”提前把尚未完成的最终验收Gate置1。
+ */
 /* PinMap已经人工复核。 */
 #define BOARD_GATE_PINMAP_REVIEWED                  (1U)
 /* COMP路由/极性尚未完成实板强制触发验收。 */

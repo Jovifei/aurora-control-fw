@@ -69,6 +69,13 @@ static void enter_state(aurora_power_stage_ctx_t *ctx, aurora_power_state_t stat
     ctx->demo_probe_since_ms = 0U;
     ctx->demo_no_load_since_ms = 0U;
 
+    if (state == AURORA_POWER_RELAY_HOLD_OFF)
+    {
+        /* 0是32位ADC发布序号的合法回绕值；有效性必须由独立标志表示。 */
+        ctx->relay_holdoff_sequence = 0U;
+        ctx->relay_holdoff_sequence_valid = false;
+    }
+
     if ((state != AURORA_POWER_PRECHARGE) && (state != AURORA_POWER_RUN) &&
         (state != AURORA_POWER_DEMO_PROBE) && (state != AURORA_POWER_DEMO_RUN))
     {
@@ -617,7 +624,6 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
                 ctx->duty_q15 = 0U;
                 ctx->power_integral = 0LL;
                 ctx->relay_closed = false;
-                ctx->relay_holdoff_sequence = 0U;
                 enter_state(ctx, AURORA_POWER_RELAY_HOLD_OFF, now_ms);
                 break;
             }
@@ -655,7 +661,7 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         }
 
         // Runtime在物理关PWM后写入基准；至少跨两个发布代次，排除横跨关波边沿的混合块。
-        if ((ctx->relay_holdoff_sequence == 0U) ||
+        if (!ctx->relay_holdoff_sequence_valid ||
             (elapsed_ms(now_ms, ctx->state_since_ms) < AURORA_RELAY_PWM_OFF_DECAY_MS) ||
             ((uint32_t)(sample->sequence - ctx->relay_holdoff_sequence) <
              AURORA_RELAY_POST_OFF_MIN_BLOCKS))
@@ -863,7 +869,6 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         else
         {
             /* 先进入共享关波放能状态；Demo闭合条件不复用Battery均压判据。 */
-            ctx->relay_holdoff_sequence = 0U;
             enter_state(ctx, AURORA_POWER_RELAY_HOLD_OFF, now_ms);
         }
         break;

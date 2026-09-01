@@ -39,10 +39,11 @@ typedef struct
     uint8_t relay_failure_count;                     /* Relay闭合后二次压差失败轮数。 */
     uint8_t bat_stability_failure_count;             /* BAT_U稳定窗口失败轮数。 */
     bool relay_closed;                               /* 软件期望继电器状态。 */
+    bool relay_holdoff_sequence_valid;               // true表示Runtime已在物理关PWM后捕获基准；sequence=0同样合法。
     bool startup_success_recorded;                   /* 本轮成功后只减少一次启动延时。 */
     bool startup_locked;                             /* 有限重试耗尽或严重过压后锁存。 */
     bool demo_load_confirmed;                        /* Demo探测得到持续负载证据。 */
-    uint8_t state_reserved[3];                       /* 显式补齐结构尾部。 */
+    uint8_t state_reserved[2];                       /* 显式补齐结构尾部。 */
 } aurora_power_stage_ctx_t;
 
 void aurora_power_stage_init(aurora_power_stage_ctx_t *ctx, uint32_t now_ms);

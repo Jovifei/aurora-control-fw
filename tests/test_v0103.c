@@ -103,15 +103,18 @@ static void test_runtime_captures_post_pwm_off_baseline(void)
     aurora_runtime_t runtime;
     mock_reset();
     CHECK(aurora_runtime_init(&runtime));
-    runtime.app.sample = valid_sample(9U, 0U);
+    /* 模拟32位ADC发布序号恰好回绕到0；0不能再被当成“未捕获”哨兵。 */
+    runtime.app.sample = valid_sample(0U, 0U);
     runtime.app.power_stage.state = AURORA_POWER_RELAY_HOLD_OFF;
-    runtime.app.power_stage.relay_holdoff_sequence = 0U;
+    runtime.app.power_stage.relay_holdoff_sequence = 123U;
+    runtime.app.power_stage.relay_holdoff_sequence_valid = false;
     runtime.app.power_command.state = AURORA_POWER_RELAY_HOLD_OFF;
     runtime.app.power_command.pwm_enable = false;
     runtime.app.power_command.relay_enable = false;
     aurora_runtime_poll(&runtime);
     CHECK(runtime.relay_holdoff_baseline_captured);
-    CHECK(runtime.app.power_stage.relay_holdoff_sequence == 9U);
+    CHECK(runtime.app.power_stage.relay_holdoff_sequence_valid);
+    CHECK(runtime.app.power_stage.relay_holdoff_sequence == 0U);
     CHECK(!mock_pwm_active());
     CHECK(!mock_relay());
 }
@@ -137,6 +140,7 @@ static void test_holdoff_requires_two_new_blocks_and_matching_generation(void)
     ctx.state = AURORA_POWER_RELAY_HOLD_OFF;
     ctx.state_since_ms = 1000U;
     ctx.relay_holdoff_sequence = 1U;
+    ctx.relay_holdoff_sequence_valid = true;
 
     sample.sequence = 2U;
     sample.timestamp_ms = 1021U;
@@ -162,6 +166,40 @@ static void test_holdoff_requires_two_new_blocks_and_matching_generation(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static void test_holdoff_sequence_wrap_zero_is_valid(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证关波基准恰好为sequence=0时仍按无符号回绕等待两个新DMA块，不会永久卡死。
+ *---------------------------------------------------------------------------*/
+static void test_holdoff_sequence_wrap_zero_is_valid(void)
+{
+    aurora_power_stage_ctx_t ctx;
+    aurora_measurement_t sample = valid_sample(1U, 1021U);
+    aurora_mppt_output_t mppt = {0};
+    aurora_charge_output_t charger = {0};
+    aurora_power_command_t command;
+
+    charger.voltage_target_mv = 50000U;
+    aurora_power_stage_init(&ctx, 0U);
+    ctx.state = AURORA_POWER_RELAY_HOLD_OFF;
+    ctx.state_since_ms = 1000U;
+    ctx.relay_holdoff_sequence = 0U;
+    ctx.relay_holdoff_sequence_valid = true;
+
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
+    CHECK(command.state == AURORA_POWER_RELAY_HOLD_OFF);
+    CHECK(!command.relay_enable);
+
+    sample.sequence = 2U;
+    sample.timestamp_ms = 1022U;
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 1022U);
+    CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
+    CHECK(command.relay_enable);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void test_holdoff_delta_loss_is_bounded(void)
  * Input       : 无
  * Output      : 无
@@ -178,6 +216,7 @@ static void test_holdoff_delta_loss_is_bounded(void)
     ctx.state = AURORA_POWER_RELAY_HOLD_OFF;
     ctx.state_since_ms = 0U;
     ctx.relay_holdoff_sequence = 10U;
+    ctx.relay_holdoff_sequence_valid = true;
     sample.bus_voltage_mv = sample.battery_voltage_mv - AURORA_RELAY_CLOSE_DELTA_MV - 1000L;
     command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
                                          false, 0U, AURORA_MODE_BATTERY, 48000U, 30000U, 600U);
@@ -350,6 +389,7 @@ int main(void)
     test_break_uses_software_arm_state();
     test_runtime_captures_post_pwm_off_baseline();
     test_holdoff_requires_two_new_blocks_and_matching_generation();
+    test_holdoff_sequence_wrap_zero_is_valid();
     test_holdoff_delta_loss_is_bounded();
     test_weak_light_requires_voltage_droop();
     test_demo_low_residual_bus_and_gate_path();

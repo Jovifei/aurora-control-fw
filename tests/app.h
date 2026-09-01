@@ -28,6 +28,7 @@ aurora_test_power_stage_step(aurora_power_stage_ctx_t *ctx,
         aurora_measurement_t fresh = *sample;
         // 历史夹具没有Runtime，这里显式模拟“物理关PWM后记录基准”的生产握手。
         ctx->relay_holdoff_sequence = sample->sequence;
+        ctx->relay_holdoff_sequence_valid = true;
         ctx->state_since_ms = now_ms;
         fresh.sequence += AURORA_RELAY_POST_OFF_MIN_BLOCKS;
         fresh.timestamp_ms = now_ms + AURORA_RELAY_PWM_OFF_DECAY_MS;

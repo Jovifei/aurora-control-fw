@@ -376,6 +376,7 @@ static void apply_power_command(aurora_runtime_t *runtime)
         if (!runtime->relay_holdoff_baseline_captured)
         {
             runtime->app.power_stage.relay_holdoff_sequence = runtime->app.sample.sequence;
+            runtime->app.power_stage.relay_holdoff_sequence_valid = true;
             runtime->app.power_stage.state_since_ms = drv_time_now_ms();
             runtime->relay_holdoff_baseline_captured = true;
         }

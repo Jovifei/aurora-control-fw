@@ -50,6 +50,8 @@ storage      片内Flash双页Journal、CRC和Commit Marker
 - [Keil AC6修复与发布边界](docs/43-v0.10.2-Keil_AC6修复与发布边界.md)
 - [v0.10.2功能移植审核](docs/44-v0.10.2-120W到300W功能移植审核报告.md)
 - [v0.10.3安全握手与快故障修复](docs/45-v0.10.3-安全握手与快故障修复说明.md)
+- [新工程分阶段移植与板级验证路线](docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md)
+- [v0.10.3审阅问题补强与验证记录](docs/47-v0.10.3-审阅问题补强与验证记录.md)
 
 ## 本地验证
 
@@ -69,7 +71,7 @@ Clang AddressSanitizer + UBSan
 Cortex-M0+ target syntax check
 ```
 
-本地若缺少某个编译器，脚本会在输出中明确显示 `skip`；正式发布结论应以工具齐全的 GitHub Actions、Keil ARM Compiler 6日志和MAP审计共同为准。Host通过不等于功率板验收通过。
+`run_checks.py`采用fail-closed：缺少CMake、Ninja、GCC或Clang任一必需工具时直接失败，不输出完整PASS结论。正式发布结论仍必须结合工具齐全的GitHub Actions、Keil ARM Compiler 6日志和MAP审计；Host通过不等于功率板验收通过。
 
 MCU弱光启动遵循：最小安全GPIO → PVD Ready → VDD连续稳定 → `aurora_runtime_init()`。PVD Reset/IRQ保持关闭；供电不足时只等待，不创建APP故障或启动IWDT复位循环。
 
@@ -125,9 +127,11 @@ v0.10.3 只能定义为：
 
 ```text
 SOFTWARE SAFETY FIXED
-READY FOR LOW-VOLTAGE BENCH
-POWER GATES STILL LOCKED
+SOFTWARE CANDIDATE FOR BRING-UP INTEGRATION
+PRODUCTION BUILD POWER GATES STILL LOCKED
 OTA/IAP OUT OF SCOPE
 ```
 
-本版本不修改3A CC、12A PV限流、BST_U分压BOM或既有30字节遥测字段语义；也不新增OTA/IAP代码。
+本版本不修改3A CC、12A PV限流和BST_U分压BOM，也不新增OTA/IAP代码。旧30字节遥测**布局不变**；daily/lifetime能量字段恢复120W兼容的电池侧充电量语义，当前硬件无BAT_I，因此该值明确为ESTIMATED。
+
+当前`BOARD_GATE_*`与`BOARD_POWER_OUTPUT_ALLOWED`是最终验收证据门，不作为低压Bring-up的临时使能开关。当前生产配置本身不会直接解锁Relay/PWM；低压验证应按`docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md`使用独立受限Bring-up构建，只开放当前阶段所需的最小能力，不能提前把尚未验收的最终Gate置1。

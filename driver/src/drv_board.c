@@ -2,6 +2,10 @@
 
 #include "board_config.h"
 
+#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN) && !defined(AURORA_HOST_TEST)
+#error "AURORA_HOST_TEST_POWER_GATES_OPEN is forbidden in target firmware"
+#endif
+
 /*---------------------------------------------------------------------------*
  * Name        : static void clear_calibration(
  *               drv_board_adc_calibration_t *calibration)
@@ -96,7 +100,7 @@ bool drv_board_get_adc_calibration(size_t channel, drv_board_adc_calibration_t *
  *---------------------------------------------------------------------------*/
 bool drv_board_power_gate_open(void)
 {
-#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
+#if defined(AURORA_HOST_TEST) && defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
     // 仅v0.10.3端到端Host目标使用；生产目标仍完全由BOARD_GATE_*与总门控制。
     return true;
 #else
@@ -114,7 +118,7 @@ bool drv_board_power_gate_open(void)
  *---------------------------------------------------------------------------*/
 bool drv_board_demo_load_gate_open(void)
 {
-#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
+#if defined(AURORA_HOST_TEST) && defined(AURORA_HOST_TEST_POWER_GATES_OPEN)
     return true;
 #else
     return (BOARD_GATE_DEMO_LOAD_VALIDATED != 0U);

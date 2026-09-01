@@ -13,6 +13,8 @@ class V0103Contracts(unittest.TestCase):
         self.assertIn("AURORA_POWER_RELAY_HOLD_OFF", types)
         self.assertIn("AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)", config)
         self.assertIn("relay_holdoff_sequence", power)
+        self.assertIn("relay_holdoff_sequence_valid", power)
+        self.assertIn("!ctx->relay_holdoff_sequence_valid", power)
         self.assertIn("AURORA_RELAY_POST_OFF_MIN_BLOCKS", power)
         self.assertIn("sample->sequence - ctx->relay_holdoff_sequence", power)
         self.assertIn("bool relay_applied", power)
@@ -54,6 +56,7 @@ class V0103Contracts(unittest.TestCase):
         power_c = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")
         config = (ROOT / "app/inc/app_config.h").read_text(encoding="utf-8")
         protocol = (ROOT / "app/src/protocol.c").read_text(encoding="utf-8")
+        board_driver = (ROOT / "driver/src/drv_board.c").read_text(encoding="utf-8")
         self.assertIn("drv_board_power_gate_open()", main_c)
         self.assertIn("drv_board_demo_load_gate_open()", main_c)
         self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV", main_c)
@@ -64,6 +67,14 @@ class V0103Contracts(unittest.TestCase):
         self.assertIn("AURORA_RELAY_HOLDOFF_TIMEOUT_MS", power_c)
         self.assertIn("AURORA_DEMO_RELAY_CLOSE_BUS_MAX_MV          (5000L)", config)
         self.assertIn("settings->charge_est_lifetime_energy_wh", protocol)
+        self.assertIn(
+            "#if defined(AURORA_HOST_TEST_POWER_GATES_OPEN) && !defined(AURORA_HOST_TEST)",
+            board_driver,
+        )
+        self.assertIn(
+            "#if defined(AURORA_HOST_TEST) && defined(AURORA_HOST_TEST_POWER_GATES_OPEN)",
+            board_driver,
+        )
 
 
 if __name__ == "__main__":
