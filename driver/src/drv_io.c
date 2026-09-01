@@ -50,8 +50,8 @@ void drv_io_init(void)
      * 功率相关GPIO必须先于定时器/比较器初始化进入安全态。
      * PA15稍后才切换到ATMR复用，杜绝外设初始化期间出现未知脉冲。
      */
-    gpio_output(GPIOA, DDL_GPIO_PIN_15, false); /* GLC：默认低，Q1/Q2关闭 */
-    gpio_output(GPIOA, DDL_GPIO_PIN_14, false); /* GHC：本板未使用，永久低 */
+    gpio_output(GPIOA, DDL_GPIO_PIN_15, false); /* GLC：默认低，随后由BSP_PWM_Init切到ATMR_CH0 */
+    gpio_output(GPIOA, DDL_GPIO_PIN_14, false); /* GHC：原理图无高侧MOS，永久GPIO低 */
     gpio_output(GPIOA, DDL_GPIO_PIN_13, false); /* RELAY：默认断开 */
     gpio_output(GPIOA, DDL_GPIO_PIN_12, false); /* LINK：默认关闭 */
 

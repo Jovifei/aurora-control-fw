@@ -7,6 +7,7 @@ extern "C" {
 
 /* Cortex-M0+目标中断入口；只做Driver应答、快速关波和事件投递。 */
 void SysTick_Handler(void);
+void ADC_IRQHandler(void);
 void DMA_CH1_IRQHandler(void);
 void COMP0_IRQHandler(void);
 void COMP1_2_3_IRQHandler(void);

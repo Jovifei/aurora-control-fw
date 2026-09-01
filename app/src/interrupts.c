@@ -45,6 +45,17 @@ void SysTick_Handler(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : void ADC_IRQHandler(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 官方Application同名入口，转发至BSP_ADC_IRQHandler处理OVR。
+ *---------------------------------------------------------------------------*/
+void ADC_IRQHandler(void)
+{
+    BSP_ADC_IRQHandler();
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : void DMA_CH1_IRQHandler(void)
  * Input       : 无
  * Output      : 无

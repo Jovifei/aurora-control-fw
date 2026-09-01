@@ -300,6 +300,7 @@ void drv_irq_configure_priorities(void)
     NVIC_SetPriority(COMP1_2_3_IRQn, 0U);
     NVIC_SetPriority(ATMR_BRK_UP_TRG_COM_IRQn, 0U);
     NVIC_SetPriority(DMA_CH1_IRQn, 1U);
+    NVIC_SetPriority(ADC_IRQn, 2U);
     NVIC_SetPriority(SysTick_IRQn, 2U);
     NVIC_SetPriority(USART_IRQn, 3U);
 }

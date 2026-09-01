@@ -9,6 +9,15 @@
 /* 驱动故障位：PV输入快速过流。 */
 #define DRV_FAULT_PV_OCP                            (1UL << 1)
 
+void BSP_OPA_Init(void);
+void BSP_COMP_Init(void);
+uint32_t BSP_COMP_IsActive(void);
+uint32_t BSP_COMP2_IsActive(void);
+void BSP_COMP0_IRQHandler(void);
+void BSP_COMP2_IRQHandler(void);
+uint32_t BSP_COMP0_GetEventCount(void);
+uint32_t BSP_COMP2_GetEventCount(void);
+
 bool drv_comp_init(void);
 uint32_t drv_comp_fault_mask(void);
 void drv_comp_irq_ack(void);

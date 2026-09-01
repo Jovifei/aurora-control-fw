@@ -2,25 +2,26 @@
 
 ## 1. COMP0、门极驱动EN和Break
 
-最新版原理图把PB10/AF7的`COMP0_OUT`连接到门极驱动器U6 EN，并有外部上拉。当前软件按以下安全语义实现：
+最新版原理图把PB10/AF7的`COMP0_OUT`连接到门极驱动器U6 EN，并有R55=4.7k上拉。COMP0正端是VDD分压参考，负端是OPA0_O（MOS电流），因此**比较器本身不需要再软件反相**：
 
 ```text
-无故障：COMP0_O高，U6允许响应GLC
-MOS过流：COMP0_O低，U6 EN立即禁止
+无故障：IN+ > IN-，COMP0_O高，U6允许响应GLC
+MOS过流：OPA0_O升高，IN- > IN+，COMP0_O低，U6 EN立即禁止
                  └→ ATMR低有效Break同时清MOE
 ```
 
-PB10配置为开漏复用，COMP0输出反相、下降沿中断，ATMR Break配置低有效。这个极性关系仍必须通过拉动比较器输入并同时测量`COMP0_O、GLC、Vgs`确认；验证前`BOARD_GATE_COMP_ROUTE_VALIDATED`保持0。
+PB10配置为开漏复用，与R55上拉配合只能拉低EN。COMP2同样是PB6参考、PB2接OPA1_O，过流输出为低。这个极性关系仍必须通过拉动比较器输入并同时测量`COMP0_O、GLC、Vgs`确认；验证前`BOARD_GATE_COMP_ROUTE_VALIDATED`保持0。
 
 COMP2用于PV快速过流，走最高优先级比较器中断；ISR第一动作仍是关MOE和通道。
 
 ## 2. PWM周期边界
 
+- PA15/GLC配置为ATMR CH0单路PWM，经U6驱动并联低侧MOS；PA14/GHC保持GPIO低；
 - ARR和CCR均启用preload；
 - 运行期只写shadow，禁止软件UG；
 - 新Duty在下一个自然UEV才生效；
 - 首次发波先写0，等待自然UEV确认，再arm；
-- AOE关闭，Break解除后不会自动恢复；
+- AOE关闭（与官方示例AutomaticOutput ENABLE不同），Break解除后不会自动恢复；
 - Break锁存清除和重新arm是两个独立操作。
 
 ## 3. 运行期Break必须依据故障前的软件授权分类

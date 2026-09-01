@@ -1,88 +1,103 @@
 #include "driver.h"
 
 #include "board_config.h"
-#include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_adc.h"
+#include "g32f031_ddl_bus.h"
 #include "g32f031_ddl_dma.h"
 #include "g32f031_ddl_gpio.h"
+#include "g32f031_ddl_gtmr.h"
 #include "g32f031_ddl_rcc.h"
 
 static uint16_t g_adc_dma[2][DRV_ADC_BLOCK_WORDS];
+static volatile uint16_t s_adc_raw[DRV_ADC_CHANNEL_COUNT];
+static volatile uint16_t s_adc_average[DRV_ADC_CHANNEL_COUNT];
+static volatile uint32_t s_sequence_count;
 
 /*---------------------------------------------------------------------------*
- * Name        : static void configure_analog_pin(GPIO_TypeDef *port, uint32_t pin)
- * Input       : port - GPIO端口；pin - GPIO引脚位图
+ * Name        : static void publish_block_averages(uint8_t block_index)
+ * Input       : block_index - 已完成的DMA半缓冲
  * Output      : 无
- * Description : 把指定GPIO配置为模拟输入，关闭上下拉并锁定配置。
+ * Description : 从完整块提取末次原始值和16次均值，供官方GetRaw/GetAverage读取。
  *---------------------------------------------------------------------------*/
-static void configure_analog_pin(GPIO_TypeDef *port, uint32_t pin)
+static void publish_block_averages(uint8_t block_index)
 {
-    DDL_GPIO_InitTypeDef config = {0U};
-    config.Pin = pin;
-    config.Mode = DDL_GPIO_MODE_ANALOG;
-    config.Drive = DDL_GPIO_DRIVE_LOW;
-    config.OutputType = DDL_GPIO_OUTPUT_PUSHPULL;
-    config.InputEnable = DDL_GPIO_INPUT_ENABLE;
-    config.Pull = DDL_GPIO_PULL_NO;
-    config.Alternate = DDL_GPIO_AF_0;
-    DDL_GPIO_LockKey(port, DDL_GPIO_LOCK_DISABLE);
-    DDL_GPIO_Init(port, &config);
-    DDL_GPIO_LockKey(port, DDL_GPIO_LOCK_ENABLE);
+    const uint16_t *block = g_adc_dma[block_index];
+    uint32_t channel;
+    uint32_t scan;
+    uint32_t last = (uint32_t)(DRV_ADC_SCANS_PER_BLOCK - 1U) * DRV_ADC_CHANNEL_COUNT;
+
+    for (channel = 0U; channel < DRV_ADC_CHANNEL_COUNT; ++channel)
+    {
+        uint32_t sum = 0U;
+        s_adc_raw[channel] = block[last + channel];
+        for (scan = 0U; scan < DRV_ADC_SCANS_PER_BLOCK; ++scan)
+        {
+            sum += block[(scan * DRV_ADC_CHANNEL_COUNT) + channel];
+        }
+        s_adc_average[channel] = (uint16_t)(sum / DRV_ADC_SCANS_PER_BLOCK);
+    }
+    s_sequence_count += DRV_ADC_SCANS_PER_BLOCK;
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : bool drv_adc_init(void)
+ * Name        : void BSP_ADC_Init(void)
  * Input       : 无
- * Output      : true表示ADC规则组、DMA和中断初始化成功；false表示关键配置失败
- * Description :
- * 配置六通道ADC规则序列、ATMR中点触发、DMA双半缓冲和HT/TC/TE中断；任一关键初始化失败即返回。
+ * Output      : 无
+ * Description : 按官方Application配置模拟GPIO、GTMR TRGO 10kHz触发和64周期采样。
+ *               产品仍保留六通道规则组与DMA双半缓冲，不改用五通道EOS轮询。
  *---------------------------------------------------------------------------*/
-bool drv_adc_init(void)
+void BSP_ADC_Init(void)
 {
-    DDL_ADC_InitTypeDef adc = {0U};
-    DDL_ADC_REG_InitTypeDef regular = {0U};
-    DDL_DMA_InitTypeDef dma = {0U};
+    DDL_GPIO_InitTypeDef gpio = {0};
+    DDL_ADC_InitTypeDef adc = {0};
+    DDL_ADC_REG_InitTypeDef reg = {0};
+    DDL_GTMR_InitTypeDef timer = {0};
+    DDL_DMA_InitTypeDef dma = {0};
 
     DDL_RCC_Unlock();
     DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA | DDL_AHB_GRP1_PERIPH_GPIOB |
                              DDL_AHB_GRP1_PERIPH_DMA);
-    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_ADC);
+    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_ADC | DDL_APB_GRP1_PERIPH_GTMR);
     DDL_RCC_SetADCClkDiv(DDL_RCC_ADCCLK_DIVISION_4);
     DDL_RCC_Lock();
 
-    configure_analog_pin(GPIOA, DDL_GPIO_PIN_8 | DDL_GPIO_PIN_9);
-    configure_analog_pin(GPIOB, DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 | DDL_GPIO_PIN_5 | DDL_GPIO_PIN_12);
+    /* GPIO：官方五路模拟输入，另保留PB1作为BST_U第六通道 */
+    gpio.Mode = DDL_GPIO_MODE_ANALOG;
+    gpio.Drive = DDL_GPIO_DRIVE_LOW;
+    gpio.OutputType = DDL_GPIO_OUTPUT_PUSHPULL;
+    gpio.InputEnable = DDL_GPIO_INPUT_ENABLE;
+    gpio.Pull = DDL_GPIO_PULL_NO;
+    gpio.Alternate = DDL_GPIO_AF_0;
+    gpio.Pin = DDL_GPIO_PIN_8 | DDL_GPIO_PIN_9;
+    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_DISABLE);
+    DDL_GPIO_Init(GPIOA, &gpio);
+    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_ENABLE);
+    gpio.Pin = DDL_GPIO_PIN_0 | DDL_GPIO_PIN_1 | DDL_GPIO_PIN_5 | DDL_GPIO_PIN_12;
+    DDL_GPIO_LockKey(GPIOB, DDL_GPIO_LOCK_DISABLE);
+    DDL_GPIO_Init(GPIOB, &gpio);
+    DDL_GPIO_LockKey(GPIOB, DDL_GPIO_LOCK_ENABLE);
 
     DDL_ADC_Enable(ADC);
     {
         uint32_t timeout = BOARD_ADC_READY_TIMEOUT_LOOPS;
-        while (!DDL_ADC_IsActiveFlag_RDY(ADC) && (timeout > 0U))
+        while ((DDL_ADC_IsActiveFlag_RDY(ADC) == 0U) && (timeout > 0U))
         {
             timeout--;
-        }
-        if (timeout == 0U)
-        {
-            return false;
         }
     }
 
     adc.DataAlignment = DDL_ADC_ALIGNMENT_RIGHT;
-    if (DDL_ADC_Init(ADC, &adc) != SUCCESS)
-    {
-        return false;
-    }
+    (void)DDL_ADC_Init(ADC, &adc);
 
-    regular.TriggerSource = DDL_ADC_REG_TRIG_EXTSEL_ATMR_TRGO0;
-    regular.TriggerEdge = DDL_ADC_REG_TRIG_EXTEDGE_FALLING;
-    regular.SequencerLength = DDL_ADC_REG_SEQ_SCAN_ENABLE_6RANKS;
-    regular.SequencerDiscont = DDL_ADC_REG_SEQ_DISCONT_DISABLE;
-    regular.ContinuousMode = DDL_ADC_REG_CONV_SINGLE;
-    regular.DMATransfer = DDL_ADC_REG_DMA_TRANSFER_CIRCULAR_MODE;
-    regular.Overrun = DDL_ADC_OVERMODE_KEEP;
-    if (DDL_ADC_REG_Init(ADC, &regular) != SUCCESS)
-    {
-        return false;
-    }
+    /* 官方：GTMR TRGO上升沿触发；产品保留六通道DMA */
+    reg.TriggerSource = DDL_ADC_REG_TRIG_EXTSEL_GTMR_TRGO;
+    reg.TriggerEdge = DDL_ADC_REG_TRIG_EXTEDGE_RISING;
+    reg.SequencerLength = DDL_ADC_REG_SEQ_SCAN_ENABLE_6RANKS;
+    reg.SequencerDiscont = DDL_ADC_REG_SEQ_DISCONT_DISABLE;
+    reg.ContinuousMode = DDL_ADC_REG_CONV_SINGLE;
+    reg.DMATransfer = DDL_ADC_REG_DMA_TRANSFER_CIRCULAR_MODE;
+    reg.Overrun = DDL_ADC_OVERMODE_KEEP;
+    (void)DDL_ADC_REG_Init(ADC, &reg);
 
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_1, DDL_ADC_CHANNEL_1);
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_2, DDL_ADC_CHANNEL_2);
@@ -90,17 +105,12 @@ bool drv_adc_init(void)
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_4, DDL_ADC_CHANNEL_4);
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_5, DDL_ADC_CHANNEL_5);
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_6, DDL_ADC_CHANNEL_6);
-    /*
-     * 六通道必须在20us PWM周期内完成。ATMR_CH3在周期中点产生下降沿，
-     * 前四路使用8周期采样、两路NTC使用16周期采样；最终用示波器/ADC OVR
-     * 计数确认转换预算，禁止恢复成32/64周期后仍按50kHz触发。
-     */
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_1, DDL_ADC_SAMPLINGTIME_8_SCYCLES);
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_2, DDL_ADC_SAMPLINGTIME_8_SCYCLES);
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_3, DDL_ADC_SAMPLINGTIME_8_SCYCLES);
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_4, DDL_ADC_SAMPLINGTIME_8_SCYCLES);
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_5, DDL_ADC_SAMPLINGTIME_16_SCYCLES);
-    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_6, DDL_ADC_SAMPLINGTIME_16_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_1, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_2, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_3, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_4, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_5, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
+    DDL_ADC_SetChannelSamplingTime(ADC, DDL_ADC_CHANNEL_6, DDL_ADC_SAMPLINGTIME_64_SCYCLES);
 
     dma.Peripheral = DDL_DMA_PERIPHERAL_0;
     dma.Direction = DDL_DMA_DIRECTION_PERIPH_TO_MEMORY;
@@ -115,23 +125,115 @@ bool drv_adc_init(void)
     dma.Priority = DDL_DMA_PRIORITY_HIGH;
     dma.FIFOMode = DDL_DMA_FIFOMODE_DISABLE;
     DDL_DMA_DisableChannel(DMA, DDL_DMA_CHANNEL_1);
-    if (DDL_DMA_Init(DMA, DDL_DMA_CHANNEL_1, &dma) != SUCCESS)
-    {
-        return false;
-    }
+    (void)DDL_DMA_Init(DMA, DDL_DMA_CHANNEL_1, &dma);
     DMA->IFCLR = 0xFFFFFFFFUL;
     DDL_DMA_EnableIT_HT(DMA, DDL_DMA_CHANNEL_1);
     DDL_DMA_EnableIT_TC(DMA, DDL_DMA_CHANNEL_1);
     DDL_DMA_EnableIT_TE(DMA, DDL_DMA_CHANNEL_1);
     NVIC_EnableIRQ(DMA_CH1_IRQn);
-    return true;
+
+    DDL_ADC_ClearFlag_EOS(ADC);
+    DDL_ADC_ClearFlag_OVR(ADC);
+    DDL_ADC_EnableIT_OVR(ADC);
+    NVIC_SetPriority(ADC_IRQn, 2U);
+    NVIC_EnableIRQ(ADC_IRQn);
+
+    /* GTMR：10kHz TRGO，不启动计数 */
+    timer.Prescaler = (uint16_t)BOARD_ADC_GTMR_PRESCALER;
+    timer.CounterMode = DDL_GTMR_COUNTERMODE_UP;
+    timer.Autoreload = BOARD_ADC_GTMR_AUTORELOAD;
+    timer.ClockDivision = DDL_GTMR_CLOCKDIVISION_DIV1;
+    (void)DDL_GTMR_Init(GTMR, &timer);
+    DDL_GTMR_SetTriggerOutput(GTMR, DDL_GTMR_TRGO_UPDATE);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_ADC_Start(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 启动GTMR计数，开始以TRGO周期触发ADC规则组扫描。
+ *---------------------------------------------------------------------------*/
+void BSP_ADC_Start(void)
+{
+    DDL_GTMR_EnableCounter(GTMR);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_ADC_IRQHandler(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : ADC OVR入口。数据路径由DMA搬运；此处只清除过载标志。
+ *---------------------------------------------------------------------------*/
+void BSP_ADC_IRQHandler(void)
+{
+    if (DDL_ADC_IsActiveFlag_OVR(ADC) != 0U)
+    {
+        DDL_ADC_ClearFlag_OVR(ADC);
+    }
+    if (DDL_ADC_IsActiveFlag_EOS(ADC) != 0U)
+    {
+        DDL_ADC_ClearFlag_EOS(ADC);
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint16_t BSP_ADC_GetRaw(uint32_t index)
+ * Input       : index - 通道索引
+ * Output      : 最近一次完整扫描的原始值；越界返回0
+ * Description : 主循环读取DMA发布块中的最后一次扫描值。
+ *---------------------------------------------------------------------------*/
+uint16_t BSP_ADC_GetRaw(uint32_t index)
+{
+    return (index < DRV_ADC_CHANNEL_COUNT) ? s_adc_raw[index] : 0U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint16_t BSP_ADC_GetAverage(uint32_t index)
+ * Input       : index - 通道索引
+ * Output      : 最近一块16次扫描均值；越界返回0
+ * Description : 与官方Application同名接口；产品测量仍以DMA块为准。
+ *---------------------------------------------------------------------------*/
+uint16_t BSP_ADC_GetAverage(uint32_t index)
+{
+    return (index < DRV_ADC_CHANNEL_COUNT) ? s_adc_average[index] : 0U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t BSP_ADC_GetSequenceCount(void)
+ * Input       : 无
+ * Output      : 累计完成的扫描序列次数
+ * Description : 每完成一次规则组扫描递增，由DMA块完成次数推算。
+ *---------------------------------------------------------------------------*/
+uint32_t BSP_ADC_GetSequenceCount(void)
+{
+    return s_sequence_count;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_adc_init(void)
+ * Input       : 无
+ * Output      : true表示ADC规则组、DMA和GTMR初始化完成
+ * Description : 调用官方BSP_ADC_Init。
+ *---------------------------------------------------------------------------*/
+bool drv_adc_init(void)
+{
+    uint32_t index;
+
+    for (index = 0U; index < DRV_ADC_CHANNEL_COUNT; ++index)
+    {
+        s_adc_raw[index] = 0U;
+        s_adc_average[index] = 0U;
+    }
+    s_sequence_count = 0U;
+    BSP_ADC_Init();
+    return DDL_ADC_IsActiveFlag_RDY(ADC) != 0U;
 }
 
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_adc_start(void)
  * Input       : 无
  * Output      : true表示DMA通道已使能且ADC规则组已武装
- * Description : 先使能DMA，再武装ADC规则组等待ATMR外部触发。
+ * Description : 先使能DMA，再武装ADC规则组，最后启动官方GTMR触发源。
  *---------------------------------------------------------------------------*/
 bool drv_adc_start(void)
 {
@@ -141,8 +243,8 @@ bool drv_adc_start(void)
         return false;
     }
 
-    /* 外部触发模式也必须先StartConversion，作用是武装规则组等待ATMR TRGO。 */
     DDL_ADC_StartConversion(ADC);
+    BSP_ADC_Start();
     return true;
 }
 
@@ -172,7 +274,7 @@ size_t drv_adc_block_words(void)
  * Name        : uint8_t drv_adc_dma_irq_ack(void)
  * Input       : 无
  * Output      : DRV_ADC_IRQ_*完成/错误位图
- * Description : 读取并清除DMA半传输、全传输和传输错误标志，返回供ISR发布的完成位图。
+ * Description : 读取并清除DMA半传输、全传输和传输错误标志。
  *---------------------------------------------------------------------------*/
 uint8_t drv_adc_dma_irq_ack(void)
 {
@@ -180,11 +282,13 @@ uint8_t drv_adc_dma_irq_ack(void)
     if (DDL_DMA_IsActiveFlag_HT1(DMA) != 0U)
     {
         DDL_DMA_ClearFlag_HT1(DMA);
+        publish_block_averages(0U);
         completed |= DRV_ADC_IRQ_BLOCK0;
     }
     if (DDL_DMA_IsActiveFlag_TC1(DMA) != 0U)
     {
         DDL_DMA_ClearFlag_TC1(DMA);
+        publish_block_averages(1U);
         completed |= DRV_ADC_IRQ_BLOCK1;
     }
     if (DDL_DMA_IsActiveFlag_TE1(DMA) != 0U)

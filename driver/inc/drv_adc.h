@@ -19,6 +19,13 @@
 /* ADC DMA结果位：传输错误。 */
 #define DRV_ADC_IRQ_ERROR                           (1U << 2)
 
+void BSP_ADC_Init(void);
+void BSP_ADC_Start(void);
+uint16_t BSP_ADC_GetRaw(uint32_t channel_index);
+uint16_t BSP_ADC_GetAverage(uint32_t channel_index);
+void BSP_ADC_IRQHandler(void);
+uint32_t BSP_ADC_GetSequenceCount(void);
+
 bool drv_adc_init(void);
 bool drv_adc_start(void);
 const uint16_t *drv_adc_completed_block(uint8_t block_index);

@@ -28,7 +28,7 @@
 #define BOARD_PIN_GLC_PORT                          ('A')
 #define BOARD_PIN_GLC_NUMBER                        (15U)
 #define BOARD_PIN_GLC_AF                            (3U)
-/* PA14 / GHC：当前异步硬件不使用，必须固定安全态。 */
+/* PA14 / GHC：原理图有网络，Boost为二极管续流，高侧MOS未装配，保持GPIO低。 */
 #define BOARD_PIN_GHC_UNUSED_PORT                   ('A')
 #define BOARD_PIN_GHC_UNUSED_NUMBER                 (14U)
 /* PA13：继电器控制。 */
@@ -120,8 +120,12 @@
 
 /* ATMR计数时钟，Hz。 */
 #define BOARD_PWM_TIMER_CLOCK_HZ                    (64000000UL)
+/* PWM载波频率，Hz；与官方Application APP_PWM_FREQUENCY_HZ一致。 */
+#define BOARD_PWM_FREQUENCY_HZ                      (50000UL)
 /* 50kHz对应周期计数值。 */
 #define BOARD_PWM_PERIOD_COUNTS                     (1280U)
+/* 单路GLC无互补通道，死区为0。 */
+#define BOARD_PWM_DEADTIME_TICKS                    (0U)
 /* 使用ATMR通道0输出GLC。 */
 #define BOARD_PWM_CHANNEL                           (0U)
 /* GLC高电平使低侧MOS导通。 */
@@ -134,6 +138,10 @@
 #define BOARD_PWM_AUTOMATIC_OUTPUT                  (0U)
 /* 最大物理占空比Q15，约90%；最终以低压台架为准。 */
 #define BOARD_PWM_MAX_DUTY_Q15                      (29491U)
+/* GTMR触发ADC的预分频；64MHz/(63+1)=1MHz计数。 */
+#define BOARD_ADC_GTMR_PRESCALER                    (63U)
+/* GTMR自动重载；1MHz/(99+1)=10kHz，对应官方APP_ADC_TRIGGER_US=100。 */
+#define BOARD_ADC_GTMR_AUTORELOAD                   (99U)
 
 /* G32F031内部Flash物理擦除页大小，字节。 */
 #define BOARD_FLASH_PAGE_SIZE                       (512UL)

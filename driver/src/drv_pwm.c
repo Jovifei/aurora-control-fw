@@ -28,107 +28,186 @@ static uint32_t duty_to_compare(uint16_t duty_q15)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : static void connect_glc_to_atmr(void)
+ * Name        : void BSP_PWM_Init(void)
  * Input       : 无
  * Output      : 无
- * Description : 在定时器、零CCR和MOE均处于安全状态后，把PA15/GLC切换到ATMR_CH0复用。
+ * Description : 配置PA15/ATMR_CH0为GLC发波路径、COMP0低有效Break。
+ *               原理图为二极管Boost，不使能PA14/CH0N。默认0 Duty、关闭MOE和AO。
  *---------------------------------------------------------------------------*/
-static void connect_glc_to_atmr(void)
+void BSP_PWM_Init(void)
 {
-    DDL_GPIO_InitTypeDef gpio = {0U};
+    DDL_GPIO_InitTypeDef gpio = {0};
+    DDL_ATMR_InitTypeDef tim = {0};
+    DDL_ATMR_OC_InitTypeDef oc = {0};
+    DDL_ATMR_BDT_InitTypeDef bdt = {0};
 
-    /* 此前PA15一直保持GPIO低；只有定时器、CCR=0、MOE=0均就绪后才接入复用。 */
+    /* 时钟使能 */
+    DDL_RCC_Unlock();
+    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_ATMR);
+    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA);
+    DDL_RCC_Lock();
+
+    /* GPIO：仅PA15=CH0/GLC；PA14/GHC保持drv_io的GPIO低 */
     gpio.Pin = DDL_GPIO_PIN_15;
     gpio.Mode = DDL_GPIO_MODE_ALTERNATE;
     gpio.Drive = DDL_GPIO_DRIVE_HIGH;
     gpio.OutputType = DDL_GPIO_OUTPUT_PUSHPULL;
-    gpio.InputEnable = DDL_GPIO_INPUT_DISABLE;
-    gpio.Pull = DDL_GPIO_PULL_DOWN;
+    gpio.Pull = DDL_GPIO_PULL_NO;
     gpio.Alternate = DDL_GPIO_AF_3;
     DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_DISABLE);
     DDL_GPIO_Init(GPIOA, &gpio);
     DDL_GPIO_SetAF3Pin_10_15(GPIOA, DDL_GPIO_PIN_15, DDL_GPIO_AF3_ATMR_CH0);
     DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_ENABLE);
-}
 
-/*---------------------------------------------------------------------------*
- * Name        : bool drv_pwm_init(void)
- * Input       : 无
- * Output      : true表示ATMR、preload和Break初始化成功；false表示关键配置失败
- * Description : 配置50 kHz单路异步Boost
- * PWM、CCR/ARR预装载、ADC触发、低有效Break和一次性零CCR装载；默认MOE与通道关闭。
- *---------------------------------------------------------------------------*/
-bool drv_pwm_init(void)
-{
-    DDL_ATMR_InitTypeDef timer;
-    DDL_ATMR_OC_InitTypeDef output;
-    DDL_ATMR_BDT_InitTypeDef break_deadtime;
-
-    DDL_RCC_Unlock();
-    DDL_AHB_GRP1_EnableClock(DDL_AHB_GRP1_PERIPH_GPIOA);
-    DDL_APB_GRP1_EnableClock(DDL_APB_GRP1_PERIPH_ATMR);
-    DDL_RCC_Lock();
-
-    DDL_ATMR_StructInit(&timer);
-    timer.Prescaler = 0U;
-    timer.CounterMode = DDL_ATMR_COUNTERMODE_UP;
-    timer.Autoreload = BOARD_PWM_PERIOD_COUNTS - 1U;
-    timer.ClockDivision = DDL_ATMR_CLOCKDIVISION_DIV1;
-    timer.RepetitionCounter = 0U;
-    if (DDL_ATMR_Init(ATMR, &timer) != SUCCESS)
-    {
-        return false;
-    }
+    /* 时基：50kHz载波 */
+    tim.Prescaler = 0U;
+    tim.CounterMode = DDL_ATMR_COUNTERMODE_UP;
+    tim.Autoreload = BOARD_PWM_PERIOD_COUNTS - 1U;
+    tim.ClockDivision = DDL_ATMR_CLOCKDIVISION_DIV1;
+    tim.RepetitionCounter = 0U;
+    (void)DDL_ATMR_Init(ATMR, &tim);
     DDL_ATMR_EnableARRPreload(ATMR);
 
-    DDL_ATMR_OC_StructInit(&output);
-    output.OCMode = DDL_ATMR_OCMODE_PWM1;
-    output.OCState = ENABLE;
-    output.OCNState = DISABLE;
-    output.OCPolarity = DDL_ATMR_OCPOLARITY_HIGH;
-    output.OCNPolarity = DDL_ATMR_OCPOLARITY_HIGH;
-    output.OCIdleState = DDL_ATMR_OCIDLESTATE_LOW;
-    output.OCNIdleState = DDL_ATMR_OCIDLESTATE_LOW;
-    output.CompareValue = 0U;
-    if (DDL_ATMR_OC_Init(ATMR, DDL_ATMR_CHANNEL_CH0, &output) != SUCCESS)
-    {
-        return false;
-    }
+    /* 单路PWM1，初始比较值为0 */
+    oc.OCMode = DDL_ATMR_OCMODE_PWM1;
+    oc.OCState = DDL_ATMR_OCSTATE_ENABLE;
+    oc.OCNState = DDL_ATMR_OCSTATE_DISABLE;
+    oc.CompareValue = 0U;
+    oc.OCPolarity = DDL_ATMR_OCPOLARITY_HIGH;
+    oc.OCNPolarity = DDL_ATMR_OCPOLARITY_HIGH;
+    oc.OCIdleState = DDL_ATMR_OCIDLESTATE_LOW;
+    oc.OCNIdleState = DDL_ATMR_OCIDLESTATE_LOW;
+    (void)DDL_ATMR_OC_Init(ATMR, DDL_ATMR_CHANNEL_CH0, &oc);
     DDL_ATMR_OC_EnablePreload(ATMR, DDL_ATMR_CHANNEL_CH0);
 
-    /* CH3只生成固定ADC采样触发点，不连接外部引脚。 */
-    output.OCState = DISABLE;
-    output.CompareValue = BOARD_PWM_PERIOD_COUNTS / 2U;
-    (void)DDL_ATMR_OC_Init(ATMR, DDL_ATMR_CHANNEL_CH3, &output);
-    DDL_ATMR_SetTriggerOutputMode0(ATMR, DDL_ATMR_TRGO_OC3REF);
-
-    DDL_ATMR_BDT_StructInit(&break_deadtime);
-    break_deadtime.BreakState = DDL_ATMR_BREAK_ENABLE;
-    break_deadtime.BreakPolarity = DDL_ATMR_BREAK_POLARITY_LOW;
-    break_deadtime.AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE;
-    break_deadtime.DeadTime0 = 0U;
-    break_deadtime.DeadTime1 = 0U;
-    if (DDL_ATMR_BDT_Init(ATMR, &break_deadtime) != SUCCESS)
-    {
-        return false;
-    }
-
-    /* MOS瞬时过流COMP0作为硬件Break；COMP2通过最高优先级中断补充输入过流保护。 */
+    /* COMP0 Break低有效；Automatic Output关闭 */
+    DDL_ATMR_BDT_StructInit(&bdt);
+    bdt.DeadTime0 = BOARD_PWM_DEADTIME_TICKS;
+    bdt.DeadTime1 = BOARD_PWM_DEADTIME_TICKS;
+    bdt.BreakState = DDL_ATMR_BREAK_ENABLE;
+    bdt.BreakPolarity = DDL_ATMR_BREAK_POLARITY_LOW;
+    bdt.AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE;
+    (void)DDL_ATMR_BDT_Init(ATMR, &bdt);
     DDL_ATMR_SetBreakSource(ATMR, DDL_ATMR_BREAKSOURCE_COMP0);
     DDL_ATMR_DisableAutomaticOutput(ATMR);
     DDL_ATMR_DisableAllOutputs(ATMR);
     DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0N);
+    DDL_ATMR_ClearFlag_BRK(ATMR);
 
     /* 初始化阶段只允许这一次软件UEV，把0占空比装入活动寄存器。 */
     DDL_ATMR_GenerateEvent_UPDATE(ATMR);
     DDL_ATMR_ClearFlag_UPDATE(ATMR);
     DDL_ATMR_DisableIT_UPDATE(ATMR);
     DDL_ATMR_EnableIT_BRK(ATMR);
+}
 
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_PWM_Start(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 启动ATMR计数并打开MOE；调用前必须已装载0 Duty且Break源无效。
+ *---------------------------------------------------------------------------*/
+void BSP_PWM_Start(void)
+{
+    DDL_ATMR_EnableCounter(ATMR);
+    DDL_ATMR_CC_EnableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    DDL_ATMR_EnableAllOutputs(ATMR);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_PWM_Stop(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 关闭MOE与互补通道。计数器保持运行，供零CCR自然UEV握手使用。
+ *---------------------------------------------------------------------------*/
+void BSP_PWM_Stop(void)
+{
+    DDL_ATMR_DisableAllOutputs(ATMR);
+    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0N);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_PWM_SetDuty(uint16_t permille)
+ * Input       : permille - 占空比千分比（0~1000）
+ * Output      : 无
+ * Description : 按当前ARR周期设置CH0比较值，超过1000则限幅；写入shadow等待自然UEV。
+ *---------------------------------------------------------------------------*/
+void BSP_PWM_SetDuty(uint16_t permille)
+{
+    uint32_t period = DDL_ATMR_GetAutoReload(ATMR) + 1U;
+
+    if (permille > 1000U)
+    {
+        permille = 1000U;
+    }
+    DDL_ATMR_OC_SetCompareCH0(ATMR, ((uint32_t)permille * period) / 1000U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_PWM_SetFrequency(uint32_t frequency_hz)
+ * Input       : frequency_hz - 目标PWM频率（Hz），0或超过SYSCLK则忽略
+ * Output      : 无
+ * Description : 修改ARR并保持当前占空比比例不变。
+ *---------------------------------------------------------------------------*/
+void BSP_PWM_SetFrequency(uint32_t frequency_hz)
+{
+    uint32_t old_period;
+    uint32_t old_compare;
+    uint32_t new_period;
+
+    if ((frequency_hz == 0U) || (frequency_hz > BOARD_PWM_TIMER_CLOCK_HZ))
+    {
+        return;
+    }
+    old_period = DDL_ATMR_GetAutoReload(ATMR) + 1U;
+    old_compare = DDL_ATMR_OC_GetCompareCH0(ATMR);
+    new_period = BOARD_PWM_TIMER_CLOCK_HZ / frequency_hz;
+    DDL_ATMR_SetAutoReload(ATMR, new_period - 1U);
+    DDL_ATMR_OC_SetCompareCH0(ATMR, (old_compare * new_period) / old_period);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void BSP_PWM_SetComplementary(uint32_t enable)
+ * Input       : enable - 非0使能CH0N，0仅CH0
+ * Output      : 无
+ * Description : 控制互补通道CH0N输出使能。
+ *---------------------------------------------------------------------------*/
+void BSP_PWM_SetComplementary(uint32_t enable)
+{
+    if (enable != 0U)
+    {
+        DDL_ATMR_CC_EnableChannel(ATMR, DDL_ATMR_CHANNEL_CH0N);
+    }
+    else
+    {
+        DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0N);
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t BSP_PWM_IsBraked(void)
+ * Input       : 无
+ * Output      : 非0表示ATMR Break标志已置位
+ * Description : 读取ATMR Break锁存标志，与官方Application同名接口一致。
+ *---------------------------------------------------------------------------*/
+uint32_t BSP_PWM_IsBraked(void)
+{
+    return DDL_ATMR_IsActiveFlag_BRK(ATMR);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_pwm_init(void)
+ * Input       : 无
+ * Output      : true表示ATMR、preload和Break初始化成功
+ * Description : 调用官方BSP_PWM_Init，再启动计数器并打开Break向量；默认MOE关闭。
+ *---------------------------------------------------------------------------*/
+bool drv_pwm_init(void)
+{
     g_staged_sequence = 0U;
     g_applied_sequence = 0U;
-
-    connect_glc_to_atmr();
+    BSP_PWM_Init();
     DDL_ATMR_EnableCounter(ATMR);
     NVIC_EnableIRQ(ATMR_BRK_UP_TRG_COM_IRQn);
     return true;
@@ -138,13 +217,11 @@ bool drv_pwm_init(void)
  * Name        : void drv_pwm_force_off_isr(void)
  * Input       : 无
  * Output      : 无
- * Description : 在快速故障ISR中以恒定时间关闭MOE和CH0通道，不做复杂清理。
+ * Description : 在快速故障ISR中以恒定时间关闭MOE和互补通道，不做复杂清理。
  *---------------------------------------------------------------------------*/
 void drv_pwm_force_off_isr(void)
 {
-    /* 只做恒定时间的硬关断；Break中断屏蔽由Break ISR单独负责。 */
-    DDL_ATMR_DisableAllOutputs(ATMR);
-    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    BSP_PWM_Stop();
 }
 
 /*---------------------------------------------------------------------------*
@@ -155,7 +232,6 @@ void drv_pwm_force_off_isr(void)
  *---------------------------------------------------------------------------*/
 void drv_pwm_quiesce_break_irq_isr(void)
 {
-    /* Break标志保持锁存，只暂时禁止重复进入，防止持续故障造成中断风暴。 */
     DDL_ATMR_DisableIT_BRK(ATMR);
 }
 
@@ -168,8 +244,7 @@ void drv_pwm_quiesce_break_irq_isr(void)
 void drv_pwm_disarm(void)
 {
     aurora_irq_state_t irq = drv_irq_save();
-    DDL_ATMR_DisableAllOutputs(ATMR);
-    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    BSP_PWM_Stop();
     drv_irq_restore(irq);
 }
 
@@ -183,8 +258,7 @@ bool drv_pwm_prepare_arm_zero(uint32_t *sequence)
 {
     aurora_irq_state_t irq = drv_irq_save();
 
-    DDL_ATMR_DisableAllOutputs(ATMR);
-    DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+    BSP_PWM_Stop();
     DDL_ATMR_OC_SetCompareCH0(ATMR, 0U);
     g_staged_sequence++;
     DDL_ATMR_ClearFlag_UPDATE(ATMR);
@@ -223,7 +297,7 @@ bool drv_pwm_stage_duty(uint16_t duty_q15, uint32_t *sequence)
  * Name        : bool drv_pwm_arm(void)
  * Input       : 无
  * Output      : true表示PWM已安全放行，false表示Break或复核失败
- * Description : 在Break源和锁存均清除时启用CH0与MOE，并在写入后立即复核故障，阻断TOCTOU竞态。
+ * Description : 在Break源和锁存均清除时启用互补通道与MOE，并在写入后立即复核故障。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_arm(void)
 {
@@ -232,14 +306,11 @@ bool drv_pwm_arm(void)
         return false;
     }
 
-    DDL_ATMR_CC_EnableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
-    DDL_ATMR_EnableAllOutputs(ATMR);
+    BSP_PWM_Start();
 
-    /* 防止检查与MOE写入之间发生故障：写入后必须立即复核。 */
     if (drv_pwm_break_source_active() || drv_pwm_break_latched())
     {
-        DDL_ATMR_DisableAllOutputs(ATMR);
-        DDL_ATMR_CC_DisableChannel(ATMR, DDL_ATMR_CHANNEL_CH0);
+        BSP_PWM_Stop();
         return false;
     }
     return DDL_ATMR_IsEnabledAllOutputs(ATMR) != 0U;
@@ -248,7 +319,7 @@ bool drv_pwm_arm(void)
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_pwm_output_active(void)
  * Input       : 无
- * Output      : true表示MOE和PWM通道当前均处于输出状态
+ * Output      : true表示MOE当前处于输出状态
  * Description : 读取ATMR主输出是否处于使能状态。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_output_active(void)
@@ -260,11 +331,11 @@ bool drv_pwm_output_active(void)
  * Name        : bool drv_pwm_break_source_active(void)
  * Input       : 无
  * Output      : true表示外部Break源当前仍处于有效电平
- * Description : 读取MOS与PV快速比较器的实时故障电平，判断任一硬件Break源是否有效。
+ * Description : MOS/PV过流比较器均为低有效：电流接负端，过流时输出拉低。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_break_source_active(void)
 {
-    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) || (DDL_COMP1_ReadOutputLevel(COMP2) != 0U);
+    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) || (DDL_COMP1_ReadOutputLevel(COMP2) == 0U);
 }
 
 /*---------------------------------------------------------------------------*
@@ -275,7 +346,7 @@ bool drv_pwm_break_source_active(void)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_break_latched(void)
 {
-    return DDL_ATMR_IsActiveFlag_BRK(ATMR) != 0U;
+    return BSP_PWM_IsBraked() != 0U;
 }
 
 /*---------------------------------------------------------------------------*
