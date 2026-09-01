@@ -19,7 +19,10 @@ jobs:
           fetch-depth: 0
 
       - name: 执行最终收尾修复
-        run: python tools/_v0103_final_closeout.py
+        shell: bash
+        run: |
+          python tools/_v0103_final_closeout.py
+          python tools/_v0103_final_test_compat.py
 
       - name: 验证完整质量门
         shell: bash
