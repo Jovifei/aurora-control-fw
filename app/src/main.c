@@ -980,7 +980,6 @@ void aurora_app_init(aurora_app_t *app, const aurora_measurement_calibration_t *
 void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settings_t *settings,
                                uint32_t now_ms)
 {
-    aurora_persistent_settings_t sanitized;
     bool demo_power_clamped;
 
     if ((app == NULL) || (settings == NULL) || (settings->chemistry >= AURORA_CHEM_COUNT) ||
@@ -993,19 +992,22 @@ void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settin
         return;
     }
 
-    sanitized = *settings;
-    demo_power_clamped = sanitized.demo_power_limit_mw > AURORA_DEMO_HARD_POWER_CAP_MW;
+    demo_power_clamped = settings->demo_power_limit_mw > AURORA_DEMO_HARD_POWER_CAP_MW;
+    if (settings != &app->storage.settings)
+    {
+        app->storage.settings = *settings;
+    }
     if (demo_power_clamped)
     {
-        sanitized.demo_power_limit_mw = AURORA_DEMO_HARD_POWER_CAP_MW;
+        app->storage.settings.demo_power_limit_mw = AURORA_DEMO_HARD_POWER_CAP_MW;
     }
 
-    app->storage.settings = sanitized;
     aurora_storage_energy_history_update(&app->storage.settings);
     app->energy_accumulator_mw_ms = app->storage.settings.pv_energy_remainder_mw_ms;
     app->charge_energy_accumulator_mw_ms = app->storage.settings.charge_est_energy_remainder_mw_ms;
     app->last_energy_history_ms = now_ms;
-    aurora_charger_init(&app->charger, sanitized.chemistry, sanitized.pack, now_ms);
+    aurora_charger_init(&app->charger, app->storage.settings.chemistry, app->storage.settings.pack,
+                        now_ms);
     aurora_mppt_reset(&app->mppt);
     aurora_power_stage_init(&app->power_stage, now_ms);
     aurora_measurement_zero_cal_reset(&app->measurement);
@@ -1344,11 +1346,10 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
         if ((frame->data_length == AURORA_PROTOCOL_SETTING_DATA_LENGTH) &&
             (frame->data[0] < AURORA_CHEM_COUNT) && (frame->data[1] < AURORA_PACK_COUNT))
         {
-            aurora_persistent_settings_t settings = app->storage.settings;
-            settings.chemistry = (aurora_battery_chem_t)frame->data[0];
-            settings.pack = (aurora_battery_pack_t)frame->data[1];
-            settings.settings_revision++;
-            aurora_app_apply_settings(app, &settings, now_ms);
+            app->storage.settings.chemistry = (aurora_battery_chem_t)frame->data[0];
+            app->storage.settings.pack = (aurora_battery_pack_t)frame->data[1];
+            app->storage.settings.settings_revision++;
+            aurora_app_apply_settings(app, &app->storage.settings, now_ms);
             aurora_storage_mark_dirty(&app->storage, now_ms);
             result = AURORA_PROTOCOL_RESULT_OK;
         }
@@ -1368,10 +1369,9 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
         if ((frame->data_length == AURORA_PROTOCOL_MODE_DATA_LENGTH) &&
             (frame->data[0] < AURORA_MODE_COUNT))
         {
-            aurora_persistent_settings_t settings = app->storage.settings;
-            settings.operating_mode = (aurora_operating_mode_t)frame->data[0];
-            settings.settings_revision++;
-            aurora_app_apply_settings(app, &settings, now_ms);
+            app->storage.settings.operating_mode = (aurora_operating_mode_t)frame->data[0];
+            app->storage.settings.settings_revision++;
+            aurora_app_apply_settings(app, &app->storage.settings, now_ms);
             aurora_storage_mark_dirty(&app->storage, now_ms);
             result = AURORA_PROTOCOL_RESULT_OK;
         }
@@ -1394,11 +1394,10 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
             if ((voltage_mv > 0U) && (voltage_mv <= AURORA_DEMO_MAX_TARGET_VOLTAGE_MV) &&
                 (power_mw > 0U) && (power_mw <= AURORA_DEMO_HARD_POWER_CAP_MW))
             {
-                aurora_persistent_settings_t settings = app->storage.settings;
-                settings.demo_target_voltage_mv = voltage_mv;
-                settings.demo_power_limit_mw = power_mw;
-                settings.settings_revision++;
-                aurora_app_apply_settings(app, &settings, now_ms);
+                app->storage.settings.demo_target_voltage_mv = voltage_mv;
+                app->storage.settings.demo_power_limit_mw = power_mw;
+                app->storage.settings.settings_revision++;
+                aurora_app_apply_settings(app, &app->storage.settings, now_ms);
                 aurora_storage_mark_dirty(&app->storage, now_ms);
                 result = AURORA_PROTOCOL_RESULT_OK;
             }
