@@ -322,6 +322,8 @@
 /* 主动遥测与存储。 */
 #define AURORA_TELEMETRY_PERIOD_MS                  (1000U)
 #define AURORA_STORAGE_DIRTY_HOLD_MS                (1000U)
+/* 首次Flash事务失败后最多再重试一次；再次失败则本次上电禁止继续擦写。 */
+#define AURORA_STORAGE_WRITE_RETRY_MAX              (1U)
 /* 运行中每60s提出一次能量保存请求；真正擦写仍只在PWM OFF且Relay OFF安全窗口。 */
 #define AURORA_ENERGY_PERSIST_REQUEST_MS            (60000U)
 /* 继承120W的49点累计量窗口：每30min一个快照，48个间隔构成24h。 */

@@ -57,6 +57,25 @@ extern "C" {
 #define AURORA_STORAGE_CHARGE_HISTORY_OFFSET        \
     (AURORA_STORAGE_ENERGY_HISTORY_OFFSET + \
      (AURORA_ENERGY_HISTORY_POINT_COUNT * 4U))
+/* 当前页实际编码总长度。 */
+#define AURORA_STORAGE_ENCODED_SIZE                 \
+    (AURORA_STORAGE_HEADER_SIZE + AURORA_STORAGE_PAYLOAD_SIZE)
+/* v3载荷最后一个数组的结束偏移，用于编译期验证地址表与PAYLOAD_SIZE一致。 */
+#define AURORA_STORAGE_PAYLOAD_USED_SIZE            \
+    (AURORA_STORAGE_CHARGE_HISTORY_OFFSET + (AURORA_ENERGY_HISTORY_POINT_COUNT * 4U))
+
+#if AURORA_STORAGE_PAYLOAD_USED_SIZE != AURORA_STORAGE_PAYLOAD_SIZE
+#error "Flash v3 payload layout does not match AURORA_STORAGE_PAYLOAD_SIZE"
+#endif
+#if AURORA_STORAGE_ENCODED_SIZE > AURORA_STORAGE_PAGE_SIZE
+#error "Flash v3 encoded record exceeds one physical page"
+#endif
+#if (AURORA_STORAGE_ENCODED_SIZE & 3U) != 0U
+#error "Flash v3 encoded record must remain 4-byte aligned"
+#endif
+#if (AURORA_STORAGE_COMMIT_OFFSET + 4U) > AURORA_STORAGE_HEADER_SIZE
+#error "Flash v3 Commit Marker must remain inside the fixed header"
+#endif
 
 /* v1/v2兼容字段偏移。 */
 #define AURORA_STORAGE_V2_HISTORY_COUNT_OFFSET      (2U)
@@ -76,6 +95,11 @@ typedef uint8_t aurora_storage_page_status_t;
 #define AURORA_STORAGE_PAGE_CONTENT_ERROR           ((aurora_storage_page_status_t)6U) // CRC正确但字段范围或历史单调性错误。
 #define AURORA_STORAGE_PAGE_IO_ERROR                ((aurora_storage_page_status_t)7U) // 底层Flash读取失败。
 
+/* 当前最后有效记录所在物理页；不依赖sequence奇偶推断，避免异常恢复时擦掉唯一好页。 */
+#define AURORA_STORAGE_ACTIVE_NONE                  (0U)
+#define AURORA_STORAGE_ACTIVE_PAGE_A                (1U)
+#define AURORA_STORAGE_ACTIVE_PAGE_B                (2U)
+
 /* Flash双页Journal运行状态。 */
 typedef struct
 {
@@ -84,6 +108,9 @@ typedef struct
     uint32_t dirty_since_ms;                         /* 首次变脏时间，用于合并多次写。 */
     bool dirty;                                      /* true表示RAM设置尚未写入Flash。 */
     bool repair_pending;                             /* true表示另一页需在安全窗口重建冗余。 */
+    bool write_blocked;                              /* 连续写失败超过一次重试后，本次上电禁止继续擦写。 */
+    uint8_t write_failure_count;                     /* 当前上电连续Flash事务失败次数。 */
+    uint8_t active_page;                             /* AURORA_STORAGE_ACTIVE_*，表示最后有效页。 */
     aurora_storage_page_status_t page_a_status;      /* 最近启动读取A页分类。 */
     aurora_storage_page_status_t page_b_status;      /* 最近启动读取B页分类。 */
 } aurora_storage_ctx_t;

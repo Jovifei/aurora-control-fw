@@ -143,6 +143,8 @@
 /* GTMR自动重载；1MHz/(99+1)=10kHz，对应官方APP_ADC_TRIGGER_US=100。 */
 #define BOARD_ADC_GTMR_AUTORELOAD                   (99U)
 
+/* G32F031K8T内部Flash总容量，字节。 */
+#define BOARD_FLASH_TOTAL_SIZE_BYTES                (64UL * 1024UL)
 /* G32F031内部Flash物理擦除页大小，字节。 */
 #define BOARD_FLASH_PAGE_SIZE                       (512UL)
 /* 双页Journal A页地址。 */
