@@ -36,7 +36,7 @@ protocol     旧产品UART帧兼容层
 storage      片内Flash双页Journal、CRC和Commit Marker
 ```
 
-仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。
+仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件；`tasks/`现用于G0~G15迁移任务与经验记录。
 
 ## 阅读入口
 

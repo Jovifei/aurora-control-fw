@@ -108,16 +108,19 @@ Flash v3保存：
 真正擦写必须满足：
 
 ```text
-PWM物理关闭
+PowerStage处于 OFF / WAIT_PV / NO_SUN / FAULT 稳定停机类状态
+AND 该停机状态保持至少 AURORA_STORAGE_STOP_HOLD_MS
+AND PWM物理关闭
 AND Runtime记录的Relay GPIO为OFF
 AND dirty保持至少1s
+AND PVD只读监测确认VDD仍高于资格门限
 ```
 
 运行时每增加整Wh或每60s只提出保存请求，不会为了统计数据强行中断充电或在Relay闭合时擦Flash。
 
 ## 7. 突然掉电的真实边界
 
-当前软件没有运行期PVD/LVD掉电保存窗口，也没有FRAM/MRAM。正常Battery运行中Relay可能连续闭合数小时，dirty请求会一直等待安全窗口。因此，突然完全掉电且VDD没有足够保持时间时，可能丢失：
+当前软件**故意不实现PVD/LVD掉电写Flash**，也没有FRAM/MRAM。PVD在正常启动后仅保留为无IRQ、无Reset的Flash写入veto：一旦VDD不满足资格，当前事务立即延后，绝不把欠压事件当成“最后保存”触发源。正常Battery运行中Relay可能连续闭合数小时，dirty请求会一直等待稳定停机窗口。因此，突然完全掉电且VDD没有足够保持时间时，可能丢失：
 
 ```text
 从上一次真正安全写入Flash之后的整段RAM能量增量
@@ -128,7 +131,11 @@ AND dirty保持至少1s
 v0.10.3保持正确的安全优先级：
 
 - 不在PWM或Relay活动时擦写；
-- NO_SUN、故障退出、模式切换后进入安全窗口时尽快落盘；
+- 不在START_DELAY、ZERO_CAL、PRECHARGE、Relay握手等启动/切换瞬态擦写；
+- NO_SUN、WAIT_PV、OFF或故障停机稳定后且VDD资格仍有效时落盘；
+- 不在欠压/PVD事件中做所谓“最后一次保存”；
+- 单页写失败只在**同一备用页**重试一次，成功回读前不递增已提交sequence、不改变active页；
+- 两次真实I/O/回读失败后本会话禁止继续擦写，保留上一份有效页并锁存Storage Fault；
 - 不用周期性断Relay换取数据保存。
 
 如产品要求严格掉电保存，需要增加掉电保持电容与可验证的PVD/LVD提前量，或采用FRAM/MRAM。该项继续标记为硬件/数据保持限制，不能在纯软件版本中宣称已经关闭。

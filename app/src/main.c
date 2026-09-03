@@ -607,11 +607,13 @@ static void load_storage(aurora_runtime_t *runtime)
         {
             runtime->app.storage.settings = settings_b;
             runtime->app.storage.sequence = seq_b;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_B;
         }
         else
         {
             runtime->app.storage.settings = settings_a;
             runtime->app.storage.sequence = seq_a;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_A;
         }
         aurora_app_apply_settings(&runtime->app, &runtime->app.storage.settings, now_ms);
 
@@ -627,11 +629,135 @@ static void load_storage(aurora_runtime_t *runtime)
 
     if ((status_a == AURORA_STORAGE_PAGE_ERASED) && (status_b == AURORA_STORAGE_PAGE_ERASED))
     {
+        runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
         aurora_storage_mark_dirty(&runtime->app.storage, now_ms);
         return;
     }
 
+    /* 两页均无可信记录时禁止本会话继续自动擦写，避免在未知配置上反复自愈。 */
+    runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
+    runtime->app.storage.write_inhibited = true;
     aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool storage_state_allows_write(const aurora_runtime_t *runtime)
+ * Input       : runtime - 应用运行上下文
+ * Output      : true表示当前处于稳定停机类状态
+ * Description : 只允许OFF/WAIT_PV/NO_SUN/FAULT落盘；启动、预充、Relay握手和RUN阶段一律只保留RAM dirty。
+ *---------------------------------------------------------------------------*/
+static bool storage_state_allows_write(const aurora_runtime_t *runtime)
+{
+    switch (runtime->app.power_stage.state)
+    {
+    case AURORA_POWER_OFF:
+    case AURORA_POWER_WAIT_PV:
+    case AURORA_POWER_NO_SUN:
+    case AURORA_POWER_FAULT:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static uint32_t storage_inactive_page(const aurora_storage_ctx_t *storage)
+ * Input       : storage - Journal运行状态
+ * Output      : 下一次只允许擦写的备用页地址；状态非法时返回0
+ * Description : 永远写当前可信页的另一页；无可信页时从A页开始，失败重试仍保持同一目标页。
+ *---------------------------------------------------------------------------*/
+static uint32_t storage_inactive_page(const aurora_storage_ctx_t *storage)
+{
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_PAGE_A)
+    {
+        return drv_board_flash_page_b();
+    }
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_PAGE_B)
+    {
+        return drv_board_flash_page_a();
+    }
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_NONE)
+    {
+        return drv_board_flash_page_a();
+    }
+    return 0U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static aurora_status_t storage_write_transaction(
+ *               const aurora_storage_ctx_t *staged, uint32_t target, uint8_t *page)
+ * Input       : staged - 带下一序号的待提交镜像；target - 固定备用页；page - 512字节工作缓冲
+ * Output      : OK成功；NOT_READY表示VDD失去资格需延后；INVALID/IO_ERROR表示真实事务错误
+ * Description : 擦备用页→写正文→最后Commit→整页回读CRC/内容复核；任何阶段欠压只中止，不触发欠压保存。
+ *---------------------------------------------------------------------------*/
+static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *staged,
+                                                  uint32_t target, uint8_t *page)
+{
+    aurora_persistent_settings_t verified_settings = {0};
+    uint32_t verified_sequence = 0U;
+    const uint32_t marker = AURORA_STORAGE_COMMIT_MARKER;
+    size_t used;
+
+    used = aurora_storage_encode_page(staged, page, AURORA_STORAGE_PAGE_SIZE, false);
+    if (used < AURORA_STORAGE_HEADER_SIZE)
+    {
+        return AURORA_STATUS_INVALID;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_erase_page(target))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
+                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
+                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET, &marker, sizeof(marker)))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_read(target, page, AURORA_STORAGE_PAGE_SIZE) ||
+        (aurora_storage_classify_page(page, AURORA_STORAGE_PAGE_SIZE, &verified_settings,
+                                      &verified_sequence) != AURORA_STORAGE_PAGE_VALID) ||
+        (verified_sequence != staged->sequence))
+    {
+        return AURORA_STATUS_IO_ERROR;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    return AURORA_STATUS_OK;
 }
 
 /*---------------------------------------------------------------------------*
@@ -639,51 +765,77 @@ static void load_storage(aurora_runtime_t *runtime)
  *               uint32_t now_ms)
  * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 只有PWM关闭且物理继电器断开时执行双页Journal保存，Commit Marker最后写入。
+ * Description : 只在稳定停机+Relay/PWM物理关闭+VDD资格有效时写备用页；成功回读后才切换Journal提交状态。
  *---------------------------------------------------------------------------*/
 static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
 {
     uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+    aurora_storage_ctx_t staged;
+    aurora_status_t status = AURORA_STATUS_IO_ERROR;
     uint32_t target;
-    size_t used;
+    uint8_t attempt;
 
-    if (!runtime->app.storage.dirty ||
+    if (!runtime->app.storage.dirty || runtime->app.storage.write_inhibited ||
         ((now_ms - runtime->app.storage.dirty_since_ms) < AURORA_STORAGE_DIRTY_HOLD_MS) ||
+        !storage_state_allows_write(runtime) ||
+        ((now_ms - runtime->app.power_stage.state_since_ms) < AURORA_STORAGE_STOP_HOLD_MS) ||
         drv_pwm_output_active() || runtime->relay_applied)
     {
         return;
     }
 
-    runtime->app.storage.sequence++;
-    target = ((runtime->app.storage.sequence & 1U) != 0U) ? drv_board_flash_page_a()
-                                                          : drv_board_flash_page_b();
-    used = aurora_storage_encode_page(&runtime->app.storage, page, sizeof(page), false);
-    if ((used < AURORA_STORAGE_HEADER_SIZE) || !drv_flash_erase_page(target) ||
-        !drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET) ||
-        !drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
-                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
-                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)))
+    /* 欠压/棕断只延后保存；绝不把LVD/PVD事件当成一次“最后写Flash”的触发源。 */
+    if (!drv_system_flash_supply_is_safe())
     {
+        return;
+    }
+
+    target = storage_inactive_page(&runtime->app.storage);
+    if (target == 0U)
+    {
+        runtime->app.storage.write_inhibited = true;
         aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
         return;
     }
 
-    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET,
-                           &((uint32_t){AURORA_STORAGE_COMMIT_MARKER}), sizeof(uint32_t)))
+    staged = runtime->app.storage;
+    staged.sequence = runtime->app.storage.sequence + 1U;
+
+    for (attempt = 0U; attempt < AURORA_STORAGE_WRITE_ATTEMPTS; ++attempt)
     {
-        aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
-        return;
+        status = storage_write_transaction(&staged, target, page);
+        if (status == AURORA_STATUS_OK)
+        {
+            runtime->app.storage.sequence = staged.sequence;
+            runtime->app.storage.active_page =
+                (target == drv_board_flash_page_a()) ? AURORA_STORAGE_ACTIVE_PAGE_A
+                                                     : AURORA_STORAGE_ACTIVE_PAGE_B;
+            runtime->app.storage.dirty = false;
+            runtime->app.storage.repair_pending = false;
+            if (target == drv_board_flash_page_a())
+            {
+                runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
+            }
+            else
+            {
+                runtime->app.storage.page_b_status = AURORA_STORAGE_PAGE_VALID;
+            }
+            return;
+        }
+        if (status == AURORA_STATUS_NOT_READY)
+        {
+            /* VDD资格丢失时保留旧active page和dirty，等待下一次稳定停机窗口。 */
+            return;
+        }
+        if (status == AURORA_STATUS_INVALID)
+        {
+            break;
+        }
+        /* IO_ERROR只允许在同一个target备用页上再试一次，绝不递增已提交sequence或切到active页。 */
     }
-    runtime->app.storage.dirty = false;
-    runtime->app.storage.repair_pending = false;
-    if (target == drv_board_flash_page_a())
-    {
-        runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
-    }
-    else
-    {
-        runtime->app.storage.page_b_status = AURORA_STORAGE_PAGE_VALID;
-    }
+
+    runtime->app.storage.write_inhibited = true;
+    aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
 }
 
 /*---------------------------------------------------------------------------*
