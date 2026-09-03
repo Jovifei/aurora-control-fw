@@ -1,0 +1,40 @@
+name: runtime stack closeout
+
+on:
+  push:
+    branches:
+      - codex/runtime-stack-closeout-work
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-stack-closeout]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/runtime-stack-closeout-work
+          fetch-depth: 0
+
+      - name: 应用主循环栈余量修复
+        run: python tools/_runtime_stack_closeout.py
+
+      - name: 完整质量门与目标栈预算验证
+        shell: bash
+        run: |
+          git diff --check
+          python tools/run_checks.py
+
+      - name: 清理一次性工具并提交候选树
+        shell: bash
+        run: |
+          rm -f tools/_runtime_stack_closeout.py
+          rm -f .github/workflows/runtime-stack-closeout.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+Jovifei@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "修复：释放主循环1KB栈余量并增加目标栈门禁 [runtime-stack-closeout]"
+          git push origin HEAD:codex/runtime-stack-closeout-work
