@@ -19,7 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: 应用Keil O1与双优化栈门禁
-        run: python tools/_o1_stack_lock_closeout.py
+        shell: bash
+        run: |
+          python tools/_o1_stack_lock_closeout.py
+          python - <<'PY'
+          from pathlib import Path
+          for name in [
+              'docs/48-v0.10.3-Flash安全持久化与最近三次远端提交审核.md',
+              'project/README.md',
+          ]:
+              path = Path(name)
+              path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8', newline='\n')
+          PY
 
       - name: 完整质量门验证
         shell: bash
