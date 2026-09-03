@@ -15,5 +15,8 @@ uint32_t mock_watchdog_feeds(void);
 size_t mock_uart_tx_length(void);
 bool mock_relay(void);
 uint16_t *mock_adc_block(uint8_t index);
+void mock_fail_next_flash_program(void);
+uint32_t mock_flash_erase_count(void);
+uint32_t mock_flash_program_count(void);
 
 #endif

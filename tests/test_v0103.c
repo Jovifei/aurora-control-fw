@@ -375,6 +375,150 @@ static void test_legacy_energy_fields_keep_v0102_pv_semantics(void)
     CHECK(frame.data[21] == 0U);
 }
 
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_storage_driver_rejects_out_of_bounds_and_cross_page(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证0地址、0长度和跨A/B页编程都被Driver拒绝，不能复现120W active-address写向量表失效模式。
+ *---------------------------------------------------------------------------*/
+static void test_storage_driver_rejects_out_of_bounds_and_cross_page(void)
+{
+    uint32_t words[2] = {0x12345678UL, 0xA5A5A5A5UL};
+    mock_reset();
+    CHECK(!drv_flash_program(0x00000000UL, words, sizeof(words)));
+    CHECK(!drv_flash_program(drv_board_flash_page_a(), words, 0U));
+    CHECK(!drv_flash_program(drv_board_flash_page_a() + AURORA_STORAGE_PAGE_SIZE - 4U,
+                             words, sizeof(words)));
+    CHECK(mock_flash_program_count() == 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_storage_writes_only_in_stopped_states(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证即使dirty且PWM/Relay均关闭，PRECHARGE等非停机状态也不能写Flash；WAIT_PV才允许事务落盘。
+ *---------------------------------------------------------------------------*/
+static void test_storage_writes_only_in_stopped_states(void)
+{
+    aurora_runtime_t runtime;
+
+    mock_reset();
+    CHECK(aurora_runtime_init(&runtime));
+    CHECK(runtime.app.storage.dirty);
+    runtime.app.power_stage.state = AURORA_POWER_PRECHARGE;
+    runtime.app.power_command.state = AURORA_POWER_PRECHARGE;
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(mock_flash_erase_count() == 0U);
+    CHECK(mock_flash_program_count() == 0U);
+    CHECK(runtime.app.storage.dirty);
+
+    runtime.app.power_stage.state = AURORA_POWER_WAIT_PV;
+    runtime.app.power_command.state = AURORA_POWER_WAIT_PV;
+    aurora_runtime_poll(&runtime);
+    CHECK(mock_flash_erase_count() == 1U);
+    CHECK(mock_flash_program_count() == 3U);
+    CHECK(!runtime.app.storage.dirty);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_storage_failed_write_preserves_last_good_and_bounds_retry(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证Flash失败不会提前推进sequence/切换active页；只重试一次，连续失败后禁止本次上电继续擦写。
+ *---------------------------------------------------------------------------*/
+static void test_storage_failed_write_preserves_last_good_and_bounds_retry(void)
+{
+    aurora_runtime_t runtime;
+    aurora_persistent_settings_t decoded;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+    uint32_t decoded_sequence = 0U;
+    uint32_t erase_before_blocked_poll;
+    uint32_t program_before_blocked_poll;
+
+    mock_reset();
+    CHECK(aurora_runtime_init(&runtime));
+    runtime.app.power_stage.state = AURORA_POWER_WAIT_PV;
+    runtime.app.power_command.state = AURORA_POWER_WAIT_PV;
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(drv_flash_read(drv_board_flash_page_a(), page, sizeof(page)));
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &decoded, &decoded_sequence) ==
+          AURORA_STORAGE_PAGE_VALID);
+    CHECK(decoded_sequence == 2U);
+
+    runtime.app.storage.settings.settings_revision++;
+    aurora_storage_mark_dirty(&runtime.app.storage, drv_time_now_ms());
+    mock_fail_next_flash_program();
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.write_failure_count == 1U);
+    CHECK(!runtime.app.storage.write_blocked);
+    CHECK(drv_flash_read(drv_board_flash_page_a(), page, sizeof(page)));
+    decoded_sequence = 0U;
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &decoded, &decoded_sequence) ==
+          AURORA_STORAGE_PAGE_VALID);
+    CHECK(decoded_sequence == 2U);
+
+    mock_fail_next_flash_program();
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.write_failure_count == 2U);
+    CHECK(runtime.app.storage.write_blocked);
+    CHECK(drv_flash_read(drv_board_flash_page_a(), page, sizeof(page)));
+    decoded_sequence = 0U;
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &decoded, &decoded_sequence) ==
+          AURORA_STORAGE_PAGE_VALID);
+    CHECK(decoded_sequence == 2U);
+
+    erase_before_blocked_poll = mock_flash_erase_count();
+    program_before_blocked_poll = mock_flash_program_count();
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(mock_flash_erase_count() == erase_before_blocked_poll);
+    CHECK(mock_flash_program_count() == program_before_blocked_poll);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_storage_tracks_physical_active_page_not_sequence_parity(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 人工构造A页保存偶数sequence，验证修复逻辑仍写B页，绝不靠奇偶推断而擦掉唯一有效页。
+ *---------------------------------------------------------------------------*/
+static void test_storage_tracks_physical_active_page_not_sequence_parity(void)
+{
+    aurora_storage_ctx_t seed;
+    aurora_runtime_t runtime;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+    size_t used;
+
+    mock_reset();
+    aurora_storage_init_defaults(&seed);
+    seed.sequence = 2U;
+    used = aurora_storage_encode_page(&seed, page, sizeof(page), true);
+    CHECK(used == AURORA_STORAGE_ENCODED_SIZE);
+    CHECK(drv_flash_erase_page(drv_board_flash_page_a()));
+    CHECK(drv_flash_program(drv_board_flash_page_a(), page, used));
+
+    CHECK(aurora_runtime_init(&runtime));
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.dirty);
+    mock_advance_ms(AURORA_STORAGE_DIRTY_HOLD_MS + 1U);
+    aurora_runtime_poll(&runtime);
+    CHECK(runtime.app.storage.sequence == 3U);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_B);
+}
+
 /*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
@@ -393,6 +537,10 @@ int main(void)
     test_pending_fault_keeps_break_latched();
     test_stale_energy_and_adc_timebase();
     test_legacy_energy_fields_keep_v0102_pv_semantics();
+    test_storage_driver_rejects_out_of_bounds_and_cross_page();
+    test_storage_writes_only_in_stopped_states();
+    test_storage_failed_write_preserves_last_good_and_bounds_retry();
+    test_storage_tracks_physical_active_page_not_sequence_parity();
     printf("Aurora v0.10.3 reviewed closeout tests: %u assertions passed.\n", g_assertions);
     return 0;
 }

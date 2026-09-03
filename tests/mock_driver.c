@@ -32,6 +32,9 @@ static uint32_t g_watchdog_feeds;
 static uint8_t g_uart_tx[MOCK_UART_TX_CAPACITY];
 static size_t g_uart_tx_length;
 static uint8_t g_flash[MOCK_FLASH_SIZE_BYTES];
+static uint32_t g_flash_erase_count;
+static uint32_t g_flash_program_count;
+static bool g_fail_next_flash_program;
 
 /*---------------------------------------------------------------------------*
  * Name        : static bool flash_range(uint32_t address, size_t length, size_t *offset)
@@ -47,7 +50,7 @@ static bool flash_range(uint32_t address, size_t length, size_t *offset)
         return false;
     }
 
-    if ((address < MOCK_FLASH_BASE_ADDRESS) ||
+    if ((length == 0U) || (address < MOCK_FLASH_BASE_ADDRESS) ||
         (range_end > (uint64_t)MOCK_FLASH_END_ADDRESS)) {
         return false;
     }
@@ -79,6 +82,9 @@ void mock_reset(void)
     g_watchdog_feeds = 0U;
     g_uart_tx_length = 0U;
     memset(g_flash, 0xFF, sizeof(g_flash));
+    g_flash_erase_count = 0U;
+    g_flash_program_count = 0U;
+    g_fail_next_flash_program = false;
 }
 
 /*---------------------------------------------------------------------------*
@@ -187,6 +193,39 @@ uint16_t *mock_adc_block(uint8_t index)
     }
 
     return g_adc[index];
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void mock_fail_next_flash_program(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 让下一次合法Flash编程尝试失败且不修改模拟Flash，用于掉电/DDL失败回归。
+ *---------------------------------------------------------------------------*/
+void mock_fail_next_flash_program(void)
+{
+    g_fail_next_flash_program = true;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t mock_flash_erase_count(void)
+ * Input       : 无
+ * Output      : 合法Flash擦除尝试次数
+ * Description : 用于验证运行态不写Flash以及失败后只允许一次重试。
+ *---------------------------------------------------------------------------*/
+uint32_t mock_flash_erase_count(void)
+{
+    return g_flash_erase_count;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t mock_flash_program_count(void)
+ * Input       : 无
+ * Output      : 合法Flash编程尝试次数
+ * Description : 用于验证事务阶段数和失败后禁止无限重复编程。
+ *---------------------------------------------------------------------------*/
+uint32_t mock_flash_program_count(void)
+{
+    return g_flash_program_count;
 }
 
 /*---------------------------------------------------------------------------*
@@ -681,6 +720,7 @@ bool drv_flash_erase_page(uint32_t address)
         return false;
     }
 
+    g_flash_erase_count++;
     memset(&g_flash[offset], 0xFF, MOCK_FLASH_PAGE_SIZE_BYTES);
     return true;
 }
@@ -695,8 +735,20 @@ bool drv_flash_program(uint32_t address, const void *data, size_t length)
 {
     size_t offset;
     size_t i;
+    const uint64_t range_end = (uint64_t)address + (uint64_t)length;
+    const uint64_t page_a_end = (uint64_t)MOCK_FLASH_BASE_ADDRESS + MOCK_FLASH_PAGE_SIZE_BYTES;
+    const uint64_t page_b_start = page_a_end;
 
-    if ((data == NULL) || g_pwm_active || !flash_range(address, length, &offset)) {
+    if ((data == NULL) || g_pwm_active || ((address & 3U) != 0U) || ((length & 3U) != 0U) ||
+        !flash_range(address, length, &offset) ||
+        !(((address >= MOCK_FLASH_BASE_ADDRESS) && (range_end <= page_a_end)) ||
+          ((address >= page_b_start) && (range_end <= MOCK_FLASH_END_ADDRESS)))) {
+        return false;
+    }
+
+    g_flash_program_count++;
+    if (g_fail_next_flash_program) {
+        g_fail_next_flash_program = false;
         return false;
     }
 

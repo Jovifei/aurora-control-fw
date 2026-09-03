@@ -607,11 +607,13 @@ static void load_storage(aurora_runtime_t *runtime)
         {
             runtime->app.storage.settings = settings_b;
             runtime->app.storage.sequence = seq_b;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_B;
         }
         else
         {
             runtime->app.storage.settings = settings_a;
             runtime->app.storage.sequence = seq_a;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_A;
         }
         aurora_app_apply_settings(&runtime->app, &runtime->app.storage.settings, now_ms);
 
@@ -627,6 +629,7 @@ static void load_storage(aurora_runtime_t *runtime)
 
     if ((status_a == AURORA_STORAGE_PAGE_ERASED) && (status_b == AURORA_STORAGE_PAGE_ERASED))
     {
+        runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
         aurora_storage_mark_dirty(&runtime->app.storage, now_ms);
         return;
     }
@@ -635,47 +638,140 @@ static void load_storage(aurora_runtime_t *runtime)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static bool runtime_storage_stop_state(aurora_power_state_t state)
+ * Input       : state - 当前功率级状态
+ * Output      : true表示当前属于明确停机/等待状态，可考虑写Flash
+ * Description : Flash不在欠压/PVD事件里抢写；只在WAIT_PV/NO_SUN/FAULT/OFF且物理PWM、Relay均关闭时保存。
+ *---------------------------------------------------------------------------*/
+static bool runtime_storage_stop_state(aurora_power_state_t state)
+{
+    return (state == AURORA_POWER_WAIT_PV) || (state == AURORA_POWER_NO_SUN) ||
+           (state == AURORA_POWER_FAULT) || (state == AURORA_POWER_OFF);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void runtime_storage_record_failure(
+ *               aurora_runtime_t *runtime, uint32_t now_ms)
+ * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
+ * Output      : 无
+ * Description : 保留dirty和最后有效sequence；首次失败等待1s后仅重试一次，再失败则本次上电禁止继续擦写。
+ *---------------------------------------------------------------------------*/
+static void runtime_storage_record_failure(aurora_runtime_t *runtime, uint32_t now_ms)
+{
+    if (runtime->app.storage.write_failure_count < 255U)
+    {
+        runtime->app.storage.write_failure_count++;
+    }
+    runtime->app.storage.dirty_since_ms = now_ms;
+    if (runtime->app.storage.write_failure_count > AURORA_STORAGE_WRITE_RETRY_MAX)
+    {
+        runtime->app.storage.write_blocked = true;
+    }
+    aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool runtime_storage_program_page(uint32_t target,
+ *               uint8_t *page, size_t used)
+ * Input       : target - A/B目标页；page - 未提交页镜像；used - 有效编码长度
+ * Output      : true表示擦除、数据、Commit Marker和逐字回读均成功
+ * Description : Commit Marker最后落盘；完成后逐4字节回读，任何异常都不允许上层推进active page/sequence。
+ *---------------------------------------------------------------------------*/
+static bool runtime_storage_program_page(uint32_t target, uint8_t *page, size_t used)
+{
+    uint8_t verify[sizeof(uint32_t)];
+    size_t offset;
+    const uint32_t commit = AURORA_STORAGE_COMMIT_MARKER;
+
+    if ((page == NULL) || (used != AURORA_STORAGE_ENCODED_SIZE) ||
+        !drv_flash_erase_page(target) ||
+        !drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET) ||
+        !drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
+                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
+                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)) ||
+        !drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET, &commit, sizeof(commit)))
+    {
+        return false;
+    }
+
+    page[AURORA_STORAGE_COMMIT_OFFSET + 0U] = (uint8_t)commit;
+    page[AURORA_STORAGE_COMMIT_OFFSET + 1U] = (uint8_t)(commit >> 8U);
+    page[AURORA_STORAGE_COMMIT_OFFSET + 2U] = (uint8_t)(commit >> 16U);
+    page[AURORA_STORAGE_COMMIT_OFFSET + 3U] = (uint8_t)(commit >> 24U);
+
+    for (offset = 0U; offset < used; offset += sizeof(uint32_t))
+    {
+        size_t byte;
+        if (!drv_flash_read(target + (uint32_t)offset, verify, sizeof(verify)))
+        {
+            return false;
+        }
+        for (byte = 0U; byte < sizeof(verify); ++byte)
+        {
+            if (verify[byte] != page[offset + byte])
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void runtime_storage(aurora_runtime_t *runtime,
  *               uint32_t now_ms)
  * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 只有PWM关闭且物理继电器断开时执行双页Journal保存，Commit Marker最后写入。
+ * Description : 只在明确停机态保存双页Journal；失败不推进sequence、不切换目标页，保住上一份有效页并限制重试次数。
  *---------------------------------------------------------------------------*/
 static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
 {
     uint8_t page[AURORA_STORAGE_PAGE_SIZE];
     uint32_t target;
+    uint32_t previous_sequence;
+    uint32_t next_sequence;
+    uint8_t next_active_page;
     size_t used;
 
-    if (!runtime->app.storage.dirty ||
+    if (!runtime->app.storage.dirty || runtime->app.storage.write_blocked ||
         ((now_ms - runtime->app.storage.dirty_since_ms) < AURORA_STORAGE_DIRTY_HOLD_MS) ||
-        drv_pwm_output_active() || runtime->relay_applied)
+        !runtime_storage_stop_state(runtime->app.power_stage.state) || drv_pwm_output_active() ||
+        runtime->relay_applied)
     {
         return;
     }
 
-    runtime->app.storage.sequence++;
-    target = ((runtime->app.storage.sequence & 1U) != 0U) ? drv_board_flash_page_a()
-                                                          : drv_board_flash_page_b();
+    previous_sequence = runtime->app.storage.sequence;
+    next_sequence = previous_sequence + 1U;
+    if (runtime->app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A)
+    {
+        target = drv_board_flash_page_b();
+        next_active_page = AURORA_STORAGE_ACTIVE_PAGE_B;
+    }
+    else
+    {
+        target = drv_board_flash_page_a();
+        next_active_page = AURORA_STORAGE_ACTIVE_PAGE_A;
+    }
+
+    /* encode需要把待提交sequence写进页头，但RAM中的last-good sequence只有事务成功后才能推进。 */
+    runtime->app.storage.sequence = next_sequence;
     used = aurora_storage_encode_page(&runtime->app.storage, page, sizeof(page), false);
-    if ((used < AURORA_STORAGE_HEADER_SIZE) || !drv_flash_erase_page(target) ||
-        !drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET) ||
-        !drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
-                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
-                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)))
+    runtime->app.storage.sequence = previous_sequence;
+
+    if ((used != AURORA_STORAGE_ENCODED_SIZE) ||
+        !runtime_storage_program_page(target, page, used))
     {
-        aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+        runtime_storage_record_failure(runtime, now_ms);
         return;
     }
 
-    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET,
-                           &((uint32_t){AURORA_STORAGE_COMMIT_MARKER}), sizeof(uint32_t)))
-    {
-        aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
-        return;
-    }
+    runtime->app.storage.sequence = next_sequence;
+    runtime->app.storage.active_page = next_active_page;
     runtime->app.storage.dirty = false;
     runtime->app.storage.repair_pending = false;
+    runtime->app.storage.write_failure_count = 0U;
+    runtime->app.storage.write_blocked = false;
     if (target == drv_board_flash_page_a())
     {
         runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
