@@ -1,0 +1,33 @@
+name: cortex m0 stack o0 audit
+
+on:
+  push:
+    branches:
+      - codex/cortex-m0-stack-o0-audit
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/cortex-m0-stack-o0-audit
+
+      - name: 按O0重跑目标栈预算
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/check_target_stack.py')
+          text = path.read_text(encoding='utf-8')
+          old = '        "-O2",\n'
+          new = '        "-O0",\n'
+          if text.count(old) != 1:
+              raise SystemExit('expected one O2 stack-audit flag')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+          PY
+          python tools/check_target_stack.py
