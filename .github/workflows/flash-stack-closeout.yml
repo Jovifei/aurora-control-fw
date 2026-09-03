@@ -24,8 +24,17 @@ jobs:
           python tools/_flash_stack_closeout.py
           python - <<'PY'
           from pathlib import Path
-          path = Path('docs/48-v0.10.3-Flash安全持久化与最近三次远端提交审核.md')
-          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8', newline='\n')
+
+          doc = Path('docs/48-v0.10.3-Flash安全持久化与最近三次远端提交审核.md')
+          doc.write_text(doc.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8', newline='\n')
+
+          contract = Path('tests/test_flash_safe_persistence_contract.py')
+          text = contract.read_text(encoding='utf-8')
+          old = '        self.assertIn("staged.sequence = runtime->app.storage.sequence + 1U;", storage)\n'
+          new = '        self.assertIn("next_sequence = runtime->app.storage.sequence + 1U;", storage)\n'
+          if text.count(old) != 1:
+              raise SystemExit('old staged sequence contract not found exactly once')
+          contract.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
           PY
 
       - name: 完整质量门验证
