@@ -37,6 +37,17 @@ aurora_runtime_t g_aurora_runtime;
 /* Flash Journal单线程工作页；避免512B页缓冲占用目标仅1KB的启动栈。 */
 static uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE];
 
+/* 主循环独占的协议收发工作区；ISR只写RX环形缓冲，不得访问这里。 */
+typedef struct
+{
+    aurora_protocol_frame_t request;                 /* 已校验的当前请求帧。 */
+    aurora_protocol_frame_t tx_frame;                /* 应答或主动遥测发送帧。 */
+    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];          /* 线格式编码缓冲。 */
+} runtime_protocol_workspace_t;
+
+/* 单实例裸机主循环可安全复用，避免约420B协议临时对象压入1KB调用栈。 */
+static runtime_protocol_workspace_t g_protocol_workspace;
+
 /*---------------------------------------------------------------------------*
  * Name        : static bool storage_bytes_equal(const uint8_t *left,
  *               const uint8_t *right, size_t length)
@@ -533,14 +544,12 @@ static void process_adc(aurora_runtime_t *runtime)
  *               uint32_t now_ms)
  * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 按预算消费RX环形缓冲、推进协议解析并发送应答，避免通信长期占用主循环。
+ * Description : 按预算消费RX环形缓冲、推进协议解析并发送应答；请求/发送/线缓冲复用主循环静态工作区，
+ *               避免约420B协议对象占用目标1KB调用栈。
  *---------------------------------------------------------------------------*/
 static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
 {
-    aurora_protocol_frame_t request;
-    aurora_protocol_frame_t response;
     bool has_response;
-    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
     size_t wire_length;
     uint32_t budget = AURORA_RUNTIME_UART_RX_BUDGET;
 
@@ -559,15 +568,18 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
         budget--;
 
         aurora_protocol_feed_byte(&runtime->app.protocol, byte, now_ms);
-        if (aurora_protocol_take_frame(&runtime->app.protocol, &request))
+        if (aurora_protocol_take_frame(&runtime->app.protocol, &g_protocol_workspace.request))
         {
-            aurora_app_on_protocol_frame(&runtime->app, &request, &response, &has_response, now_ms);
+            aurora_app_on_protocol_frame(&runtime->app, &g_protocol_workspace.request,
+                                         &g_protocol_workspace.tx_frame, &has_response, now_ms);
             if (has_response)
             {
-                wire_length = aurora_protocol_encode(&response, wire, sizeof(wire));
+                wire_length = aurora_protocol_encode(&g_protocol_workspace.tx_frame,
+                                                     g_protocol_workspace.wire,
+                                                     sizeof(g_protocol_workspace.wire));
                 if (wire_length != 0U)
                 {
-                    (void)drv_uart_send(wire, wire_length);
+                    (void)drv_uart_send(g_protocol_workspace.wire, wire_length);
                 }
             }
         }
@@ -1562,18 +1574,18 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
 
     if ((now_ms - runtime->last_telemetry_ms) >= AURORA_TELEMETRY_PERIOD_MS)
     {
-        aurora_protocol_frame_t telemetry;
-        uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
         size_t wire_length;
 
         aurora_protocol_fill_telemetry_ex(
-            &telemetry, runtime->app.telemetry_message_id++, &runtime->app.sample,
+            &g_protocol_workspace.tx_frame, runtime->app.telemetry_message_id++, &runtime->app.sample,
             runtime->app.charger.state, runtime->app.actual_power_transfer,
             aurora_protection_fault_mask(&runtime->app.protection), &runtime->app.storage.settings);
-        wire_length = aurora_protocol_encode(&telemetry, wire, sizeof(wire));
+        wire_length = aurora_protocol_encode(&g_protocol_workspace.tx_frame,
+                                             g_protocol_workspace.wire,
+                                             sizeof(g_protocol_workspace.wire));
         if (wire_length != 0U)
         {
-            (void)drv_uart_send(wire, wire_length);
+            (void)drv_uart_send(g_protocol_workspace.wire, wire_length);
         }
         runtime->last_telemetry_ms = now_ms;
     }

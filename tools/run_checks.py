@@ -30,4 +30,5 @@ run(["cmake", "-S", ".", "-B", "build-sanitize", "-G", "Ninja", "-DCMAKE_C_COMPI
 run(["cmake", "--build", "build-sanitize"])
 run(["ctest", "--test-dir", "build-sanitize", "--output-on-failure"])
 run([sys.executable, "tools/check_target_syntax.py"])
+run([sys.executable, "tools/check_target_stack.py"])
 print("ALL CHECKS PASSED")
