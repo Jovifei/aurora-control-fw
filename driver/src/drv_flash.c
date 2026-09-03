@@ -96,7 +96,8 @@ bool drv_flash_erase_page(uint32_t address)
  *---------------------------------------------------------------------------*/
 bool drv_flash_program(uint32_t address, const void *data, size_t length)
 {
-    ErrorStatus status;
+    ErrorStatus status = SUCCESS;
+    size_t offset;
 
     if ((data == NULL) || ((address & 3U) != 0U) || ((length & 3U) != 0U) ||
         !range_in_single_nvm_page(address, length) || drv_pwm_output_active() ||
@@ -107,7 +108,21 @@ bool drv_flash_program(uint32_t address, const void *data, size_t length)
 
     DDL_FLASH_RKEY_Unlock();
     DDL_FLASH_MKEY_Unlock();
-    status = DDL_FLASH_Write(address, (uint32_t)length, (uint8_t *)(uintptr_t)data);
+    for (offset = 0U; offset < length; offset += sizeof(uint32_t))
+    {
+        /* 每个32-bit word前重新检查PVD，欠压后不再启动下一次Flash编程。 */
+        if (!drv_system_flash_supply_is_safe())
+        {
+            status = ERROR;
+            break;
+        }
+        status = DDL_FLASH_Write(address + (uint32_t)offset, (uint32_t)sizeof(uint32_t),
+                                 (uint8_t *)(uintptr_t)((const uint8_t *)data + offset));
+        if (status != SUCCESS)
+        {
+            break;
+        }
+    }
     DDL_FLASH_MKEY_Lock();
     DDL_FLASH_RKEY_Lock();
     return status == SUCCESS;

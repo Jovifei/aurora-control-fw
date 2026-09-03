@@ -13,7 +13,7 @@ bool drv_watchdog_init(uint32_t timeout_ms)
 {
     uint32_t reload;
 
-    /* IWDT典型时钟按40kHz估算，分频64；实板需测量真实复位时间。 */
+    /* IWDT按数据手册典型32.768kHz估算、分频64；实板仍需测量LSI容差下的真实复位时间。 */
     reload = (timeout_ms * BOARD_WATCHDOG_CLOCK_HZ) /
              (BOARD_WATCHDOG_PRESCALER * BOARD_MILLISECONDS_PER_SECOND);
     if (reload == 0U)

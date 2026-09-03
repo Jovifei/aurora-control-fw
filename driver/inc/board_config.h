@@ -179,8 +179,8 @@
 /* Driver层TX环形缓冲长度。 */
 #define BOARD_UART_TX_BUFFER_SIZE                   (256U)
 
-/* IWDT名义低速时钟，Hz；实板受LSI容差影响。 */
-#define BOARD_WATCHDOG_CLOCK_HZ                     (40000UL)
+/* IWDT名义低速时钟，Hz；数据手册典型LSICLK为32.768kHz，实板仍受31~34kHz/温漂容差影响。 */
+#define BOARD_WATCHDOG_CLOCK_HZ                     (32768UL)
 /* IWDT固定预分频值。 */
 #define BOARD_WATCHDOG_PRESCALER                    (64UL)
 /* 毫秒换算秒的比例。 */

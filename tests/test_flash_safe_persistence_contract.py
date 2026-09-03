@@ -50,5 +50,24 @@ class FlashSafePersistenceContract(unittest.TestCase):
         self.assertNotIn("power_fail", main.lower())
 
 
+    def test_protocol_setting_updates_do_not_copy_full_persistent_struct_on_1k_stack(self):
+        main = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
+        self.assertNotIn("aurora_persistent_settings_t sanitized;", main)
+        self.assertNotIn("aurora_persistent_settings_t settings = app->storage.settings;", main)
+        self.assertIn("aurora_app_apply_settings(app, &app->storage.settings, now_ms);", main)
+
+    def test_watchdog_uses_official_lsi_typical_frequency(self):
+        board = (ROOT / "driver/inc/board_config.h").read_text(encoding="utf-8")
+        watchdog = (ROOT / "driver/src/drv_watchdog.c").read_text(encoding="utf-8")
+        self.assertIn("#define BOARD_WATCHDOG_CLOCK_HZ                     (32768UL)", board)
+        self.assertIn("32.768kHz", watchdog)
+
+    def test_flash_program_rechecks_supply_before_each_word(self):
+        flash = (ROOT / "driver/src/drv_flash.c").read_text(encoding="utf-8")
+        program = flash[flash.index("bool drv_flash_program"):]
+        self.assertIn("for (offset = 0U; offset < length; offset += sizeof(uint32_t))", program)
+        self.assertIn("if (!drv_system_flash_supply_is_safe())", program)
+        self.assertIn("DDL_FLASH_Write(address + (uint32_t)offset", program)
+
 if __name__ == "__main__":
     unittest.main()
