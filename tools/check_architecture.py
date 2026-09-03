@@ -30,12 +30,19 @@ for forbidden_root in ["service", "board"]:
         errors.append(f"v0.8.3禁止根目录: {forbidden_root}/")
 
 for forbidden in [
-    "firmware", "tasks", "legacy_reference", "legacy_parity",
+    "firmware", "legacy_reference", "legacy_parity",
     "legacy_protocol_import", ".bootstrap"
 ]:
     if any(path.name == forbidden and is_project_content(path)
            for path in root.rglob("*")):
         errors.append(f"禁止目录仍存在: {forbidden}")
+
+# G0~G15迁移允许tasks/保存纯Markdown过程资料，但禁止它演化成第三套固件源码树。
+tasks_root = root / "tasks"
+if tasks_root.exists():
+    for task_file in tasks_root.rglob("*"):
+        if task_file.is_file() and task_file.suffix.lower() != ".md":
+            errors.append(f"tasks仅允许Markdown过程资料: {task_file.relative_to(root)}")
 
 # APP/Driver必须严格采用inc/src。
 for layer in ["app", "driver"]:
@@ -219,6 +226,9 @@ else:
         for forbidden in ["service\\", "board\\board.c", "app\\src\\app.c", "project\\keil"]:
             if forbidden in joined:
                 errors.append(f"Keil仍引用旧路径: {forbidden}")
+        optim = project.find(".//Cads/Optim")
+        if (optim is None) or ((optim.text or "").strip() != "1"):
+            errors.append("Keil AC6发布优化必须固定Level 1 (-O1)；O0已通过目标栈审计判定不安全")
     except ET.ParseError as exc:
         errors.append(f"Keil工程XML无效: {exc}")
 

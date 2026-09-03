@@ -268,20 +268,23 @@ void aurora_storage_mark_dirty(aurora_storage_ctx_t *ctx, uint32_t now_ms)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
+ * Name        : size_t aurora_storage_encode_page_sequence(
+ *               const aurora_persistent_settings_t *settings, uint32_t sequence,
  *               uint8_t *page, size_t page_size, bool committed)
- * Input       : ctx - 当前设置；page/page_size - 目标页；committed - 是否写Commit Marker
+ * Input       : settings - 待保存设置；sequence - 待提交序号；page/page_size - 目标页；
+ *               committed - 是否写Commit Marker
  * Output      : 编码字节数；参数或内容无效时返回0
- * Description : 将v3设置编码为固定小端Flash页；Commit Marker由调用者在事务最后写入。
+ * Description : 直接按settings+sequence编码v3页面，避免为了下一序号在1KB目标栈复制完整storage ctx。
  *---------------------------------------------------------------------------*/
-size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx, uint8_t *page, size_t page_size,
-                                  bool committed)
+size_t aurora_storage_encode_page_sequence(const aurora_persistent_settings_t *settings,
+                                           uint32_t sequence, uint8_t *page, size_t page_size,
+                                           bool committed)
 {
     uint8_t *payload;
     size_t index;
 
-    if ((ctx == NULL) || (page == NULL) || (page_size < AURORA_STORAGE_PAGE_SIZE) ||
-        !settings_valid(&ctx->settings))
+    if ((settings == NULL) || (page == NULL) || (page_size < AURORA_STORAGE_PAGE_SIZE) ||
+        !settings_valid(settings))
     {
         return 0U;
     }
@@ -289,36 +292,35 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx, uint8_t *page
     put_u32_le(&page[AURORA_STORAGE_MAGIC_OFFSET], AURORA_STORAGE_MAGIC);
     put_u16_le(&page[AURORA_STORAGE_VERSION_OFFSET], AURORA_STORAGE_VERSION);
     put_u16_le(&page[AURORA_STORAGE_LENGTH_OFFSET], AURORA_STORAGE_PAYLOAD_SIZE);
-    put_u32_le(&page[AURORA_STORAGE_SEQUENCE_OFFSET], ctx->sequence);
+    put_u32_le(&page[AURORA_STORAGE_SEQUENCE_OFFSET], sequence);
 
     payload = &page[AURORA_STORAGE_HEADER_SIZE];
-    payload[AURORA_STORAGE_CHEMISTRY_OFFSET] = (uint8_t)ctx->settings.chemistry;
-    payload[AURORA_STORAGE_PACK_OFFSET] = (uint8_t)ctx->settings.pack;
-    payload[AURORA_STORAGE_MODE_OFFSET] = (uint8_t)ctx->settings.operating_mode;
-    payload[AURORA_STORAGE_HISTORY_COUNT_OFFSET] = ctx->settings.energy_history_count;
-    payload[AURORA_STORAGE_ENERGY_SEMANTICS_OFFSET] = ctx->settings.energy_semantics_version;
-    put_u32_le(&payload[AURORA_STORAGE_LIFETIME_ENERGY_OFFSET], ctx->settings.lifetime_energy_wh);
-    put_u32_le(&payload[AURORA_STORAGE_DAILY_ENERGY_OFFSET], ctx->settings.daily_energy_wh);
+    payload[AURORA_STORAGE_CHEMISTRY_OFFSET] = (uint8_t)settings->chemistry;
+    payload[AURORA_STORAGE_PACK_OFFSET] = (uint8_t)settings->pack;
+    payload[AURORA_STORAGE_MODE_OFFSET] = (uint8_t)settings->operating_mode;
+    payload[AURORA_STORAGE_HISTORY_COUNT_OFFSET] = settings->energy_history_count;
+    payload[AURORA_STORAGE_ENERGY_SEMANTICS_OFFSET] = settings->energy_semantics_version;
+    put_u32_le(&payload[AURORA_STORAGE_LIFETIME_ENERGY_OFFSET], settings->lifetime_energy_wh);
+    put_u32_le(&payload[AURORA_STORAGE_DAILY_ENERGY_OFFSET], settings->daily_energy_wh);
     put_u32_le(&payload[AURORA_STORAGE_CHARGE_LIFETIME_OFFSET],
-               ctx->settings.charge_est_lifetime_energy_wh);
+               settings->charge_est_lifetime_energy_wh);
     put_u32_le(&payload[AURORA_STORAGE_CHARGE_DAILY_OFFSET],
-               ctx->settings.charge_est_daily_energy_wh);
-    put_u32_le(&payload[AURORA_STORAGE_REVISION_OFFSET], ctx->settings.settings_revision);
+               settings->charge_est_daily_energy_wh);
+    put_u32_le(&payload[AURORA_STORAGE_REVISION_OFFSET], settings->settings_revision);
     put_u32_le(&payload[AURORA_STORAGE_HISTORY_ELAPSED_OFFSET],
-               ctx->settings.history_interval_elapsed_ms);
-    put_u32_le(&payload[AURORA_STORAGE_DEMO_VOLTAGE_OFFSET], ctx->settings.demo_target_voltage_mv);
-    put_u32_le(&payload[AURORA_STORAGE_DEMO_POWER_OFFSET], ctx->settings.demo_power_limit_mw);
-    put_u64_le(&payload[AURORA_STORAGE_PV_REMAINDER_OFFSET],
-               ctx->settings.pv_energy_remainder_mw_ms);
+               settings->history_interval_elapsed_ms);
+    put_u32_le(&payload[AURORA_STORAGE_DEMO_VOLTAGE_OFFSET], settings->demo_target_voltage_mv);
+    put_u32_le(&payload[AURORA_STORAGE_DEMO_POWER_OFFSET], settings->demo_power_limit_mw);
+    put_u64_le(&payload[AURORA_STORAGE_PV_REMAINDER_OFFSET], settings->pv_energy_remainder_mw_ms);
     put_u64_le(&payload[AURORA_STORAGE_CHARGE_REMAINDER_OFFSET],
-               ctx->settings.charge_est_energy_remainder_mw_ms);
+               settings->charge_est_energy_remainder_mw_ms);
 
     for (index = 0U; index < AURORA_ENERGY_HISTORY_POINT_COUNT; ++index)
     {
         put_u32_le(&payload[AURORA_STORAGE_ENERGY_HISTORY_OFFSET + index * 4U],
-                   ctx->settings.energy_history_wh[index]);
+                   settings->energy_history_wh[index]);
         put_u32_le(&payload[AURORA_STORAGE_CHARGE_HISTORY_OFFSET + index * 4U],
-                   ctx->settings.charge_est_history_wh[index]);
+                   settings->charge_est_history_wh[index]);
     }
 
     put_u32_le(&page[AURORA_STORAGE_CRC_OFFSET],
@@ -326,6 +328,24 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx, uint8_t *page
     put_u32_le(&page[AURORA_STORAGE_COMMIT_OFFSET],
                committed ? AURORA_STORAGE_COMMIT_MARKER : STORAGE_ERASED_WORD);
     return AURORA_STORAGE_HEADER_SIZE + AURORA_STORAGE_PAYLOAD_SIZE;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
+ *               uint8_t *page, size_t page_size, bool committed)
+ * Input       : ctx - 当前设置与已提交序号；page/page_size - 目标页；committed - 提交标志
+ * Output      : 编码字节数；参数无效时返回0
+ * Description : 保留原有公共接口，内部转调显式sequence编码器供既有测试/调用者兼容。
+ *---------------------------------------------------------------------------*/
+size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx, uint8_t *page, size_t page_size,
+                                  bool committed)
+{
+    if (ctx == NULL)
+    {
+        return 0U;
+    }
+    return aurora_storage_encode_page_sequence(&ctx->settings, ctx->sequence, page, page_size,
+                                               committed);
 }
 
 /*---------------------------------------------------------------------------*

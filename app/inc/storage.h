@@ -76,6 +76,15 @@ typedef uint8_t aurora_storage_page_status_t;
 #define AURORA_STORAGE_PAGE_CONTENT_ERROR           ((aurora_storage_page_status_t)6U) // CRC正确但字段范围或历史单调性错误。
 #define AURORA_STORAGE_PAGE_IO_ERROR                ((aurora_storage_page_status_t)7U) // 底层Flash读取失败。
 
+/* 当前可信Journal页；NONE表示尚无已提交的可信页。 */
+typedef uint8_t aurora_storage_active_page_t;
+/* 尚无已提交可信页。 */
+#define AURORA_STORAGE_ACTIVE_NONE                  ((aurora_storage_active_page_t)0U)
+/* A页是当前已提交可信页。 */
+#define AURORA_STORAGE_ACTIVE_PAGE_A                ((aurora_storage_active_page_t)1U)
+/* B页是当前已提交可信页。 */
+#define AURORA_STORAGE_ACTIVE_PAGE_B                ((aurora_storage_active_page_t)2U)
+
 /* Flash双页Journal运行状态。 */
 typedef struct
 {
@@ -84,6 +93,8 @@ typedef struct
     uint32_t dirty_since_ms;                         /* 首次变脏时间，用于合并多次写。 */
     bool dirty;                                      /* true表示RAM设置尚未写入Flash。 */
     bool repair_pending;                             /* true表示另一页需在安全窗口重建冗余。 */
+    bool write_inhibited;                            /* 连续安全供电I/O失败后禁止本会话继续擦写。 */
+    aurora_storage_active_page_t active_page;        /* 当前仍可信的已提交页，写失败时不得切换。 */
     aurora_storage_page_status_t page_a_status;      /* 最近启动读取A页分类。 */
     aurora_storage_page_status_t page_b_status;      /* 最近启动读取B页分类。 */
 } aurora_storage_ctx_t;
@@ -103,6 +114,11 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
                                   uint8_t *page,
                                   size_t page_size,
                                   bool committed);
+size_t aurora_storage_encode_page_sequence(const aurora_persistent_settings_t *settings,
+                                           uint32_t sequence,
+                                           uint8_t *page,
+                                           size_t page_size,
+                                           bool committed);
 void aurora_storage_energy_history_update(aurora_persistent_settings_t *settings);
 void aurora_storage_energy_history_checkpoint(aurora_persistent_settings_t *settings);
 uint32_t aurora_storage_crc32(const uint8_t *data, size_t length);

@@ -376,6 +376,191 @@ static void test_legacy_energy_fields_keep_v0102_pv_semantics(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static uint32_t storage_test_ready_ms(void)
+ * Input       : 无
+ * Output      : 满足dirty与停机稳定窗口后的测试时间
+ * Description : 统一构造可触发安全存储调度的时间点。
+ *---------------------------------------------------------------------------*/
+static uint32_t storage_test_ready_ms(void)
+{
+    return AURORA_STORAGE_DIRTY_HOLD_MS + AURORA_STORAGE_STOP_HOLD_MS + 10U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void prepare_stopped_dirty_runtime(aurora_runtime_t *runtime)
+ * Input       : runtime - 待准备的运行上下文
+ * Output      : 无
+ * Description : 从擦除Flash启动，保持WAIT_PV停机态并等待足够时间，使dirty只差电源资格即可落盘。
+ *---------------------------------------------------------------------------*/
+static void prepare_stopped_dirty_runtime(aurora_runtime_t *runtime)
+{
+    mock_reset();
+    CHECK(aurora_runtime_init(runtime));
+    runtime->app.power_stage.state = AURORA_POWER_WAIT_PV;
+    runtime->app.power_stage.state_since_ms = 0U;
+    runtime->app.storage.dirty = true;
+    runtime->app.storage.dirty_since_ms = 0U;
+    mock_advance_ms(storage_test_ready_ms());
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_low_supply_is_defer_only(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 欠压/PVD不合格时不得擦写Flash，也不得把“没保存”升级成Storage Fault；dirty保留待下次停机。
+ *---------------------------------------------------------------------------*/
+static void test_flash_low_supply_is_defer_only(void)
+{
+    aurora_runtime_t runtime;
+
+    prepare_stopped_dirty_runtime(&runtime);
+    mock_set_flash_supply_safe(false);
+    aurora_runtime_poll(&runtime);
+
+    CHECK(mock_flash_erase_count() == 0U);
+    CHECK(mock_flash_program_count() == 0U);
+    CHECK(runtime.app.storage.dirty);
+    CHECK(!runtime.app.storage.write_inhibited);
+    CHECK((aurora_protection_fault_mask(&runtime.app.protection) & AURORA_FAULT_STORAGE) == 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_only_writes_in_stable_stop_state(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 即使PWM/Relay物理关闭，START_DELAY等启动瞬态也不得把RAM dirty写入Flash。
+ *---------------------------------------------------------------------------*/
+static void test_flash_only_writes_in_stable_stop_state(void)
+{
+    aurora_runtime_t runtime;
+
+    prepare_stopped_dirty_runtime(&runtime);
+    runtime.app.power_stage.state = AURORA_POWER_START_DELAY;
+    runtime.app.power_stage.state_since_ms = 0U;
+    aurora_runtime_poll(&runtime);
+
+    CHECK(mock_flash_erase_count() == 0U);
+    CHECK(mock_flash_program_count() == 0U);
+    CHECK(runtime.app.storage.dirty);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_safe_stop_commits_and_reads_back(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 稳定停机且VDD正常时从无active页写A页，Commit回读有效后才清dirty并提交sequence。
+ *---------------------------------------------------------------------------*/
+static void test_flash_safe_stop_commits_and_reads_back(void)
+{
+    aurora_runtime_t runtime;
+    aurora_persistent_settings_t restored;
+    uint32_t sequence = 0U;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+
+    prepare_stopped_dirty_runtime(&runtime);
+    aurora_runtime_poll(&runtime);
+
+    CHECK(mock_flash_erase_count() == 1U);
+    CHECK(mock_flash_program_count() == 3U);
+    CHECK(!runtime.app.storage.dirty);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK(drv_flash_read(drv_board_flash_page_a(), page, sizeof(page)));
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &restored, &sequence) ==
+          AURORA_STORAGE_PAGE_VALID);
+    CHECK(sequence == runtime.app.storage.sequence);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_retries_same_inactive_page_once(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 第一次program I/O失败时只在同一备用A页重试一次，成功后才提交sequence且不产生Storage Fault。
+ *---------------------------------------------------------------------------*/
+static void test_flash_retries_same_inactive_page_once(void)
+{
+    aurora_runtime_t runtime;
+
+    prepare_stopped_dirty_runtime(&runtime);
+    mock_fail_next_flash_program(1U);
+    aurora_runtime_poll(&runtime);
+
+    CHECK(mock_flash_erase_count() == 2U);
+    CHECK(mock_flash_program_count() == 4U);
+    CHECK(!runtime.app.storage.dirty);
+    CHECK(!runtime.app.storage.write_inhibited);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.sequence == 2U);
+    CHECK((aurora_protection_fault_mask(&runtime.app.protection) & AURORA_FAULT_STORAGE) == 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_double_failure_preserves_active_page(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 已有A页有效时，B页两次写失败不得递增已提交sequence或回头擦A页；本会话随后禁止继续擦写。
+ *---------------------------------------------------------------------------*/
+static void test_flash_double_failure_preserves_active_page(void)
+{
+    aurora_runtime_t runtime;
+    aurora_persistent_settings_t restored;
+    uint32_t first_sequence;
+    uint32_t restored_sequence = 0U;
+    uint32_t erase_before;
+    uint32_t program_before;
+    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+
+    prepare_stopped_dirty_runtime(&runtime);
+    aurora_runtime_poll(&runtime);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    first_sequence = runtime.app.storage.sequence;
+
+    aurora_storage_mark_dirty(&runtime.app.storage, drv_time_now_ms());
+    mock_advance_ms(storage_test_ready_ms());
+    runtime.app.power_stage.state_since_ms = drv_time_now_ms() - AURORA_STORAGE_STOP_HOLD_MS;
+    erase_before = mock_flash_erase_count();
+    program_before = mock_flash_program_count();
+    mock_fail_next_flash_program(2U);
+    aurora_runtime_poll(&runtime);
+
+    CHECK(mock_flash_erase_count() == erase_before + 2U);
+    CHECK(mock_flash_program_count() == program_before + 2U);
+    CHECK(runtime.app.storage.sequence == first_sequence);
+    CHECK(runtime.app.storage.active_page == AURORA_STORAGE_ACTIVE_PAGE_A);
+    CHECK(runtime.app.storage.dirty);
+    CHECK(runtime.app.storage.write_inhibited);
+    CHECK((aurora_protection_fault_mask(&runtime.app.protection) & AURORA_FAULT_STORAGE) != 0U);
+    CHECK(drv_flash_read(drv_board_flash_page_a(), page, sizeof(page)));
+    CHECK(aurora_storage_classify_page(page, sizeof(page), &restored, &restored_sequence) ==
+          AURORA_STORAGE_PAGE_VALID);
+    CHECK(restored_sequence == first_sequence);
+
+    erase_before = mock_flash_erase_count();
+    program_before = mock_flash_program_count();
+    mock_advance_ms(storage_test_ready_ms());
+    aurora_runtime_poll(&runtime);
+    CHECK(mock_flash_erase_count() == erase_before);
+    CHECK(mock_flash_program_count() == program_before);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_flash_driver_rejects_zero_and_cross_page(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : Driver最后防线必须拒绝0地址以及从A页尾跨入B页的单次program请求。
+ *---------------------------------------------------------------------------*/
+static void test_flash_driver_rejects_zero_and_cross_page(void)
+{
+    const uint32_t words[2] = {0x12345678UL, 0xABCDEF00UL};
+    const uint32_t cross = drv_board_flash_page_a() + AURORA_STORAGE_PAGE_SIZE - (uint32_t)sizeof(uint32_t);
+
+    mock_reset();
+    CHECK(!drv_flash_program(0U, words, sizeof(uint32_t)));
+    CHECK(!drv_flash_program(cross, words, sizeof(words)));
+    CHECK(mock_flash_program_count() == 0U);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
  * Output      : 0表示全部v0.10.3二次审阅行为回归通过
@@ -393,6 +578,12 @@ int main(void)
     test_pending_fault_keeps_break_latched();
     test_stale_energy_and_adc_timebase();
     test_legacy_energy_fields_keep_v0102_pv_semantics();
+    test_flash_low_supply_is_defer_only();
+    test_flash_only_writes_in_stable_stop_state();
+    test_flash_safe_stop_commits_and_reads_back();
+    test_flash_retries_same_inactive_page_once();
+    test_flash_double_failure_preserves_active_page();
+    test_flash_driver_rejects_zero_and_cross_page();
     printf("Aurora v0.10.3 reviewed closeout tests: %u assertions passed.\n", g_assertions);
     return 0;
 }

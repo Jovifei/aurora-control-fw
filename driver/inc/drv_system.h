@@ -24,6 +24,7 @@ void drv_irq_configure_priorities(void);
 bool drv_system_supply_qualifier_init(void);
 bool drv_system_supply_monitor_ready(void);
 bool drv_system_supply_is_good(void);
+bool drv_system_flash_supply_is_safe(void);
 bool drv_system_wait_for_supply_stable(void);
 void drv_system_supply_qualifier_stop(void);
 DRV_SYSTEM_NORETURN void drv_system_reset(void);

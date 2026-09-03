@@ -175,10 +175,22 @@ bool drv_system_supply_is_good(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : bool drv_system_flash_supply_is_safe(void)
+ * Input       : 无
+ * Output      : true表示PVD已就绪且当前VDD高于启动资格门限
+ * Description : 仅作为Flash擦写前的否决条件；不触发保存、不产生欠压Fault，也不使能PVD IRQ/Reset。
+ *---------------------------------------------------------------------------*/
+bool drv_system_flash_supply_is_safe(void)
+{
+    return (DDL_PMU_IsEnabledPVD() != 0U) && drv_system_supply_monitor_ready() &&
+           drv_system_supply_is_good();
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : void drv_system_supply_qualifier_stop(void)
  * Input       : 无
  * Output      : 无
- * Description : 供电资格通过或PVD模块异常后关闭PVD；正常运行阶段不使用PVD做弱光保护。
+ * Description : PVD用于启动供电资格并在正常启动后保留为只读Flash写入veto；始终不启用PVD IRQ/Reset。
  *---------------------------------------------------------------------------*/
 void drv_system_supply_qualifier_stop(void)
 {
@@ -259,7 +271,7 @@ bool drv_system_wait_for_supply_stable(void)
         __WFI();
     }
 
-    drv_system_supply_qualifier_stop();
+    /* 正常启动后保留PVD为无中断、无复位的只读电源监测器；Flash只读取它做写入veto。 */
     return true;
 }
 

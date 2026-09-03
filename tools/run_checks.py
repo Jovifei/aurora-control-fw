@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed运行架构、编码、Host编译/测试、Sanitizer和目标端语法门禁。"""
+"""Fail-closed运行架构、编码、Host编译/测试、Sanitizer和目标端资源门禁。"""
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,4 +30,6 @@ run(["cmake", "-S", ".", "-B", "build-sanitize", "-G", "Ninja", "-DCMAKE_C_COMPI
 run(["cmake", "--build", "build-sanitize"])
 run(["ctest", "--test-dir", "build-sanitize", "--output-on-failure"])
 run([sys.executable, "tools/check_target_syntax.py"])
+run([sys.executable, "tools/check_target_stack.py"])
+run([sys.executable, "tools/check_target_ram.py"])
 print("ALL CHECKS PASSED")

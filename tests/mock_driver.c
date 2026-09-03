@@ -32,6 +32,10 @@ static uint32_t g_watchdog_feeds;
 static uint8_t g_uart_tx[MOCK_UART_TX_CAPACITY];
 static size_t g_uart_tx_length;
 static uint8_t g_flash[MOCK_FLASH_SIZE_BYTES];
+static bool g_flash_supply_safe;
+static uint32_t g_flash_fail_program_remaining;
+static uint32_t g_flash_erase_counter;
+static uint32_t g_flash_program_counter;
 
 /*---------------------------------------------------------------------------*
  * Name        : static bool flash_range(uint32_t address, size_t length, size_t *offset)
@@ -78,6 +82,10 @@ void mock_reset(void)
     g_fault_led = false;
     g_watchdog_feeds = 0U;
     g_uart_tx_length = 0U;
+    g_flash_supply_safe = true;
+    g_flash_fail_program_remaining = 0U;
+    g_flash_erase_counter = 0U;
+    g_flash_program_counter = 0U;
     memset(g_flash, 0xFF, sizeof(g_flash));
 }
 
@@ -252,6 +260,61 @@ void drv_irq_restore(aurora_irq_state_t state)
  *---------------------------------------------------------------------------*/
 void drv_irq_configure_priorities(void)
 {
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void mock_set_flash_supply_safe(bool safe)
+ * Input       : safe - true表示VDD满足Flash写入资格；false表示模拟欠压/棕断
+ * Output      : 无
+ * Description : 只改变Flash写入veto，不主动触发保存或Fault。
+ *---------------------------------------------------------------------------*/
+void mock_set_flash_supply_safe(bool safe)
+{
+    g_flash_supply_safe = safe;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void mock_fail_next_flash_program(uint32_t count)
+ * Input       : count - 后续需要失败的program调用次数
+ * Output      : 无
+ * Description : 注入供电仍正常时的真实Flash编程I/O失败，用于验证同页一次重试和写入抑制。
+ *---------------------------------------------------------------------------*/
+void mock_fail_next_flash_program(uint32_t count)
+{
+    g_flash_fail_program_remaining = count;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t mock_flash_erase_count(void)
+ * Input       : 无
+ * Output      : 本测试累计的有效Flash擦除尝试次数
+ * Description : 用于断言欠压和非停机状态不会触碰Flash。
+ *---------------------------------------------------------------------------*/
+uint32_t mock_flash_erase_count(void)
+{
+    return g_flash_erase_counter;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : uint32_t mock_flash_program_count(void)
+ * Input       : 无
+ * Output      : 本测试累计的有效Flash编程尝试次数
+ * Description : 用于验证事务写次数和失败重试边界。
+ *---------------------------------------------------------------------------*/
+uint32_t mock_flash_program_count(void)
+{
+    return g_flash_program_counter;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_system_flash_supply_is_safe(void)
+ * Input       : 无
+ * Output      : Host模拟的Flash供电资格
+ * Description : 与目标PVD只读veto接口保持一致。
+ *---------------------------------------------------------------------------*/
+bool drv_system_flash_supply_is_safe(void)
+{
+    return g_flash_supply_safe;
 }
 
 /*---------------------------------------------------------------------------*
@@ -668,42 +731,62 @@ bool drv_flash_read(uint32_t address, void *data, size_t length)
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_flash_erase_page(uint32_t address)
  * Input       : address - 待擦除页首地址
- * Output      : true表示整页已恢复为0xFF；false表示PWM仍在运行、地址越界或未按物理页对齐
- * Description : 模拟目标端Flash页擦除门禁，功率输出有效时绝不允许修改NVM。
+ * Output      : true表示整页已恢复为0xFF；false表示PWM/VDD/地址门禁或注入错误
+ * Description : Host模拟与目标一致：只允许A/B整页、PWM关闭、VDD资格有效时擦除。
  *---------------------------------------------------------------------------*/
 bool drv_flash_erase_page(uint32_t address)
 {
     size_t offset;
 
-    if (g_pwm_active ||
+    if (g_pwm_active || !g_flash_supply_safe ||
         !flash_range(address, MOCK_FLASH_PAGE_SIZE_BYTES, &offset) ||
-        ((offset % MOCK_FLASH_PAGE_SIZE_BYTES) != 0U)) {
+        ((address != MOCK_FLASH_BASE_ADDRESS) &&
+         (address != (MOCK_FLASH_BASE_ADDRESS + MOCK_FLASH_PAGE_SIZE_BYTES))))
+    {
         return false;
     }
 
+    g_flash_erase_counter++;
     memset(&g_flash[offset], 0xFF, MOCK_FLASH_PAGE_SIZE_BYTES);
     return true;
 }
 
 /*---------------------------------------------------------------------------*
  * Name        : bool drv_flash_program(uint32_t address, const void *data, size_t length)
- * Input       : address - 起始编程地址；data - 待写入数据；length - 编程长度
- * Output      : true表示编程完成；false表示参数非法、地址越界或PWM仍在运行
- * Description : 使用按位与模拟Flash只能从1写成0的物理特性，并保持功率运行期间禁止写Flash的门禁。
+ * Input       : address - 起始编程地址；data - 数据；length - 长度
+ * Output      : true表示编程完成；false表示地址/供电/PWM门禁或注入I/O失败
+ * Description : 仅允许单个512字节Journal页内4字节对齐写入；地址0、跨页和欠压一律拒绝。
  *---------------------------------------------------------------------------*/
 bool drv_flash_program(uint32_t address, const void *data, size_t length)
 {
     size_t offset;
     size_t i;
+    const uint64_t end_address = (uint64_t)address + (uint64_t)length;
+    const uint64_t page_a_end = (uint64_t)MOCK_FLASH_BASE_ADDRESS + MOCK_FLASH_PAGE_SIZE_BYTES;
+    const uint64_t page_b_start = page_a_end;
+    const uint64_t page_b_end = page_b_start + MOCK_FLASH_PAGE_SIZE_BYTES;
+    const bool in_one_page =
+        (((uint64_t)address >= MOCK_FLASH_BASE_ADDRESS) && (end_address <= page_a_end)) ||
+        (((uint64_t)address >= page_b_start) && (end_address <= page_b_end));
 
-    if ((data == NULL) || g_pwm_active || !flash_range(address, length, &offset)) {
+    if ((data == NULL) || (length == 0U) || g_pwm_active || !g_flash_supply_safe ||
+        ((address & 3U) != 0U) || ((length & 3U) != 0U) || !in_one_page ||
+        !flash_range(address, length, &offset))
+    {
         return false;
     }
 
-    for (i = 0U; i < length; ++i) {
-        g_flash[offset + i] &= ((const uint8_t *)data)[i];
+    g_flash_program_counter++;
+    if (g_flash_fail_program_remaining != 0U)
+    {
+        g_flash_fail_program_remaining--;
+        return false;
     }
 
+    for (i = 0U; i < length; ++i)
+    {
+        g_flash[offset + i] &= ((const uint8_t *)data)[i];
+    }
     return true;
 }
 

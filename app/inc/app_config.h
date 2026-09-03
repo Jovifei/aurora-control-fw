@@ -322,7 +322,11 @@
 /* 主动遥测与存储。 */
 #define AURORA_TELEMETRY_PERIOD_MS                  (1000U)
 #define AURORA_STORAGE_DIRTY_HOLD_MS                (1000U)
-/* 运行中每60s提出一次能量保存请求；真正擦写仍只在PWM OFF且Relay OFF安全窗口。 */
+/* 进入OFF/WAIT_PV/NO_SUN/FAULT后还需稳定保持1s，禁止在启动/关波瞬态擦写Flash。 */
+#define AURORA_STORAGE_STOP_HOLD_MS                 (1000U)
+/* 单次事务I/O或回读失败时只允许在同一备用页重试一次，禁止切页追写。 */
+#define AURORA_STORAGE_WRITE_ATTEMPTS               (2U)
+/* 运行中每60s只提出RAM保存请求；真正擦写必须等待稳定停机且VDD资格有效。 */
 #define AURORA_ENERGY_PERSIST_REQUEST_MS            (60000U)
 /* 继承120W的49点累计量窗口：每30min一个快照，48个间隔构成24h。 */
 #define AURORA_ENERGY_HISTORY_INTERVAL_MS            (30UL * 60UL * 1000UL)

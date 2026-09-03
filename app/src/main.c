@@ -34,6 +34,41 @@
 /* 目标中断桥接与主循环共享的唯一运行实例。 */
 aurora_runtime_t g_aurora_runtime;
 
+/* Flash Journal单线程工作页；避免512B页缓冲占用目标仅1KB的启动栈。 */
+static uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE];
+
+/* 主循环独占的协议收发工作区；ISR只写RX环形缓冲，不得访问这里。 */
+typedef struct
+{
+    aurora_protocol_frame_t request;                 /* 已校验的当前请求帧。 */
+    aurora_protocol_frame_t tx_frame;                /* 应答或主动遥测发送帧。 */
+    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];          /* 线格式编码缓冲。 */
+} runtime_protocol_workspace_t;
+
+/* 单实例裸机主循环可安全复用，避免约420B协议临时对象压入1KB调用栈。 */
+static runtime_protocol_workspace_t g_protocol_workspace;
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool storage_bytes_equal(const uint8_t *left,
+ *               const uint8_t *right, size_t length)
+ * Input       : left/right - 待比较字节块；length - 有界长度
+ * Output      : true表示逐字节完全一致
+ * Description : Flash回读只比较32B小块，避免为裸机目标额外依赖memcmp库符号。
+ *---------------------------------------------------------------------------*/
+static bool storage_bytes_equal(const uint8_t *left, const uint8_t *right, size_t length)
+{
+    size_t index;
+
+    for (index = 0U; index < length; ++index)
+    {
+        if (left[index] != right[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*---------------------------------------------------------------------------*
  * Name        : static uint32_t min_u32(uint32_t a, uint32_t b)
  * Input       : a/b - 两个无符号32位值
@@ -509,14 +544,12 @@ static void process_adc(aurora_runtime_t *runtime)
  *               uint32_t now_ms)
  * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 按预算消费RX环形缓冲、推进协议解析并发送应答，避免通信长期占用主循环。
+ * Description : 按预算消费RX环形缓冲、推进协议解析并发送应答；请求/发送/线缓冲复用主循环静态工作区，
+ *               避免约420B协议对象占用目标1KB调用栈。
  *---------------------------------------------------------------------------*/
 static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
 {
-    aurora_protocol_frame_t request;
-    aurora_protocol_frame_t response;
     bool has_response;
-    uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
     size_t wire_length;
     uint32_t budget = AURORA_RUNTIME_UART_RX_BUDGET;
 
@@ -535,15 +568,18 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
         budget--;
 
         aurora_protocol_feed_byte(&runtime->app.protocol, byte, now_ms);
-        if (aurora_protocol_take_frame(&runtime->app.protocol, &request))
+        if (aurora_protocol_take_frame(&runtime->app.protocol, &g_protocol_workspace.request))
         {
-            aurora_app_on_protocol_frame(&runtime->app, &request, &response, &has_response, now_ms);
+            aurora_app_on_protocol_frame(&runtime->app, &g_protocol_workspace.request,
+                                         &g_protocol_workspace.tx_frame, &has_response, now_ms);
             if (has_response)
             {
-                wire_length = aurora_protocol_encode(&response, wire, sizeof(wire));
+                wire_length = aurora_protocol_encode(&g_protocol_workspace.tx_frame,
+                                                     g_protocol_workspace.wire,
+                                                     sizeof(g_protocol_workspace.wire));
                 if (wire_length != 0U)
                 {
-                    (void)drv_uart_send(wire, wire_length);
+                    (void)drv_uart_send(g_protocol_workspace.wire, wire_length);
                 }
             }
         }
@@ -556,41 +592,48 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static aurora_storage_page_status_t storage_read_page(
+ *               uint32_t address, aurora_persistent_settings_t *settings,
+ *               uint32_t *sequence)
+ * Input       : address - A/B页地址；settings/sequence - 分类输出
+ * Output      : 页分类状态
+ * Description : 使用唯一静态512B工作页读取并分类，避免启动阶段在1KB目标栈分配整页。
+ *---------------------------------------------------------------------------*/
+static aurora_storage_page_status_t storage_read_page(uint32_t address,
+                                                       aurora_persistent_settings_t *settings,
+                                                       uint32_t *sequence)
+{
+    if (!drv_flash_read(address, g_storage_page_workspace, sizeof(g_storage_page_workspace)))
+    {
+        return AURORA_STORAGE_PAGE_IO_ERROR;
+    }
+    return aurora_storage_classify_page(g_storage_page_workspace, sizeof(g_storage_page_workspace),
+                                        settings, sequence);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void load_storage(aurora_runtime_t *runtime)
  * Input       : runtime - 应用运行上下文
  * Output      : 无
- * Description : 分类读取Flash A/B页并选择最新可信记录；单页异常安排安全窗口自愈。
+ * Description : 先顺序检查A/B状态和序号，再只重读最终选中的可信页；不在栈同时保留两页和两套settings。
  *---------------------------------------------------------------------------*/
 static void load_storage(aurora_runtime_t *runtime)
 {
-    uint8_t page_a[AURORA_STORAGE_PAGE_SIZE];
-    uint8_t page_b[AURORA_STORAGE_PAGE_SIZE];
-    aurora_persistent_settings_t settings_a = {0};
-    aurora_persistent_settings_t settings_b = {0};
     aurora_storage_page_status_t status_a;
     aurora_storage_page_status_t status_b;
+    aurora_storage_page_status_t selected_status;
     uint32_t seq_a = 0U;
     uint32_t seq_b = 0U;
+    uint32_t selected_sequence = 0U;
+    uint32_t selected_address;
     bool valid_a;
     bool valid_b;
+    bool choose_b;
     const uint32_t now_ms = drv_time_now_ms();
 
-    if (drv_flash_read(drv_board_flash_page_a(), page_a, sizeof(page_a)))
-    {
-        status_a = aurora_storage_classify_page(page_a, sizeof(page_a), &settings_a, &seq_a);
-    }
-    else
-    {
-        status_a = AURORA_STORAGE_PAGE_IO_ERROR;
-    }
-    if (drv_flash_read(drv_board_flash_page_b(), page_b, sizeof(page_b)))
-    {
-        status_b = aurora_storage_classify_page(page_b, sizeof(page_b), &settings_b, &seq_b);
-    }
-    else
-    {
-        status_b = AURORA_STORAGE_PAGE_IO_ERROR;
-    }
+    /* 首轮只收集A/B状态与序号；settings暂存可被下一页覆盖，最终选中后会重新读取。 */
+    status_a = storage_read_page(drv_board_flash_page_a(), &runtime->app.storage.settings, &seq_a);
+    status_b = storage_read_page(drv_board_flash_page_b(), &runtime->app.storage.settings, &seq_b);
 
     runtime->app.storage.page_a_status = status_a;
     runtime->app.storage.page_b_status = status_b;
@@ -601,18 +644,25 @@ static void load_storage(aurora_runtime_t *runtime)
 
     if (valid_a || valid_b)
     {
-        const bool choose_b = valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0));
+        choose_b = valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0));
+        selected_address = choose_b ? drv_board_flash_page_b() : drv_board_flash_page_a();
+        selected_status = storage_read_page(selected_address, &runtime->app.storage.settings,
+                                            &selected_sequence);
 
-        if (choose_b)
+        /* 第二次读取必须仍是同一可信记录；异常时禁止凭第一次快照继续应用或自愈擦写。 */
+        if (((selected_status != AURORA_STORAGE_PAGE_VALID) &&
+             (selected_status != AURORA_STORAGE_PAGE_VALID_LEGACY)) ||
+            (selected_sequence != (choose_b ? seq_b : seq_a)))
         {
-            runtime->app.storage.settings = settings_b;
-            runtime->app.storage.sequence = seq_b;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
+            runtime->app.storage.write_inhibited = true;
+            aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+            return;
         }
-        else
-        {
-            runtime->app.storage.settings = settings_a;
-            runtime->app.storage.sequence = seq_a;
-        }
+
+        runtime->app.storage.sequence = selected_sequence;
+        runtime->app.storage.active_page =
+            choose_b ? AURORA_STORAGE_ACTIVE_PAGE_B : AURORA_STORAGE_ACTIVE_PAGE_A;
         aurora_app_apply_settings(&runtime->app, &runtime->app.storage.settings, now_ms);
 
         runtime->app.storage.repair_pending = !valid_a || !valid_b ||
@@ -627,11 +677,153 @@ static void load_storage(aurora_runtime_t *runtime)
 
     if ((status_a == AURORA_STORAGE_PAGE_ERASED) && (status_b == AURORA_STORAGE_PAGE_ERASED))
     {
+        runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
         aurora_storage_mark_dirty(&runtime->app.storage, now_ms);
         return;
     }
 
+    /* 两页均无可信记录时禁止本会话继续自动擦写，避免在未知配置上反复自愈。 */
+    runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
+    runtime->app.storage.write_inhibited = true;
     aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool storage_state_allows_write(const aurora_runtime_t *runtime)
+ * Input       : runtime - 应用运行上下文
+ * Output      : true表示当前处于稳定停机类状态
+ * Description : 只允许OFF/WAIT_PV/NO_SUN/FAULT落盘；启动、预充、Relay握手和RUN阶段一律只保留RAM dirty。
+ *---------------------------------------------------------------------------*/
+static bool storage_state_allows_write(const aurora_runtime_t *runtime)
+{
+    switch (runtime->app.power_stage.state)
+    {
+    case AURORA_POWER_OFF:
+    case AURORA_POWER_WAIT_PV:
+    case AURORA_POWER_NO_SUN:
+    case AURORA_POWER_FAULT:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static uint32_t storage_inactive_page(const aurora_storage_ctx_t *storage)
+ * Input       : storage - Journal运行状态
+ * Output      : 下一次只允许擦写的备用页地址；状态非法时返回0
+ * Description : 永远写当前可信页的另一页；无可信页时从A页开始，失败重试仍保持同一目标页。
+ *---------------------------------------------------------------------------*/
+static uint32_t storage_inactive_page(const aurora_storage_ctx_t *storage)
+{
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_PAGE_A)
+    {
+        return drv_board_flash_page_b();
+    }
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_PAGE_B)
+    {
+        return drv_board_flash_page_a();
+    }
+    if (storage->active_page == AURORA_STORAGE_ACTIVE_NONE)
+    {
+        return drv_board_flash_page_a();
+    }
+    return 0U;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static aurora_status_t storage_write_transaction(
+ *               const aurora_storage_ctx_t *storage, uint32_t next_sequence,
+ *               uint32_t target, uint8_t *page)
+ * Input       : storage - 当前设置；next_sequence - 待提交序号；target - 固定备用页；
+ *               page - 唯一静态512B工作页
+ * Output      : OK成功；NOT_READY表示VDD失去资格需延后；INVALID/IO_ERROR表示真实事务错误
+ * Description : 擦备用页→写正文→最后Commit→32B小块回读逐字节比对；避免完整page/settings验证副本占目标栈。
+ *---------------------------------------------------------------------------*/
+static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *storage,
+                                                  uint32_t next_sequence, uint32_t target,
+                                                  uint8_t *page)
+{
+    uint8_t verify[32];
+    const uint32_t marker = AURORA_STORAGE_COMMIT_MARKER;
+    size_t used;
+    size_t offset;
+
+    used = aurora_storage_encode_page_sequence(&storage->settings, next_sequence, page,
+                                               AURORA_STORAGE_PAGE_SIZE, false);
+    if (used < AURORA_STORAGE_HEADER_SIZE)
+    {
+        return AURORA_STATUS_INVALID;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_erase_page(target))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
+                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
+                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET, &marker, sizeof(marker)))
+    {
+        return drv_system_flash_supply_is_safe() ? AURORA_STATUS_IO_ERROR
+                                                 : AURORA_STATUS_NOT_READY;
+    }
+    if (!drv_system_flash_supply_is_safe())
+    {
+        return AURORA_STATUS_NOT_READY;
+    }
+
+    /* 重新编码committed镜像作为期望值；不再分配448B verified_settings做整页解码。 */
+    if (aurora_storage_encode_page_sequence(&storage->settings, next_sequence, page,
+                                            AURORA_STORAGE_PAGE_SIZE, true) != used)
+    {
+        return AURORA_STATUS_INVALID;
+    }
+
+    for (offset = 0U; offset < AURORA_STORAGE_PAGE_SIZE; offset += sizeof(verify))
+    {
+        size_t chunk = AURORA_STORAGE_PAGE_SIZE - offset;
+        if (chunk > sizeof(verify))
+        {
+            chunk = sizeof(verify);
+        }
+        if (!drv_flash_read(target + (uint32_t)offset, verify, chunk) ||
+            !storage_bytes_equal(verify, &page[offset], chunk))
+        {
+            return AURORA_STATUS_IO_ERROR;
+        }
+        if (!drv_system_flash_supply_is_safe())
+        {
+            return AURORA_STATUS_NOT_READY;
+        }
+    }
+    return AURORA_STATUS_OK;
 }
 
 /*---------------------------------------------------------------------------*
@@ -639,51 +831,75 @@ static void load_storage(aurora_runtime_t *runtime)
  *               uint32_t now_ms)
  * Input       : runtime - 应用运行上下文；now_ms - 当前毫秒
  * Output      : 无
- * Description : 只有PWM关闭且物理继电器断开时执行双页Journal保存，Commit Marker最后写入。
+ * Description : 只在稳定停机+Relay/PWM物理关闭+VDD资格有效时写备用页；成功回读后才切换Journal提交状态。
  *---------------------------------------------------------------------------*/
 static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
 {
-    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
+    aurora_status_t status = AURORA_STATUS_IO_ERROR;
     uint32_t target;
-    size_t used;
+    uint32_t next_sequence;
+    uint8_t attempt;
 
-    if (!runtime->app.storage.dirty ||
+    if (!runtime->app.storage.dirty || runtime->app.storage.write_inhibited ||
         ((now_ms - runtime->app.storage.dirty_since_ms) < AURORA_STORAGE_DIRTY_HOLD_MS) ||
+        !storage_state_allows_write(runtime) ||
+        ((now_ms - runtime->app.power_stage.state_since_ms) < AURORA_STORAGE_STOP_HOLD_MS) ||
         drv_pwm_output_active() || runtime->relay_applied)
     {
         return;
     }
 
-    runtime->app.storage.sequence++;
-    target = ((runtime->app.storage.sequence & 1U) != 0U) ? drv_board_flash_page_a()
-                                                          : drv_board_flash_page_b();
-    used = aurora_storage_encode_page(&runtime->app.storage, page, sizeof(page), false);
-    if ((used < AURORA_STORAGE_HEADER_SIZE) || !drv_flash_erase_page(target) ||
-        !drv_flash_program(target, page, AURORA_STORAGE_COMMIT_OFFSET) ||
-        !drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t),
-                           &page[AURORA_STORAGE_COMMIT_OFFSET + sizeof(uint32_t)],
-                           used - AURORA_STORAGE_COMMIT_OFFSET - sizeof(uint32_t)))
+    /* 欠压/棕断只延后保存；绝不把LVD/PVD事件当成一次“最后写Flash”的触发源。 */
+    if (!drv_system_flash_supply_is_safe())
     {
+        return;
+    }
+
+    target = storage_inactive_page(&runtime->app.storage);
+    if (target == 0U)
+    {
+        runtime->app.storage.write_inhibited = true;
         aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
         return;
     }
 
-    if (!drv_flash_program(target + AURORA_STORAGE_COMMIT_OFFSET,
-                           &((uint32_t){AURORA_STORAGE_COMMIT_MARKER}), sizeof(uint32_t)))
+    next_sequence = runtime->app.storage.sequence + 1U;
+    for (attempt = 0U; attempt < AURORA_STORAGE_WRITE_ATTEMPTS; ++attempt)
     {
-        aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
-        return;
+        status = storage_write_transaction(&runtime->app.storage, next_sequence, target,
+                                           g_storage_page_workspace);
+        if (status == AURORA_STATUS_OK)
+        {
+            runtime->app.storage.sequence = next_sequence;
+            runtime->app.storage.active_page =
+                (target == drv_board_flash_page_a()) ? AURORA_STORAGE_ACTIVE_PAGE_A
+                                                     : AURORA_STORAGE_ACTIVE_PAGE_B;
+            runtime->app.storage.dirty = false;
+            runtime->app.storage.repair_pending = false;
+            if (target == drv_board_flash_page_a())
+            {
+                runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
+            }
+            else
+            {
+                runtime->app.storage.page_b_status = AURORA_STORAGE_PAGE_VALID;
+            }
+            return;
+        }
+        if (status == AURORA_STATUS_NOT_READY)
+        {
+            /* VDD资格丢失时保留旧active page和dirty，等待下一次稳定停机窗口。 */
+            return;
+        }
+        if (status == AURORA_STATUS_INVALID)
+        {
+            break;
+        }
+        /* IO_ERROR只允许在同一个target备用页上再试一次，绝不递增已提交sequence或切到active页。 */
     }
-    runtime->app.storage.dirty = false;
-    runtime->app.storage.repair_pending = false;
-    if (target == drv_board_flash_page_a())
-    {
-        runtime->app.storage.page_a_status = AURORA_STORAGE_PAGE_VALID;
-    }
-    else
-    {
-        runtime->app.storage.page_b_status = AURORA_STORAGE_PAGE_VALID;
-    }
+
+    runtime->app.storage.write_inhibited = true;
+    aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
 }
 
 /*---------------------------------------------------------------------------*
@@ -776,7 +992,6 @@ void aurora_app_init(aurora_app_t *app, const aurora_measurement_calibration_t *
 void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settings_t *settings,
                                uint32_t now_ms)
 {
-    aurora_persistent_settings_t sanitized;
     bool demo_power_clamped;
 
     if ((app == NULL) || (settings == NULL) || (settings->chemistry >= AURORA_CHEM_COUNT) ||
@@ -789,19 +1004,22 @@ void aurora_app_apply_settings(aurora_app_t *app, const aurora_persistent_settin
         return;
     }
 
-    sanitized = *settings;
-    demo_power_clamped = sanitized.demo_power_limit_mw > AURORA_DEMO_HARD_POWER_CAP_MW;
+    demo_power_clamped = settings->demo_power_limit_mw > AURORA_DEMO_HARD_POWER_CAP_MW;
+    if (settings != &app->storage.settings)
+    {
+        app->storage.settings = *settings;
+    }
     if (demo_power_clamped)
     {
-        sanitized.demo_power_limit_mw = AURORA_DEMO_HARD_POWER_CAP_MW;
+        app->storage.settings.demo_power_limit_mw = AURORA_DEMO_HARD_POWER_CAP_MW;
     }
 
-    app->storage.settings = sanitized;
     aurora_storage_energy_history_update(&app->storage.settings);
     app->energy_accumulator_mw_ms = app->storage.settings.pv_energy_remainder_mw_ms;
     app->charge_energy_accumulator_mw_ms = app->storage.settings.charge_est_energy_remainder_mw_ms;
     app->last_energy_history_ms = now_ms;
-    aurora_charger_init(&app->charger, sanitized.chemistry, sanitized.pack, now_ms);
+    aurora_charger_init(&app->charger, app->storage.settings.chemistry, app->storage.settings.pack,
+                        now_ms);
     aurora_mppt_reset(&app->mppt);
     aurora_power_stage_init(&app->power_stage, now_ms);
     aurora_measurement_zero_cal_reset(&app->measurement);
@@ -1140,11 +1358,10 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
         if ((frame->data_length == AURORA_PROTOCOL_SETTING_DATA_LENGTH) &&
             (frame->data[0] < AURORA_CHEM_COUNT) && (frame->data[1] < AURORA_PACK_COUNT))
         {
-            aurora_persistent_settings_t settings = app->storage.settings;
-            settings.chemistry = (aurora_battery_chem_t)frame->data[0];
-            settings.pack = (aurora_battery_pack_t)frame->data[1];
-            settings.settings_revision++;
-            aurora_app_apply_settings(app, &settings, now_ms);
+            app->storage.settings.chemistry = (aurora_battery_chem_t)frame->data[0];
+            app->storage.settings.pack = (aurora_battery_pack_t)frame->data[1];
+            app->storage.settings.settings_revision++;
+            aurora_app_apply_settings(app, &app->storage.settings, now_ms);
             aurora_storage_mark_dirty(&app->storage, now_ms);
             result = AURORA_PROTOCOL_RESULT_OK;
         }
@@ -1164,10 +1381,9 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
         if ((frame->data_length == AURORA_PROTOCOL_MODE_DATA_LENGTH) &&
             (frame->data[0] < AURORA_MODE_COUNT))
         {
-            aurora_persistent_settings_t settings = app->storage.settings;
-            settings.operating_mode = (aurora_operating_mode_t)frame->data[0];
-            settings.settings_revision++;
-            aurora_app_apply_settings(app, &settings, now_ms);
+            app->storage.settings.operating_mode = (aurora_operating_mode_t)frame->data[0];
+            app->storage.settings.settings_revision++;
+            aurora_app_apply_settings(app, &app->storage.settings, now_ms);
             aurora_storage_mark_dirty(&app->storage, now_ms);
             result = AURORA_PROTOCOL_RESULT_OK;
         }
@@ -1190,11 +1406,10 @@ void aurora_app_on_protocol_frame(aurora_app_t *app, const aurora_protocol_frame
             if ((voltage_mv > 0U) && (voltage_mv <= AURORA_DEMO_MAX_TARGET_VOLTAGE_MV) &&
                 (power_mw > 0U) && (power_mw <= AURORA_DEMO_HARD_POWER_CAP_MW))
             {
-                aurora_persistent_settings_t settings = app->storage.settings;
-                settings.demo_target_voltage_mv = voltage_mv;
-                settings.demo_power_limit_mw = power_mw;
-                settings.settings_revision++;
-                aurora_app_apply_settings(app, &settings, now_ms);
+                app->storage.settings.demo_target_voltage_mv = voltage_mv;
+                app->storage.settings.demo_power_limit_mw = power_mw;
+                app->storage.settings.settings_revision++;
+                aurora_app_apply_settings(app, &app->storage.settings, now_ms);
                 aurora_storage_mark_dirty(&app->storage, now_ms);
                 result = AURORA_PROTOCOL_RESULT_OK;
             }
@@ -1359,18 +1574,18 @@ void aurora_runtime_poll(aurora_runtime_t *runtime)
 
     if ((now_ms - runtime->last_telemetry_ms) >= AURORA_TELEMETRY_PERIOD_MS)
     {
-        aurora_protocol_frame_t telemetry;
-        uint8_t wire[AURORA_PROTOCOL_MAX_WIRE];
         size_t wire_length;
 
         aurora_protocol_fill_telemetry_ex(
-            &telemetry, runtime->app.telemetry_message_id++, &runtime->app.sample,
+            &g_protocol_workspace.tx_frame, runtime->app.telemetry_message_id++, &runtime->app.sample,
             runtime->app.charger.state, runtime->app.actual_power_transfer,
             aurora_protection_fault_mask(&runtime->app.protection), &runtime->app.storage.settings);
-        wire_length = aurora_protocol_encode(&telemetry, wire, sizeof(wire));
+        wire_length = aurora_protocol_encode(&g_protocol_workspace.tx_frame,
+                                             g_protocol_workspace.wire,
+                                             sizeof(g_protocol_workspace.wire));
         if (wire_length != 0U)
         {
-            (void)drv_uart_send(wire, wire_length);
+            (void)drv_uart_send(g_protocol_workspace.wire, wire_length);
         }
         runtime->last_telemetry_ms = now_ms;
     }
