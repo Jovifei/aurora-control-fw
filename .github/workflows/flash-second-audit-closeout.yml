@@ -1,0 +1,40 @@
+name: flash second audit closeout
+
+on:
+  push:
+    branches:
+      - codex/flash-safe-second-audit-work
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    if: ${{ !contains(github.event.head_commit.message, '[second-audit-closeout]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/flash-safe-second-audit-work
+          fetch-depth: 0
+
+      - name: 应用二次目标机审核修复
+        run: python tools/_flash_second_audit_closeout.py
+
+      - name: 完整质量门验证
+        shell: bash
+        run: |
+          git diff --check
+          python tools/run_checks.py
+
+      - name: 清理一次性工具并提交候选树
+        shell: bash
+        run: |
+          rm -f tools/_flash_second_audit_closeout.py
+          rm -f .github/workflows/flash-second-audit-closeout.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "修复：关闭协议栈溢出并收紧欠压Flash编程 [second-audit-closeout]"
+          git push origin HEAD:codex/flash-safe-second-audit-work
