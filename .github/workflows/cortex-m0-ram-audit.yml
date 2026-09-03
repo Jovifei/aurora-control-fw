@@ -1,0 +1,130 @@
+name: cortex m0 ram audit
+
+on:
+  push:
+    branches:
+      - codex/cortex-m0-ram-audit
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/cortex-m0-ram-audit
+
+      - name: 编译Keil实际C源并统计RAM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/aurora-ram-stub /tmp/aurora-ram-obj
+          cat > /tmp/aurora-ram-stub/string.h <<'EOF'
+          #ifndef AURORA_RAM_STRING_H
+          #define AURORA_RAM_STRING_H
+          #include <stddef.h>
+          void *memset(void *s, int c, size_t n);
+          void *memcpy(void *dest, const void *src, size_t n);
+          void *memmove(void *dest, const void *src, size_t n);
+          #endif
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path('.').resolve()
+          project = ET.parse('project/AuroraControl.uvprojx')
+          sources = []
+          for node in project.findall('.//FilePath'):
+              raw = (node.text or '').replace('\\', '/')
+              if raw.lower().endswith('.c'):
+                  path = (root / 'project' / raw).resolve()
+                  sources.append(path.relative_to(root).as_posix())
+          Path('/tmp/aurora-ram-sources.txt').write_text('\n'.join(sources) + '\n', encoding='utf-8')
+          print(f'Keil C sources: {len(sources)}')
+          for source in sources:
+              print(source)
+          PY
+
+          COMMON=(
+            --target=arm-none-eabi
+            -mcpu=cortex-m0plus
+            -mthumb
+            -std=c11
+            -ffreestanding
+            -O1
+            -DUSE_FULL_DDL_DRIVER
+            -DG32F031xx
+            -I/tmp/aurora-ram-stub
+            -Iapp/inc
+            -Idriver/inc
+            -Ivendor/cmsis/Include
+            -Ivendor/device/Include
+            -Ivendor/ddl/Include
+            -w
+          )
+          index=0
+          while IFS= read -r src; do
+            [[ -n "${src}" ]] || continue
+            obj="/tmp/aurora-ram-obj/${index}.o"
+            clang "${COMMON[@]}" -c "${src}" -o "${obj}"
+            index=$((index + 1))
+          done < /tmp/aurora-ram-sources.txt
+
+          SIZE_TOOL="$(command -v llvm-size || command -v llvm-size-18 || command -v size)"
+          echo "SIZE_TOOL=${SIZE_TOOL}"
+          "${SIZE_TOOL}" /tmp/aurora-ram-obj/*.o > /tmp/aurora-size.txt
+          cat /tmp/aurora-size.txt
+
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          rows = Path('/tmp/aurora-size.txt').read_text().splitlines()
+          data_total = 0
+          bss_total = 0
+          object_rows = []
+          for line in rows:
+              parts = line.split()
+              if len(parts) < 6 or parts[0] == 'text':
+                  continue
+              try:
+                  data = int(parts[1])
+                  bss = int(parts[2])
+              except ValueError:
+                  continue
+              data_total += data
+              bss_total += bss
+              object_rows.append((data + bss, data, bss, parts[-1]))
+
+          startup = Path('vendor/device/Source/startup_g32f031.s').read_text(encoding='utf-8')
+          stack_match = re.search(r'Stack_Size\s+EQU\s+(0x[0-9A-Fa-f]+)', startup)
+          heap_match = re.search(r'Heap_Size\s+EQU\s+(0x[0-9A-Fa-f]+)', startup)
+          if not stack_match or not heap_match:
+              raise SystemExit('cannot parse stack/heap sizes')
+          stack = int(stack_match.group(1), 16)
+          heap = int(heap_match.group(1), 16)
+          ram_total = 8192
+          static_ram = data_total + bss_total
+          reserved = static_ram + stack + heap
+          free = ram_total - reserved
+
+          print('=== RAM SUMMARY ===')
+          print(f'.data total: {data_total} B')
+          print(f'.bss total : {bss_total} B')
+          print(f'C static RAM: {static_ram} B')
+          print(f'Stack: {stack} B')
+          print(f'Heap : {heap} B')
+          print(f'Estimated reserved RAM: {reserved} / {ram_total} B')
+          print(f'Estimated remaining RAM: {free} B')
+          print('=== largest object writable RAM ===')
+          for total, data, bss, name in sorted(object_rows, reverse=True)[:20]:
+              print(f'{total:5d} B data={data:4d} bss={bss:4d} {name}')
+
+          # Audit only: require at least 512 B free beyond declared stack+heap before considering a permanent gate.
+          if free < 512:
+              raise SystemExit(f'RAM AUDIT FAIL: only {free} B estimated free')
+          print('RAM AUDIT PASS: >=512 B estimated free beyond declared stack+heap')
+          PY
