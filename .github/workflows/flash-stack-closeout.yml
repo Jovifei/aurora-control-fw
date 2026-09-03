@@ -35,6 +35,20 @@ jobs:
           if text.count(old) != 1:
               raise SystemExit('old staged sequence contract not found exactly once')
           contract.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          main_path = Path('app/src/main.c')
+          main = main_path.read_text(encoding='utf-8')
+          marker = '''/* Flash Journal单线程工作页；避免512B页缓冲占用目标仅1KB的启动栈。 */\nstatic uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE];\n'''
+          helper = '''/* Flash Journal单线程工作页；避免512B页缓冲占用目标仅1KB的启动栈。 */\nstatic uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE];\n\n/*---------------------------------------------------------------------------*\n * Name        : static bool storage_bytes_equal(const uint8_t *left,\n *               const uint8_t *right, size_t length)\n * Input       : left/right - 待比较字节块；length - 有界长度\n * Output      : true表示逐字节完全一致\n * Description : Flash回读只比较32B小块，避免为裸机目标额外依赖memcmp库符号。\n *---------------------------------------------------------------------------*/\nstatic bool storage_bytes_equal(const uint8_t *left, const uint8_t *right, size_t length)\n{\n    size_t index;\n\n    for (index = 0U; index < length; ++index)\n    {\n        if (left[index] != right[index])\n        {\n            return false;\n        }\n    }\n    return true;\n}\n'''
+          if main.count(marker) != 1:
+              raise SystemExit('storage workspace insertion point not found exactly once')
+          main = main.replace(marker, helper, 1)
+          old_cmp = '(memcmp(verify, &page[offset], chunk) != 0)'
+          new_cmp = '!storage_bytes_equal(verify, &page[offset], chunk)'
+          if main.count(old_cmp) != 1:
+              raise SystemExit('memcmp flash verify expression not found exactly once')
+          main = main.replace(old_cmp, new_cmp, 1)
+          main_path.write_text(main, encoding='utf-8', newline='\n')
           PY
 
       - name: 完整质量门验证
