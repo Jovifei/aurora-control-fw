@@ -18,8 +18,11 @@ jobs:
           ref: codex/flash-safe-stop-persistence
           fetch-depth: 0
 
-      - name: 应用 Flash 安全持久化修复
-        run: python tools/_flash_safe_stop_patch.py
+      - name: 修正一次性补丁脚本并应用 Flash 安全持久化修复
+        shell: bash
+        run: |
+          python tools/_flash_safe_stop_patch_fix.py
+          python tools/_flash_safe_stop_patch.py
 
       - name: 完整质量门验证
         shell: bash
@@ -31,6 +34,7 @@ jobs:
         shell: bash
         run: |
           rm -f tools/_flash_safe_stop_patch.py
+          rm -f tools/_flash_safe_stop_patch_fix.py
           rm -f .github/workflows/flash-safe-stop-persistence.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
