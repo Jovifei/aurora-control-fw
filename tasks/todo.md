@@ -278,44 +278,53 @@ aurora `drv_watchdog.c` **没有这一步** → G2-D 移植时必须补上。
 
 ## 4. 批次 3 = G3 + G4 + G5（ADC 采样链 + DMA 双缓冲 + 工程量标定）
 
-> **前提**：进入本批时把 `DRV_DEVICE_MIGRATION_GATE` 依次推进到 `3U → 4U → 5U`，每推进一次都要重跑 Keil Rebuild 与静态验证。
+> **前提**：本批代码已把 `DRV_DEVICE_MIGRATION_GATE` 一次推到 `5U`（G3 软触发 / G4 DMA 以 `#if GATE==3` 与 `#if GATE>=4` 互斥保留）。实板仍须按 3→4→5 取证，未 PASS 不得把本批标绿。
 >
-> **⚠ 不得冒充**：目标工程现有 `DRV_ADC` 已经是「GTMR TRGO + 5 通道扫描 + EOS 中断」，看起来很像 G4。但它**通道映射与 aurora 冲突（§0.2/G0-2）、无 DMA 双缓冲、无 producer/consumer 序号、无 overrun 计数**，因此**不能拿现有实现直接标 G4 PASS**。G3/G4 必须在新 `drv_adc.c` 上重新取证。
+> 2026-09-02：Keil Rebuild **0 Error / 0 Warning**（`rebuild_g5.log`，Code=10192）。listing 含 `g32f031_ddl_dma.o`，无 `DRV_ADC_Init` / `DRV_ADC_IRQHandler`，无 `EnableAllOutputs`。实板未做。
+
+> **⚠ 不得冒充**：旧五通道 EOS / `DRV_ADC_*` 已删除。G4 取证必须针对新 DMA 双半缓冲路径。
 
 ### G3 单通道原始码验证（**不上 DMA**）
 
-- [ ] G3-1 新增 `drv_adc.h/.c`，本阶段只做「软触发单次转换 + 逐通道读原始码」路径；`DRV_ADC_*` 旧路径由 `DRV_DEVICE_MIGRATION_GATE` 关闭，**两套采样链不得同时使能**
+> **Jovi 2026-09-02**：G2 不配 PB1、不 Init ADC。PB1 不是漏移植。G3 新写路径一次性落地四件，禁止给 legacy 5 通道 `drv_adc.c` 补 PIN_1 冒充六通道。详见 doc46 §5.0 / §23.8。
+
+- [x] G3-0a GPIO 模拟掩码含 `PIN_1`（PB1 / ADC_IN4 / BST_U）
+- [x] G3-0b rank / 通道表含 CH4
+- [x] G3-0c Sequencer 与缓冲 / 索引从 5 改为 6（`CHANNEL_COUNT`、缓冲数组、采样时间表一并改）
+- [x] G3-0d 对外命名统一 **BST_U**；`BUS_U` 只允许一次性废弃别名，不得当成第二路
+- [x] G3-0e **G3 PASS 前置（书面）**：BST_U 26:1 → 理论满量程 ≈85.8 V；近满量程码 4080 标不可信。**注入/超参考台架未做**
+- [x] G3-1 新写 `drv_adc.h/.c`：`GATE==3` 软触发单通道；`GATE>=4` DMA。legacy `DRV_ADC_*` 已删
 - [ ] G3-2 逐通道注入 0.0 / 0.5 / 1.0 / 1.5 / 2.0 / 2.5 / 3.0 V，打印 `channel / raw / mean_100 / min / max / peak_to_peak / vdd_mv`
 - [ ] G3-3 对照 `Code_ideal = Vin / Vref * 4095`；**一次只动一条网络**确认物理映射
 - [ ] G3-4 BAT_U 高源阻抗建立时间专项：前一通道分别置近 0 V 与近 3.3 V，比较 BAT_U 读数差
 - [ ] G3-5 判据：6 通道映射 100% 一致、原始码单调、0~3.0 V 无跳码、单通道误差 ≤0.5%FS、BAT_U 建立时间合格、VREF/VDD 实测记录
-- [ ] G3-6 归档 `docs/bringup/G03-ADC原始码/{meter-data.csv,RESULT.md}`
+- [x] G3-6 归档 `docs/bringup/G03-ADC原始码/RESULT.md`（**IN_PROGRESS**，无 meter-data）
 
 ### G4 定时触发 + 6 通道扫描 + DMA 双半缓冲
 
-- [ ] G4-1 `g32f031_ddl_dma.c` 加入 uvprojx（**目标工程当前未包含，G4 必链接失败**）
-- [ ] G4-2 GTMR 预分频 63 / 自动重载 99 → 10 kHz TRGO；ADC 规则组 6 rank（CH1~CH6），DMA CH1 循环双块，16 次扫描/块
-- [ ] G4-3 DMA 索引顺序固定 `0=PV_I,1=PV_U,2=BAT_U,3=BST_U,4=NTC_MOS,5=NTC_AMB`
-- [ ] G4-4 ISR **只允许**：识别完成块、记录 block/sequence、置事件、清中断。**禁止**温度查表 / MPPT / 复杂保护状态机 / printf / Flash
-- [ ] G4-5 埋点 `producer_block / producer_sequence / consumer_sequence / DMA overwrite_count / ADC overrun_count`
-- [ ] G4-6 主循环读稳定快照；验证 stale 与 overrun 可检出
-- [ ] G4-7 SRAM 预算复核（8 KiB 总量：`g_adc_dma[2][96]` = 384 B + runtime 结构）
-- [ ] G4-8 看门狗新增 ADC 健康票，确认 2 h 无误复位、无 DMA 异常。**票据仍由 ISR 只置不喂**（G2-D4 不变量延伸到 ADC 票）
-- [ ] G4-9 **静态验证**：MAP 确认 `g32f031_ddl_dma.c` 已参与链接、`DRV_ADC_*` 无调用残留、ATMR MOE 仍未使能
-- [ ] G4-10 归档 `docs/bringup/G04-ADC-DMA/{README.md,scope-trigger.png,counters.csv,RESULT.md}`
+- [x] G4-1 `g32f031_ddl_dma.c` 加入 uvprojx（Rebuild 已编入 `g32f031_ddl_dma.o`）
+- [x] G4-2 GTMR 预分频 63 / 自动重载 99 → 10 kHz TRGO；ADC 规则组 6 rank（CH1~CH6），DMA CH1 循环双块，16 次扫描/块
+- [x] G4-3 DMA 索引顺序固定 `0=PV_I,1=PV_U,2=BAT_U,3=BST_U,4=NTC_MOS,5=NTC_AMB`
+- [x] G4-4 ISR **只允许**：识别完成块、记录 block/sequence、置 ADC 票、清中断。**禁止**温度查表 / MPPT / printf / Flash / feed
+- [x] G4-5 埋点 `producer_block / producer_sequence / consumer_sequence / DMA overwrite_count / ADC overrun_count`
+- [ ] G4-6 主循环读稳定快照；**实板**验证 stale 与 overrun 可检出
+- [x] G4-7 SRAM 预算复核（8 KiB 总量：`g_adc_dma[2][96]` = 384 B；本镜像 ZI=1968）
+- [x] G4-8 看门狗新增 ADC 健康票（ISR 只置不喂）。**2 h 无误复位未做**
+- [x] G4-9 **静态验证（listing）**：`g32f031_ddl_dma.o` 已链接、无 `DRV_ADC_*` 旧符号、无 `EnableAllOutputs`。完整 MAP 文件未开
+- [x] G4-10 归档 `docs/bringup/G04-ADC-DMA/RESULT.md`（**IN_PROGRESS**）
 
 ### G5 工程量换算与标定（上电前最关键一门）
 
-- [ ] G5-1 新增 `drv_board.h/.c`（标定提供者）+ 测量层 `Physical = K * Code + B`
-- [ ] G5-2 电压链理论值复核：PV_U 26:1 → ≈20.95 mV/code；BAT_U 15510/510≈30.41 → ≈24.51 mV/code；BST_U 26:1 → 理论满量程 ≈85.8 V
-- [ ] G5-3 **BST_U 量程风险显式落档**：87~93 V 超出理论满量程，**不可标称为可准确测量**，软件系数不得试图恢复饱和信息；`BOARD_ADC_NEAR_FULL_SCALE_CODE(4080)` 饱和判定必须生效
-- [ ] G5-4 PV_I 链：3 mΩ 采样电阻 × 内部 OPA ×16，VCM=AVDD/2，0 A 标称码 ≈2048，极性候选 +1，≈16.79 mA/code（2 A≈+119、6 A≈+357、12 A≈+715 码）
-- [ ] G5-5 标定点：PV_U 0/5/10/20/30/40/50 V；BAT_U 0/10/20/40/48/60/72/84 V；BST_U 0/10/20/40/60/75/82 V；PV_I 本阶段 0/0.5/1/2 A（4/6/9/12 A 留到 G8）
-- [ ] G5-6 NTC：5.1k 上拉 + 100K/B3950，验证短路/开路/0/25/60/95/105 °C；25 °C 理论 raw ≈3896、开路≈满量程、短路≈0
-- [ ] G5-7 初始精度门：电压 ≤1% 读数；PV_I(≥2 A) ≤3% 读数；PV_I 零点等效 ≤0.1 A；NTC 0~100 °C ≤2 °C；方向单调且极性唯一
-- [ ] G5-8 拟合系数回填 **`drv_board.h` / `drv_board.c`**（分压比、增益、零点、极性、NTC 表）；**严禁写入 `main.h` 或任何 `app/` 头文件**——板级标定只有一个真源（红线 #4）
-- [ ] G5-9 `DRV_DEVICE_GATE_ANALOG_CALIBRATED` **仅在证据齐全后**由人工置 1；`DRV_DEVICE_POWER_OUTPUT_ALLOWED` 本批**保持 0**（G5 不是上电放行门）
-- [ ] G5-10 归档 `docs/bringup/G05-工程量标定/{README.md,calib-points.csv,fit-report.md,RESULT.md}`
+- [x] G5-1 `drv_board.h/.c`：`Physical = K*(code-zero)*polarity/den`（BAT_U 走 int64）
+- [x] G5-2 电压链理论值写入头文件：PV_U ≈20.95 mV/code；BAT_U ≈24.51 mV/code；BST_U 满量程 ≈85.8 V
+- [x] G5-3 BST_U 量程风险落档；`DRV_ADC_NEAR_FULL_SCALE_CODE(4080)` 日志打 `!SAT`。**87~93 V 台架未做**
+- [x] G5-4 PV_I 理论链写入（OPA×16 / zero=2048 / +1）。**G7 前 OPA 未 Init，不能当产品电流**
+- [ ] G5-5 标定点：PV_U 0/5/10/20/30/40/50 V；BAT_U 0/10/20/40/48/60/72/84 V；BST_U 0/10/20/40/60/75/82 V；PV_I 本阶段 0/0.5/1/2 A
+- [ ] G5-6 NTC：短路/开路/0/25/60/95/105 °C；25 °C 理论 raw ≈3896
+- [ ] G5-7 初始精度门：电压 ≤1% 读数；PV_I(≥2 A) ≤3% 读数；NTC ≤2 °C
+- [x] G5-8 理论系数只在 `drv_board.h/.c`；禁止写入 `main.h`
+- [x] G5-9 `DRV_DEVICE_GATE_ANALOG_CALIBRATED=0`；`DRV_DEVICE_POWER_OUTPUT_ALLOWED=0`
+- [x] G5-10 归档 `docs/bringup/G05-工程量标定/RESULT.md`（**IN_PROGRESS**）
 
 ---
 
@@ -325,7 +334,7 @@ aurora `drv_watchdog.c` **没有这一步** → G2-D 移植时必须补上。
 |---|---|---|
 | ⚠⚠ | `ATMR_CR1_UDISEN` 两库位定义不同（bit1 vs bit2）+ `DDL_ATMR_InitTypeDef` 字段顺序不同 | 本次 G0~G5 不涉及 ATMR 业务；**G6 必须对着目标头文件重写 `drv_pwm.c`，禁止逐行照抄 aurora** |
 | ⚠⚠ | aurora `BOARD_FLASH_PAGE_B 0xFE00` 与目标 OTA 标志页重叠 | G0-3 一次性冻结新地址并同步收窄 IROM1 |
-| ⚠ | 目标 uvprojx 缺 `g32f031_ddl_dma.c` | G4-1 加入，否则链接失败 |
+| ⚠ | 目标 uvprojx 曾缺 `g32f031_ddl_dma.c` | G4-1 已加入；`rebuild_g5.log` 已链接 `g32f031_ddl_dma.o` |
 | ⚠ | aurora `drv_watchdog_init()` 缺 IWDT APB 时钟使能 | G2-D1 补齐 |
 | ⚠ | 目标 `GPIO_Config()`/`RCM_PeripheralClkConfig()` 为空、`SysTick_Handler` 为空、`HardFault_Handler` 裸 `while(1)`、启动即 50% 占空比 + 互补输出 | G1 全部改掉；这是当前工程**连 G1 都不满足**的根因 |
 | ⚠ | 目标文档提到的 `bsp_pvd.c` / `bsp_debug.c` / `APP_PWM_COMPLEMENTARY` 实际不存在（只剩 stale `.o`） | 不得假定存在；G1 清理 `Objects/` 陈旧产物 |
@@ -333,7 +342,7 @@ aurora `drv_watchdog.c` **没有这一步** → G2-D 移植时必须补上。
 | 信息 | AC5 已停止维护 | 本次不迁移；aurora 代码已确认 C99 兼容，保留目标验证过的 AC5 基线 |
 | ⚠ | PVD 门限 100 mV 迟滞 + ±2.5% 容差（§0.7），2.8 V 只是候选值 | G2-A6 必须实测上升/下降两个点后再冻结 |
 | ⚠ | `RCC->RSTCSR` 有 8 个标志且 `PVDRSTFLG`/`LOCKUPRSTFLG` 语义敏感（§0.8） | G2-C4 全解析 + 读后清除；`LOCKUPRSTEN` 决策在 G0-6 冻结 |
-| ⚠ | 目标现有 `DRV_ADC` 形似 G4（GTMR TRGO + EOS）但无 DMA/序号/overrun 且通道映射冲突 | 不得冒充 G4 PASS；G3/G4 在新 `drv_adc.c` 上重取证，旧路径按 `MIGRATION_GATE` 关停 |
+| ⚠ | 旧 `DRV_ADC` 五通道 EOS 形似 G4 | 已删除；G4 取证只针对 DMA 双半缓冲路径 |
 | ⚠ | `BSP_OTA_Process()` 在台架期留着 = 存在未验证的跳 Bootloader 路径 | G1 从 main 删除、G2 由 `MIGRATION_GATE` 关闭 |
 | ⚠ | 1 ms 节拍探针若选 PA12/LINK、PA13/RELAY、PA14/GHC、PA15/GLC，会驱动真实功率/通信网络 | 只允许 PB11/LED_FAULT，且仅 `MIGRATION_GATE == 2U` 编译（G2-B3） |
 | ⚠ | 若 1 ms ISR 直接喂狗，主循环卡死无法被捕获 | G2-D4 不变量：ISR 只置票，主循环 service 才 feed |
@@ -455,4 +464,28 @@ aurora `drv_watchdog.c` **没有这一步** → G2-D 移植时必须补上。
 （待填）
 
 ### 批次 3 Review
-（待填）
+
+**2026-09-02 首轮审核**（H1/H2/M1–M4 六条，详录于会话；H1=IWDT 40kHz、H2=G3-T01 七字段+vdd_mv、M1=NTC 表两端、M2=adc_start 位置、M3=FATAL 静默、M4=目标仓判据指针）。
+
+**2026-09-03 修复轮复核（第三轮审核，工作流 18 agents + 主线程独立验证）：**
+
+修复符合度（10/10 处置：8 fixed + 1 partial + 1 本轮未触及）：
+
+| 旧发现 | 结论 | 关键证据 |
+|---|---|---|
+| #1 IWDT 顺序+LSI | ✅ fixed | 逐行对齐手册 §15.1.4.3 九步；AXF 反汇编级复核（0xCCCC→0x5555→PSC=4→PVU→RLR=512→RVU→0xAAAA）；LSI 失败先于 0xCCCC 可安全挂死 |
+| #2 GATE=1/2 编不过 | ✅ fixed | 五门全 0E/0W（Code 1932/7848/9064/9612/10284）；围栏与唯一使用者同宽，非巧合 |
+| #3 ADC-start 复位环 | ✅ fixed（设计接受） | 三层失败语义分层正确：pre-IWDT 永挂 / post-0xCCCC ≤32s / post-config ≤1s，注释已声明 |
+| #4 FATAL 静默回归 | ✅ fixed | 三处 FATAL 全改裸字节 hang_after_uart，不受 DEBUG_ENABLE 裁剪 |
+| #5 PVD 竞态+静默 | ⚠️ partial | 2-tick 地板已修（竞态消除）；静默 WFI（drv_device.c:61-67）保留为已知项 |
+| #6 NTC 3 LSB 余量 | ❌ unfixed | 本轮未触及，V0.3.0 §12⑬ 已落档 |
+| #7 VBG 出厂字窗 | ✅ fixed | [1218,1300] 精确对应 VBG 1.19–1.27V；0/0xFFFFFFFF/花码全拒 |
+| #8 vdd/vbg 钳位 | ✅ fixed | 三窗串联无漏放无误杀；int64 无溢出 |
+| #9 STOP 收尾 | ✅ fixed | 比手册 §19.4.12 更严（双清）；残余理论窗口 ~0.2–0.8µs 需 ADC 内核 >31ms 卡死，已收敛 |
+| #10 G3 多行日志 | ✅ fixed（再文档化） | 6×~70B≈420B>256B 理由经计算为真；三处注释+README 一致 |
+
+存活项（全部 低/info 级，无功能缺陷）：LSI ±10% 注释无出处+#error 守卫只按标称（低，调参隐患）；VBG 三窗注释公式错/结果窗下界 2500 死码（低）；vdd_mv=0 三成因文档只列两（低）；drv_device.c:27 漏 RVU 路径（info）；drv_system.c:295 "约1ms" 注释失配（低）；等待循环末轮假失败窗（info）。
+
+事实更正：复位默认 PSC=0x7(/256)+0xFFF → 32s（手册 §15.4.2 实取）——上一轮工作流推断的"500ms"系 STM32 假设，错误。DDL_IWDT_PSC_64=0x4（非 0x2，PSC_2 是位名非数值），固件写入值正确。
+
+红线回归全过：drv_pwm.o 0 字节、ATMR GC、PA14 永久 GPIO 低、POWER_OUTPUT_ALLOWED=0、分层单向、uvprojx 仅 +2 文件条目、DMA_CH1 桥名咬合。

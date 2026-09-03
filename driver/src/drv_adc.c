@@ -90,13 +90,13 @@ void BSP_ADC_Init(void)
     (void)DDL_ADC_Init(ADC, &adc);
 
     /* 官方：GTMR TRGO上升沿触发；产品保留六通道DMA */
-    reg.TriggerSource = DDL_ADC_REG_TRIG_EXTSEL_GTMR_TRGO;
-    reg.TriggerEdge = DDL_ADC_REG_TRIG_EXTEDGE_RISING;
-    reg.SequencerLength = DDL_ADC_REG_SEQ_SCAN_ENABLE_6RANKS;
-    reg.SequencerDiscont = DDL_ADC_REG_SEQ_DISCONT_DISABLE;
-    reg.ContinuousMode = DDL_ADC_REG_CONV_SINGLE;
-    reg.DMATransfer = DDL_ADC_REG_DMA_TRANSFER_CIRCULAR_MODE;
-    reg.Overrun = DDL_ADC_OVERMODE_KEEP;
+    reg.TriggerSource = DDL_ADC_REG_TRIG_EXTSEL_GTMR_TRGO;    // GTMR TRGO上升沿触发
+    reg.TriggerEdge = DDL_ADC_REG_TRIG_EXTEDGE_RISING;        // 上升沿触发
+    reg.SequencerLength = DDL_ADC_REG_SEQ_SCAN_ENABLE_6RANKS; // 6个通道
+    reg.SequencerDiscont = DDL_ADC_REG_SEQ_DISCONT_DISABLE;   // 不连续模式
+    reg.ContinuousMode = DDL_ADC_REG_CONV_SINGLE;             // 单次转换
+    reg.DMATransfer = DDL_ADC_REG_DMA_TRANSFER_CIRCULAR_MODE; // 循环模式
+    reg.Overrun = DDL_ADC_OVERMODE_KEEP;                      // 覆盖模式
     (void)DDL_ADC_REG_Init(ADC, &reg);
 
     DDL_ADC_REG_SetSequencerRanks(ADC, DDL_ADC_REG_RANK_1, DDL_ADC_CHANNEL_1);
