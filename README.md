@@ -1,6 +1,6 @@
 # Aurora Control Firmware
 
-> 当前候选基线：**v0.10.3**。在 v0.10.2 真实源码集成基础上，关闭快速 Break 误判、Relay 关波后新鲜采样、Relay 执行反馈、Demo Relay 和陈旧能量累计等软件缺口；所有物理功率门仍保持关闭。
+> 当前候选基线：**v0.10.3 / Bring-up 软件候选**。在 v0.10.2 真实源码集成基础上，已经关闭快速 Break 误判、Relay 关波后新鲜采样、Relay 执行反馈、Demo Relay、陈旧能量累计，以及 Flash 双页 Journal 越界/失败重试/停机保存等软件缺口；**所有生产功率门仍保持关闭，尚未完成实板功率放行。**
 
 单路异步 Boost 光伏充电控制器的可移植嵌入式固件。当前基线默认高功率BOM，可编译切换低功率BOM，支持48/60/72V与铅酸、三元锂、磷酸铁锂、钠离子四类电池档案。
 
@@ -33,10 +33,10 @@ protection   软件保护、去抖、锁存与恢复许可
 power_stage  预充、Relay Hold-off、继电器和物理Duty执行器
 ui           RUN/FAULT指示逻辑
 protocol     旧产品UART帧兼容层
-storage      片内Flash双页Journal、CRC和Commit Marker
+storage      片内Flash双页Journal、CRC、Commit Marker和停机保存
 ```
 
-仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。
+仓库不包含旧MCU工程、闭源MPPT库、`legacy_*`、根目录`tasks/`、重复的`firmware/tests/tools`、应用目录内厂商例程、生成JSON或bootstrap临时文件。Bring-up过程记录统一放在`docs/bringup/过程记录/`。
 
 ## 阅读入口
 
@@ -52,6 +52,26 @@ storage      片内Flash双页Journal、CRC和Commit Marker
 - [v0.10.3安全握手与快故障修复](docs/45-v0.10.3-安全握手与快故障修复说明.md)
 - [新工程分阶段移植与板级验证路线](docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md)
 - [v0.10.3审阅问题补强与验证记录](docs/47-v0.10.3-审阅问题补强与验证记录.md)
+- [Flash边界与停机保存闭环](docs/48-v0.10.3-Flash边界与停机保存闭环.md)
+- [当前主线状态与下一步待测试总表](docs/49-v0.10.3-当前主线状态与下一步待测试总表.md)
+
+如果你准备从远端拉取后继续上板，**先看49号状态总表，再按46号路线逐Gate执行**。
+
+## 当前 Bring-up 进度
+
+当前远端已有的证据只允许得到以下结论：
+
+| Gate | 软件/静态状态 | 板级状态 | 下一步 |
+|---|---|---|---|
+| G0 PinMap/BOM | 文档腿已完成 | `IN_PROGRESS` | 人工冻结签字 + 实板断电通断/误焊检查 |
+| G1 最小安全工程 | 代码、Keil静态腿完成 | `IN_PROGRESS` | 实板确认复位/上电全功率脚安全、无未知脉冲 |
+| G2 PVD/时基/UART/IWDT | 代码、Keil 0E/0W | `IN_PROGRESS` | PVD升降沿、UART回环、IWDT注入、2h稳定性 |
+| G3 ADC raw | 代码腿完成 | `IN_PROGRESS` | 0~3V逐点、六通道映射、BAT_U高阻建立时间 |
+| G4 ADC DMA | 代码腿完成 | `IN_PROGRESS` | DMA顺序、stale/overrun、2h连续采样 |
+| G5 工程量标定 | 理论模型、Keil 0E/0W | `IN_PROGRESS` | PV_U/BAT_U/BST_U/NTC/PV_I实板拟合与误差签字 |
+| G6~G15 | 路线已定义 | **无BOARD_PASS证据** | 严格按46号文档顺序推进；G7 BOARD_PASS前不得进入G8真实传能 |
+
+详细测试点和PASS条件见[49号总表](docs/49-v0.10.3-当前主线状态与下一步待测试总表.md)。
 
 ## 本地验证
 
@@ -64,6 +84,7 @@ python tools/run_checks.py
 ```text
 Architecture gate
 Code style/comment/layout gate
+UTF-8 / mojibake gate
 Python contract tests
 GCC strict build + CTest
 Clang strict build + CTest
@@ -73,7 +94,9 @@ Cortex-M0+ target syntax check
 
 `run_checks.py`采用fail-closed：缺少CMake、Ninja、GCC或Clang任一必需工具时直接失败，不输出完整PASS结论。正式发布结论仍必须结合工具齐全的GitHub Actions、Keil ARM Compiler 6日志和MAP审计；Host通过不等于功率板验收通过。
 
-MCU弱光启动遵循：最小安全GPIO → PVD Ready → VDD连续稳定 → `aurora_runtime_init()`。PVD Reset/IRQ保持关闭；供电不足时只等待，不创建APP故障或启动IWDT复位循环。
+当前 Flash 安全闭环已经纳入永久回归：地址0/越界/跨页写拒绝、只在明确停机态保存、失败不提前推进`sequence/active_page`、Commit-last、全量回读以及有限重试均有自动化合同。**这些自动化仍不能替代G13实板断电注入。**
+
+MCU弱光启动遵循：最小安全GPIO → PVD Ready → VDD连续稳定 → `aurora_runtime_init()`。PVD Reset/IRQ保持关闭；供电不足时只等待，不创建APP故障或启动IWDT复位循环。运行期**不使用LVD/PVD欠压事件抢写Flash**。
 
 ## IDE / clangd 函数跳转
 
@@ -108,7 +131,7 @@ compile_flags.txt              全工程兜底解析参数（未收录进 Keil �
 
 ## 当前安全状态
 
-所有功率放行门保持关闭：
+所有生产功率放行门保持关闭：
 
 ```c
 BOARD_GATE_COMP_ROUTE_VALIDATED == 0
@@ -119,7 +142,7 @@ BOARD_GATE_DEMO_LOAD_VALIDATED  == 0
 BOARD_POWER_OUTPUT_ALLOWED      == 0
 ```
 
-真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 的Keil MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流、Relay拉弧、Demo负载和低压到额定功率验收。
+真正解锁前必须完成 `docs/11-Keil编译与台架验收.md` 和 `docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md` 对应证据：Keil/MAP、模拟标定、COMP/Break强制触发、首脉冲/Vgs/电感电流、Relay拉弧、Flash断电注入、Demo负载和低压到额定功率验收。
 
 ## v0.10.3 发布边界
 
@@ -128,10 +151,11 @@ v0.10.3 只能定义为：
 ```text
 SOFTWARE SAFETY FIXED
 SOFTWARE CANDIDATE FOR BRING-UP INTEGRATION
+FLASH SOFTWARE CONTRACT CLOSED / BOARD POWER-CUT TEST PENDING
 PRODUCTION BUILD POWER GATES STILL LOCKED
-OTA/IAP OUT OF SCOPE
+OTA/IAP OUT OF CURRENT PRODUCT SCOPE
 ```
 
-本版本不修改3A CC、12A PV限流和BST_U分压BOM，也不新增OTA/IAP代码。旧30字节遥测**布局与v0.10.2 PV能量字段语义均保持不变**；`charge_est_*`继续作为Flash v3内部独立估算账本，后续如需对外提供应使用新资源或明确版本化协议。
+本版本不修改3A CC、12A PV限流和BST_U分压BOM，也不新增OTA/IAP运行代码。旧30字节遥测**布局与v0.10.2 PV能量字段语义均保持不变**；`charge_est_*`继续作为Flash v3内部独立估算账本，后续如需对外提供应使用新资源或明确版本化协议。
 
-当前`BOARD_GATE_*`与`BOARD_POWER_OUTPUT_ALLOWED`是最终验收证据门，不作为低压Bring-up的临时使能开关。当前生产配置本身不会直接解锁Relay/PWM；低压验证应按`docs/46-v0.10.3-新工程分阶段移植与板级验证路线.md`使用独立受限Bring-up构建，只开放当前阶段所需的最小能力，不能提前把尚未验收的最终Gate置1。
+当前`BOARD_GATE_*`与`BOARD_POWER_OUTPUT_ALLOWED`是最终验收证据门，不作为低压Bring-up的临时使能开关。当前生产配置本身不会直接解锁Relay/PWM；低压验证应按46号路线使用独立受限Bring-up构建，只开放当前阶段所需的最小能力，不能提前把尚未验收的最终Gate置1。
