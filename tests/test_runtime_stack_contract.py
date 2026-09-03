@@ -32,7 +32,11 @@ class RuntimeStackContract(unittest.TestCase):
         self.assertIn("TARGET_STACK_BYTES = 1024", stack_check)
         self.assertIn("EXTRA_MARGIN_BYTES = 128", stack_check)
         self.assertIn("MAX_RUNTIME_POLL_FRAME = 256", stack_check)
+        self.assertIn("OPTIMIZATION_LEVELS = (\"-O1\", \"-O2\")", stack_check)
         self.assertIn("nested IRQ reserve", stack_check)
+        keil = (ROOT / "project/AuroraControl.uvprojx").read_text(encoding="utf-8")
+        self.assertIn("<Optim>1</Optim>", keil)
+        self.assertNotIn("<Optim>0</Optim>", keil)
 
 
 if __name__ == "__main__":
