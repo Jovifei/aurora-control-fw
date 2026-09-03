@@ -19,7 +19,14 @@ jobs:
           fetch-depth: 0
 
       - name: 应用1KB目标栈安全修复
-        run: python tools/_flash_stack_closeout.py
+        shell: bash
+        run: |
+          python tools/_flash_stack_closeout.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/48-v0.10.3-Flash安全持久化与最近三次远端提交审核.md')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8', newline='\n')
+          PY
 
       - name: 完整质量门验证
         shell: bash
