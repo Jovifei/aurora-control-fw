@@ -21,5 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Move recent worklog out of forbidden root
+        run: |
+          mkdir -p 'docs/bringup/过程记录'
+          git mv tasks/todo.md 'docs/bringup/过程记录/todo.md'
+          git mv tasks/lessons.md 'docs/bringup/过程记录/lessons.md'
       - name: Patch, verify, clean and commit
         run: python tools/_flash_stop_save_closeout.py
