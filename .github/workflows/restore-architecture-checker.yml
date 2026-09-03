@@ -1,0 +1,78 @@
+name: restore full architecture checker
+
+on:
+  push:
+    branches:
+      - codex/flash-safe-stop-persistence
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: ${{ !contains(github.event.head_commit.message, '[checker-restored]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/flash-safe-stop-persistence
+          fetch-depth: 0
+
+      - name: 从 main 恢复完整 checker 并做最小 tasks 规则修改
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          original = subprocess.check_output(
+              ["git", "show", "origin/main:tools/check_architecture.py"],
+              text=True,
+              encoding="utf-8",
+          )
+
+          old_forbidden = '''for forbidden in [
+              "firmware", "tasks", "legacy_reference", "legacy_parity",
+              "legacy_protocol_import", ".bootstrap"
+          ]:
+              if any(path.name == forbidden and is_project_content(path)
+                     for path in root.rglob("*")):
+                  errors.append(f"禁止目录仍存在: {forbidden}")
+          '''
+          new_forbidden = '''for forbidden in [
+              "firmware", "legacy_reference", "legacy_parity",
+              "legacy_protocol_import", ".bootstrap"
+          ]:
+              if any(path.name == forbidden and is_project_content(path)
+                     for path in root.rglob("*")):
+                  errors.append(f"禁止目录仍存在: {forbidden}")
+
+          # G0~G15迁移允许tasks/保存纯Markdown过程资料，但禁止它演化成第三套固件源码树。
+          tasks_root = root / "tasks"
+          if tasks_root.exists():
+              for task_file in tasks_root.rglob("*"):
+                  if task_file.is_file() and task_file.suffix.lower() != ".md":
+                      errors.append(f"tasks仅允许Markdown过程资料: {task_file.relative_to(root)}")
+          '''
+          if original.count(old_forbidden) != 1:
+              raise SystemExit("main checker forbidden-directory block changed unexpectedly")
+          restored = original.replace(old_forbidden, new_forbidden, 1)
+          Path("tools/check_architecture.py").write_text(restored, encoding="utf-8", newline="\n")
+          PY
+
+      - name: 完整质量门验证
+        shell: bash
+        run: |
+          git diff --check
+          python tools/run_checks.py
+
+      - name: 清理临时 workflow 并提交
+        shell: bash
+        run: |
+          rm -f .github/workflows/restore-architecture-checker.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "修复：恢复完整架构门禁并仅允许Markdown迁移任务 [checker-restored]"
+          git push origin HEAD:codex/flash-safe-stop-persistence
