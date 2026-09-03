@@ -1,0 +1,40 @@
+name: flash journal stack closeout
+
+on:
+  push:
+    branches:
+      - codex/flash-safe-stop-persistence
+
+permissions:
+  contents: write
+
+jobs:
+  closeout:
+    if: ${{ !contains(github.event.head_commit.message, '[flash-stack-closeout]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/flash-safe-stop-persistence
+          fetch-depth: 0
+
+      - name: 应用1KB目标栈安全修复
+        run: python tools/_flash_stack_closeout.py
+
+      - name: 完整质量门验证
+        shell: bash
+        run: |
+          git diff --check
+          python tools/run_checks.py
+
+      - name: 清理一次性工具并提交
+        shell: bash
+        run: |
+          rm -f tools/_flash_stack_closeout.py
+          rm -f .github/workflows/flash-stack-closeout.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "修复：消除 Flash Journal 在1KB目标栈上的大对象溢出风险 [flash-stack-closeout]"
+          git push origin HEAD:codex/flash-safe-stop-persistence
