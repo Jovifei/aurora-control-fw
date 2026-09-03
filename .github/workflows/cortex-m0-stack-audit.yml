@@ -16,11 +16,11 @@ jobs:
         with:
           ref: codex/cortex-m0-stack-audit
 
-      - name: 生成Cortex-M0+静态栈占用
+      - name: 生成Cortex-M0+全首方静态栈与调用链
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/aurora-stack-stub /tmp/aurora-stack-out
+          mkdir -p /tmp/aurora-stack-stub /tmp/aurora-stack-out /tmp/aurora-stack-ir
           cat > /tmp/aurora-stack-stub/string.h <<'EOF'
           #ifndef AURORA_STACK_STRING_H
           #define AURORA_STACK_STRING_H
@@ -38,7 +38,6 @@ jobs:
             -std=c11
             -ffreestanding
             -O2
-            -fstack-usage
             -DUSE_FULL_DDL_DRIVER
             -DG32F031xx
             -I/tmp/aurora-stack-stub
@@ -58,15 +57,101 @@ jobs:
             -Werror
           )
 
-          clang "${COMMON[@]}" -c app/src/main.c -o /tmp/aurora-stack-out/main.o
-          clang "${COMMON[@]}" -c app/src/storage.c -o /tmp/aurora-stack-out/storage.o
-          clang "${COMMON[@]}" -c app/src/protocol.c -o /tmp/aurora-stack-out/protocol.o
+          for src in app/src/*.c driver/src/*.c; do
+            base="$(basename "${src}" .c)"
+            extra=()
+            if [[ "${src}" == "app/src/interrupts.c" ]]; then
+              extra=(-Wno-missing-prototypes)
+            fi
+            clang "${COMMON[@]}" "${extra[@]}" -fstack-usage -c "${src}" -o "/tmp/aurora-stack-out/${base}.o"
+            clang "${COMMON[@]}" "${extra[@]}" -S -emit-llvm "${src}" -o "/tmp/aurora-stack-ir/${base}.ll"
+          done
 
-          echo '=== raw .su files ==='
-          find /tmp/aurora-stack-out -name '*.su' -maxdepth 1 -print -exec cat {} \;
+          echo '=== largest first-party frames ==='
+          cat /tmp/aurora-stack-out/*.su | awk -F '\t' '{print $2 "\t" $1 "\t" $3}' | sort -nr | head -80
 
-          echo '=== key functions ==='
-          grep -hE '(^|:)(aurora_runtime_poll|process_uart|aurora_app_on_protocol_frame|aurora_app_apply_settings|load_storage|storage_read_page|runtime_storage|storage_write_transaction|storage_bytes_equal|aurora_storage_classify_page|aurora_storage_encode_page_sequence|aurora_protocol_take_frame|aurora_protocol_encode)(\t|$)' /tmp/aurora-stack-out/*.su || true
+          echo '=== key frames ==='
+          grep -hE '(aurora_runtime_poll|aurora_runtime_init|aurora_app_step_1ms|process_uart|aurora_app_on_protocol_frame|aurora_app_apply_settings|load_storage|runtime_storage|storage_write_transaction|aurora_storage_classify_page|SysTick_Handler|DMA_CH1_IRQHandler|ADC_IRQHandler|ATMR_BRK_UP_TRG_COM_IRQHandler|COMP0_IRQHandler|COMP1_2_3_IRQHandler|USART_IRQHandler)' /tmp/aurora-stack-out/*.su || true
 
-          echo '=== largest frames ==='
-          cat /tmp/aurora-stack-out/*.su | awk -F '\t' '{print $2 "\t" $1 "\t" $3}' | sort -nr | head -40
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          out = Path('/tmp/aurora-stack-out')
+          ir_dir = Path('/tmp/aurora-stack-ir')
+          frames = {}
+          for su in out.glob('*.su'):
+              for raw in su.read_text().splitlines():
+                  if not raw.strip():
+                      continue
+                  loc, size, kind = raw.split('\t')[:3]
+                  func = loc.rsplit(':', 1)[-1]
+                  frames[func] = max(frames.get(func, 0), int(size))
+
+          calls = {name: set() for name in frames}
+          unresolved = {name: set() for name in frames}
+          define_re = re.compile(r'^define\b.*?@([A-Za-z_.$][A-Za-z0-9_.$]*)\(')
+          call_re = re.compile(r'\b(?:call|invoke)\b.*?@([A-Za-z_.$][A-Za-z0-9_.$]*)\(')
+          current = None
+          for ll in ir_dir.glob('*.ll'):
+              for line in ll.read_text().splitlines():
+                  m = define_re.match(line)
+                  if m:
+                      current = m.group(1)
+                      calls.setdefault(current, set())
+                      unresolved.setdefault(current, set())
+                      continue
+                  if current is not None and line.strip() == '}':
+                      current = None
+                      continue
+                  if current is None:
+                      continue
+                  for target in call_re.findall(line):
+                      if target.startswith('llvm.'):
+                          continue
+                      if target in frames:
+                          calls[current].add(target)
+                      else:
+                          unresolved[current].add(target)
+
+          memo = {}
+          visiting = set()
+          def deepest(name):
+              if name in memo:
+                  return memo[name]
+              if name in visiting:
+                  return (frames.get(name, 0), [name, '<cycle>'])
+              visiting.add(name)
+              best_child = (0, [])
+              for child in sorted(calls.get(name, ())):
+                  candidate = deepest(child)
+                  if candidate[0] > best_child[0]:
+                      best_child = candidate
+              visiting.remove(name)
+              result = (frames.get(name, 0) + best_child[0], [name] + best_child[1])
+              memo[name] = result
+              return result
+
+          roots = [
+              'main', 'aurora_runtime_init', 'aurora_runtime_poll', 'aurora_app_step_1ms',
+              'aurora_app_on_protocol_frame', 'aurora_app_apply_settings',
+              'SysTick_Handler', 'DMA_CH1_IRQHandler', 'ADC_IRQHandler',
+              'ATMR_BRK_UP_TRG_COM_IRQHandler', 'COMP0_IRQHandler',
+              'COMP1_2_3_IRQHandler', 'USART_IRQHandler'
+          ]
+          print('=== first-party O2 direct-call chain sums ===')
+          for root in roots:
+              if root not in frames:
+                  print(f'{root}: not emitted / likely inlined or absent')
+                  continue
+              total, chain = deepest(root)
+              print(f'{root}: {total} B :: ' + ' -> '.join(chain))
+              ext = sorted(unresolved.get(root, ()))
+              if ext:
+                  print(f'  direct unresolved: {", ".join(ext)}')
+
+          print('=== top first-party direct-call chains ===')
+          ranked = sorted((deepest(name)[0], name, deepest(name)[1]) for name in frames)
+          for total, name, chain in reversed(ranked[-30:]):
+              print(f'{total:4d} B  {name}: ' + ' -> '.join(chain))
+          PY
