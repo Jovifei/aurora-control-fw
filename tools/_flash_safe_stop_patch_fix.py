@@ -19,5 +19,12 @@ if old_macros not in text:
     raise SystemExit("active page macro block not found in patch script")
 text = text.replace(old_macros, new_macros, 1)
 
+# Host 64位平台上sizeof返回size_t；显式收窄到uint32_t，保持-Wconversion/-Werror严格门禁。
+old_cross = '''drv_board_flash_page_a() + AURORA_STORAGE_PAGE_SIZE - sizeof(uint32_t);'''
+new_cross = '''drv_board_flash_page_a() + AURORA_STORAGE_PAGE_SIZE - (uint32_t)sizeof(uint32_t);'''
+if old_cross not in text:
+    raise SystemExit("cross-page test expression not found in patch script")
+text = text.replace(old_cross, new_cross, 1)
+
 path.write_text(text, encoding="utf-8", newline="\n")
-print("已修正测试入口并补齐active页宏注释")
+print("已修正测试入口、active页宏注释和严格类型转换")
