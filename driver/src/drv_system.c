@@ -190,7 +190,7 @@ bool drv_system_flash_supply_is_safe(void)
  * Name        : void drv_system_supply_qualifier_stop(void)
  * Input       : 无
  * Output      : 无
- * Description : 仅在PVD模块建立异常时关闭监测；正常启动后保留只读PVD供Flash写入veto使用。
+ * Description : PVD用于启动供电资格并在正常启动后保留为只读Flash写入veto；始终不启用PVD IRQ/Reset。
  *---------------------------------------------------------------------------*/
 void drv_system_supply_qualifier_stop(void)
 {

@@ -114,6 +114,11 @@ size_t aurora_storage_encode_page(const aurora_storage_ctx_t *ctx,
                                   uint8_t *page,
                                   size_t page_size,
                                   bool committed);
+size_t aurora_storage_encode_page_sequence(const aurora_persistent_settings_t *settings,
+                                           uint32_t sequence,
+                                           uint8_t *page,
+                                           size_t page_size,
+                                           bool committed);
 void aurora_storage_energy_history_update(aurora_persistent_settings_t *settings);
 void aurora_storage_energy_history_checkpoint(aurora_persistent_settings_t *settings);
 uint32_t aurora_storage_crc32(const uint8_t *data, size_t length);

@@ -14,8 +14,23 @@ class FlashSafePersistenceContract(unittest.TestCase):
         self.assertIn("AURORA_STORAGE_WRITE_ATTEMPTS", config)
         storage = main[main.index("static void runtime_storage"):main.index("static void runtime_watchdog")]
         self.assertNotIn("runtime->app.storage.sequence++;", storage)
-        self.assertIn("staged.sequence = runtime->app.storage.sequence + 1U;", storage)
+        self.assertIn("next_sequence = runtime->app.storage.sequence + 1U;", storage)
         self.assertIn("runtime->app.storage.write_inhibited = true;", storage)
+
+    def test_storage_workspace_stays_off_1k_target_stack(self):
+        main = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
+        startup = (ROOT / "vendor/device/Source/startup_g32f031.s").read_text(encoding="utf-8")
+        self.assertIn("Stack_Size      EQU     0x00000400", startup)
+        self.assertIn("static uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE]", main)
+        self.assertNotIn("uint8_t page_a[AURORA_STORAGE_PAGE_SIZE]", main)
+        self.assertNotIn("uint8_t page_b[AURORA_STORAGE_PAGE_SIZE]", main)
+        self.assertNotIn("aurora_persistent_settings_t settings_a", main)
+        self.assertNotIn("aurora_persistent_settings_t settings_b", main)
+        storage = main[main.index("static aurora_status_t storage_write_transaction"):
+                       main.index("static void runtime_watchdog")]
+        self.assertNotIn("aurora_storage_ctx_t staged", storage)
+        self.assertNotIn("aurora_persistent_settings_t verified_settings", storage)
+        self.assertIn("uint8_t verify[32]", storage)
 
     def test_driver_rejects_address_zero_cross_page_and_low_supply(self):
         flash = (ROOT / "driver/src/drv_flash.c").read_text(encoding="utf-8")

@@ -34,6 +34,30 @@
 /* 目标中断桥接与主循环共享的唯一运行实例。 */
 aurora_runtime_t g_aurora_runtime;
 
+/* Flash Journal单线程工作页；避免512B页缓冲占用目标仅1KB的启动栈。 */
+static uint8_t g_storage_page_workspace[AURORA_STORAGE_PAGE_SIZE];
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool storage_bytes_equal(const uint8_t *left,
+ *               const uint8_t *right, size_t length)
+ * Input       : left/right - 待比较字节块；length - 有界长度
+ * Output      : true表示逐字节完全一致
+ * Description : Flash回读只比较32B小块，避免为裸机目标额外依赖memcmp库符号。
+ *---------------------------------------------------------------------------*/
+static bool storage_bytes_equal(const uint8_t *left, const uint8_t *right, size_t length)
+{
+    size_t index;
+
+    for (index = 0U; index < length; ++index)
+    {
+        if (left[index] != right[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*---------------------------------------------------------------------------*
  * Name        : static uint32_t min_u32(uint32_t a, uint32_t b)
  * Input       : a/b - 两个无符号32位值
@@ -556,41 +580,48 @@ static void process_uart(aurora_runtime_t *runtime, uint32_t now_ms)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static aurora_storage_page_status_t storage_read_page(
+ *               uint32_t address, aurora_persistent_settings_t *settings,
+ *               uint32_t *sequence)
+ * Input       : address - A/B页地址；settings/sequence - 分类输出
+ * Output      : 页分类状态
+ * Description : 使用唯一静态512B工作页读取并分类，避免启动阶段在1KB目标栈分配整页。
+ *---------------------------------------------------------------------------*/
+static aurora_storage_page_status_t storage_read_page(uint32_t address,
+                                                       aurora_persistent_settings_t *settings,
+                                                       uint32_t *sequence)
+{
+    if (!drv_flash_read(address, g_storage_page_workspace, sizeof(g_storage_page_workspace)))
+    {
+        return AURORA_STORAGE_PAGE_IO_ERROR;
+    }
+    return aurora_storage_classify_page(g_storage_page_workspace, sizeof(g_storage_page_workspace),
+                                        settings, sequence);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void load_storage(aurora_runtime_t *runtime)
  * Input       : runtime - 应用运行上下文
  * Output      : 无
- * Description : 分类读取Flash A/B页并选择最新可信记录；单页异常安排安全窗口自愈。
+ * Description : 先顺序检查A/B状态和序号，再只重读最终选中的可信页；不在栈同时保留两页和两套settings。
  *---------------------------------------------------------------------------*/
 static void load_storage(aurora_runtime_t *runtime)
 {
-    uint8_t page_a[AURORA_STORAGE_PAGE_SIZE];
-    uint8_t page_b[AURORA_STORAGE_PAGE_SIZE];
-    aurora_persistent_settings_t settings_a = {0};
-    aurora_persistent_settings_t settings_b = {0};
     aurora_storage_page_status_t status_a;
     aurora_storage_page_status_t status_b;
+    aurora_storage_page_status_t selected_status;
     uint32_t seq_a = 0U;
     uint32_t seq_b = 0U;
+    uint32_t selected_sequence = 0U;
+    uint32_t selected_address;
     bool valid_a;
     bool valid_b;
+    bool choose_b;
     const uint32_t now_ms = drv_time_now_ms();
 
-    if (drv_flash_read(drv_board_flash_page_a(), page_a, sizeof(page_a)))
-    {
-        status_a = aurora_storage_classify_page(page_a, sizeof(page_a), &settings_a, &seq_a);
-    }
-    else
-    {
-        status_a = AURORA_STORAGE_PAGE_IO_ERROR;
-    }
-    if (drv_flash_read(drv_board_flash_page_b(), page_b, sizeof(page_b)))
-    {
-        status_b = aurora_storage_classify_page(page_b, sizeof(page_b), &settings_b, &seq_b);
-    }
-    else
-    {
-        status_b = AURORA_STORAGE_PAGE_IO_ERROR;
-    }
+    /* 首轮只收集A/B状态与序号；settings暂存可被下一页覆盖，最终选中后会重新读取。 */
+    status_a = storage_read_page(drv_board_flash_page_a(), &runtime->app.storage.settings, &seq_a);
+    status_b = storage_read_page(drv_board_flash_page_b(), &runtime->app.storage.settings, &seq_b);
 
     runtime->app.storage.page_a_status = status_a;
     runtime->app.storage.page_b_status = status_b;
@@ -601,20 +632,25 @@ static void load_storage(aurora_runtime_t *runtime)
 
     if (valid_a || valid_b)
     {
-        const bool choose_b = valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0));
+        choose_b = valid_b && (!valid_a || ((int32_t)(seq_b - seq_a) > 0));
+        selected_address = choose_b ? drv_board_flash_page_b() : drv_board_flash_page_a();
+        selected_status = storage_read_page(selected_address, &runtime->app.storage.settings,
+                                            &selected_sequence);
 
-        if (choose_b)
+        /* 第二次读取必须仍是同一可信记录；异常时禁止凭第一次快照继续应用或自愈擦写。 */
+        if (((selected_status != AURORA_STORAGE_PAGE_VALID) &&
+             (selected_status != AURORA_STORAGE_PAGE_VALID_LEGACY)) ||
+            (selected_sequence != (choose_b ? seq_b : seq_a)))
         {
-            runtime->app.storage.settings = settings_b;
-            runtime->app.storage.sequence = seq_b;
-            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_B;
+            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_NONE;
+            runtime->app.storage.write_inhibited = true;
+            aurora_protection_latch_fast_fault(&runtime->app.protection, AURORA_FAULT_STORAGE, now_ms);
+            return;
         }
-        else
-        {
-            runtime->app.storage.settings = settings_a;
-            runtime->app.storage.sequence = seq_a;
-            runtime->app.storage.active_page = AURORA_STORAGE_ACTIVE_PAGE_A;
-        }
+
+        runtime->app.storage.sequence = selected_sequence;
+        runtime->app.storage.active_page =
+            choose_b ? AURORA_STORAGE_ACTIVE_PAGE_B : AURORA_STORAGE_ACTIVE_PAGE_A;
         aurora_app_apply_settings(&runtime->app, &runtime->app.storage.settings, now_ms);
 
         runtime->app.storage.repair_pending = !valid_a || !valid_b ||
@@ -686,20 +722,24 @@ static uint32_t storage_inactive_page(const aurora_storage_ctx_t *storage)
 
 /*---------------------------------------------------------------------------*
  * Name        : static aurora_status_t storage_write_transaction(
- *               const aurora_storage_ctx_t *staged, uint32_t target, uint8_t *page)
- * Input       : staged - 带下一序号的待提交镜像；target - 固定备用页；page - 512字节工作缓冲
+ *               const aurora_storage_ctx_t *storage, uint32_t next_sequence,
+ *               uint32_t target, uint8_t *page)
+ * Input       : storage - 当前设置；next_sequence - 待提交序号；target - 固定备用页；
+ *               page - 唯一静态512B工作页
  * Output      : OK成功；NOT_READY表示VDD失去资格需延后；INVALID/IO_ERROR表示真实事务错误
- * Description : 擦备用页→写正文→最后Commit→整页回读CRC/内容复核；任何阶段欠压只中止，不触发欠压保存。
+ * Description : 擦备用页→写正文→最后Commit→32B小块回读逐字节比对；避免完整page/settings验证副本占目标栈。
  *---------------------------------------------------------------------------*/
-static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *staged,
-                                                  uint32_t target, uint8_t *page)
+static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *storage,
+                                                  uint32_t next_sequence, uint32_t target,
+                                                  uint8_t *page)
 {
-    aurora_persistent_settings_t verified_settings = {0};
-    uint32_t verified_sequence = 0U;
+    uint8_t verify[32];
     const uint32_t marker = AURORA_STORAGE_COMMIT_MARKER;
     size_t used;
+    size_t offset;
 
-    used = aurora_storage_encode_page(staged, page, AURORA_STORAGE_PAGE_SIZE, false);
+    used = aurora_storage_encode_page_sequence(&storage->settings, next_sequence, page,
+                                               AURORA_STORAGE_PAGE_SIZE, false);
     if (used < AURORA_STORAGE_HEADER_SIZE)
     {
         return AURORA_STATUS_INVALID;
@@ -746,16 +786,30 @@ static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *sta
     {
         return AURORA_STATUS_NOT_READY;
     }
-    if (!drv_flash_read(target, page, AURORA_STORAGE_PAGE_SIZE) ||
-        (aurora_storage_classify_page(page, AURORA_STORAGE_PAGE_SIZE, &verified_settings,
-                                      &verified_sequence) != AURORA_STORAGE_PAGE_VALID) ||
-        (verified_sequence != staged->sequence))
+
+    /* 重新编码committed镜像作为期望值；不再分配448B verified_settings做整页解码。 */
+    if (aurora_storage_encode_page_sequence(&storage->settings, next_sequence, page,
+                                            AURORA_STORAGE_PAGE_SIZE, true) != used)
     {
-        return AURORA_STATUS_IO_ERROR;
+        return AURORA_STATUS_INVALID;
     }
-    if (!drv_system_flash_supply_is_safe())
+
+    for (offset = 0U; offset < AURORA_STORAGE_PAGE_SIZE; offset += sizeof(verify))
     {
-        return AURORA_STATUS_NOT_READY;
+        size_t chunk = AURORA_STORAGE_PAGE_SIZE - offset;
+        if (chunk > sizeof(verify))
+        {
+            chunk = sizeof(verify);
+        }
+        if (!drv_flash_read(target + (uint32_t)offset, verify, chunk) ||
+            !storage_bytes_equal(verify, &page[offset], chunk))
+        {
+            return AURORA_STATUS_IO_ERROR;
+        }
+        if (!drv_system_flash_supply_is_safe())
+        {
+            return AURORA_STATUS_NOT_READY;
+        }
     }
     return AURORA_STATUS_OK;
 }
@@ -769,10 +823,9 @@ static aurora_status_t storage_write_transaction(const aurora_storage_ctx_t *sta
  *---------------------------------------------------------------------------*/
 static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
 {
-    uint8_t page[AURORA_STORAGE_PAGE_SIZE];
-    aurora_storage_ctx_t staged;
     aurora_status_t status = AURORA_STATUS_IO_ERROR;
     uint32_t target;
+    uint32_t next_sequence;
     uint8_t attempt;
 
     if (!runtime->app.storage.dirty || runtime->app.storage.write_inhibited ||
@@ -798,15 +851,14 @@ static void runtime_storage(aurora_runtime_t *runtime, uint32_t now_ms)
         return;
     }
 
-    staged = runtime->app.storage;
-    staged.sequence = runtime->app.storage.sequence + 1U;
-
+    next_sequence = runtime->app.storage.sequence + 1U;
     for (attempt = 0U; attempt < AURORA_STORAGE_WRITE_ATTEMPTS; ++attempt)
     {
-        status = storage_write_transaction(&staged, target, page);
+        status = storage_write_transaction(&runtime->app.storage, next_sequence, target,
+                                           g_storage_page_workspace);
         if (status == AURORA_STATUS_OK)
         {
-            runtime->app.storage.sequence = staged.sequence;
+            runtime->app.storage.sequence = next_sequence;
             runtime->app.storage.active_page =
                 (target == drv_board_flash_page_a()) ? AURORA_STORAGE_ACTIVE_PAGE_A
                                                      : AURORA_STORAGE_ACTIVE_PAGE_B;
