@@ -226,6 +226,9 @@ else:
         for forbidden in ["service\\", "board\\board.c", "app\\src\\app.c", "project\\keil"]:
             if forbidden in joined:
                 errors.append(f"Keil仍引用旧路径: {forbidden}")
+        optim = project.find(".//Cads/Optim")
+        if (optim is None) or ((optim.text or "").strip() != "1"):
+            errors.append("Keil AC6发布优化必须固定Level 1 (-O1)；O0已通过目标栈审计判定不安全")
     except ET.ParseError as exc:
         errors.append(f"Keil工程XML无效: {exc}")
 
