@@ -545,3 +545,14 @@ Rebuild 执行记录：控制器以 `D:\Keil_v5\UV4\UV4.exe -b IAP_Application.u
 | G00 README | BOM/红线宏名改为 `DRV_*`；`app_hw_config.h` 改为已删除 |
 
 **硬前置**：本次改了 `drv_io.c` / `drv_pwm.c` / `bsp_ota.c` / `g32f031_int.c`。Keil Rebuild（2026-09-01，`rebuild_p2.log`）：**0 Error / 0 Warning**，Program Size Code=1726 / RO=238 / RW=8 / ZI=1024（与 §11.6 相同：PinMap 检查是编译期 `#if`，PWM 原本就不在镜像里）。G1 总状态仍为 `IN_PROGRESS`（实板腿未做）。
+
+---
+
+## 13. 实板 GPIO 无毛刺（2026-09-07）
+
+| 项 | 结果 |
+|---|---|
+| 功率相关 GPIO 上电/运行观察 | **无毛刺**（台架确认） |
+| 判定 | G1 安全静止态核心腿 **通过** |
+
+整门可仍标 `IN_PROGRESS`（正式示波次数归档可选）。总表见 `docs/bringup/G0-G8-实板进度总表.md`。

@@ -47,6 +47,19 @@ G6 才写 ATMR。目标 `ATMR_CR1_UDISEN` 是 bit2，禁止照抄 aurora `drv_pw
 
 ---
 
-## 4. 结论
+## 4. 结论（2026-09-02）
 
 **IN_PROGRESS**：代码链已落地，无台架 PASS，无 MAP 签字。
+
+---
+
+## 5. 实板稳态证据（2026-09-07）
+
+| 项 | 结果 |
+|---|---|
+| 触发 | GTMR 10 kHz TRGO |
+| 路径 | 六通道扫描 + 双半区 DMA |
+| 稳定性 | 连续跑数十万 DMA 块，`overrun=0` |
+| 判定 | **稳态 overrun 腿通过** |
+
+整门仍为 `IN_PROGRESS`：六通道独立注入顺序、stale/overrun 人为注入、正式 2 h CSV 未闭环。详见 `docs/bringup/G0-G8-实板进度总表.md`。
