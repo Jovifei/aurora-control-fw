@@ -112,7 +112,7 @@ write("tests/test_v0103.c", p)
 
 # 6) Strengthen static contracts so target/mock cannot silently diverge again.
 p = read("tests/test_v0103_contract.py")
-needle = "class V0103ContractTests(unittest.TestCase):\n"
+needle = "class V0103Contracts(unittest.TestCase):\n"
 if needle not in p:
     raise SystemExit("contract class anchor missing")
 method = '''    def test_fast_sources_gate_rearm_and_arm_does_not_clear_break(self):\n        main = (ROOT / "app/src/main.c").read_text(encoding="utf-8")\n        pwm = (ROOT / "driver/src/drv_pwm.c").read_text(encoding="utf-8")\n        comp_h = (ROOT / "driver/inc/drv_comp.h").read_text(encoding="utf-8")\n        mock = (ROOT / "tests/mock_driver.c").read_text(encoding="utf-8")\n        self.assertIn("drv_comp_fast_fault_source_active", comp_h)\n        self.assertIn("!drv_comp_fast_fault_source_active()", main)\n        arm = pwm[pwm.index("bool drv_pwm_arm(void)"):pwm.index("bool drv_pwm_output_active(void)")]\n        self.assertIn("drv_comp_fast_fault_source_active()", arm)\n        self.assertIn("drv_pwm_break_latched()", arm)\n        self.assertNotIn("drv_pwm_clear_break_latch", arm)\n        self.assertIn("g_comp2_source", mock)\n        self.assertIn("drv_comp_fast_fault_source_active", mock)\n\n'''
