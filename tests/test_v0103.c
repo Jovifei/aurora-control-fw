@@ -93,6 +93,64 @@ static void test_break_uses_software_arm_state(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static void test_comp2_persistent_source_blocks_rearm_and_recovery(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : COMP2虽不直连ATMR Break，但持续低时必须禁止PWM重新ARM，并阻止FAST_PV_OCP的30s恢复计时。
+ *---------------------------------------------------------------------------*/
+static void test_comp2_persistent_source_blocks_rearm_and_recovery(void)
+{
+    aurora_runtime_t runtime;
+    uint32_t sequence;
+
+    mock_reset();
+    CHECK(aurora_runtime_init(&runtime));
+    CHECK(drv_pwm_prepare_arm_zero(&sequence));
+    mock_apply_uev();
+    CHECK(drv_pwm_zero_duty_applied());
+
+    mock_set_comp2_fault(true);
+    CHECK(!drv_pwm_arm());
+
+    /* 模拟运行期COMP2快速故障已锁存；持续源存在时超过30s也不得恢复。 */
+    runtime.pwm_arm_state = AURORA_RUNTIME_PWM_ARM_ACTIVE;
+    aurora_runtime_isr_comparator_fault(&runtime, AURORA_FAULT_FAST_PV_OCP);
+    aurora_runtime_poll(&runtime);
+    CHECK((aurora_protection_fault_mask(&runtime.app.protection) & AURORA_FAULT_FAST_PV_OCP) != 0U);
+    mock_advance_ms(AURORA_FAST_OCP_RECOVER_DELAY_MS + 1000U);
+    aurora_runtime_poll(&runtime);
+    CHECK((aurora_protection_fault_mask(&runtime.app.protection) & AURORA_FAULT_FAST_PV_OCP) != 0U);
+    CHECK(runtime.fast_ocp_recover_since_ms == 0U);
+
+    mock_set_comp2_fault(false);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_pwm_arm_preserves_transient_break_latch(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 模拟COMP0短脉冲已释放但BRK锁存尚未消费，arm必须拒绝且不得主动清除该硬件证据。
+ *---------------------------------------------------------------------------*/
+static void test_pwm_arm_preserves_transient_break_latch(void)
+{
+    aurora_runtime_t runtime;
+    uint32_t sequence;
+
+    mock_reset();
+    CHECK(aurora_runtime_init(&runtime));
+    CHECK(drv_pwm_prepare_arm_zero(&sequence));
+    mock_apply_uev();
+    CHECK(drv_pwm_zero_duty_applied());
+
+    mock_set_break(true);
+    mock_set_break(false);
+    CHECK(drv_pwm_break_latched());
+    CHECK(!drv_pwm_arm());
+    CHECK(drv_pwm_break_latched());
+    CHECK(!mock_pwm_active());
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static void test_runtime_captures_post_pwm_off_baseline(void)
  * Input       : 无
  * Output      : 无
@@ -618,6 +676,8 @@ static void test_relay_physical_recheck_rejects_pv_over_bat(void)
 int main(void)
 {
     test_break_uses_software_arm_state();
+    test_comp2_persistent_source_blocks_rearm_and_recovery();
+    test_pwm_arm_preserves_transient_break_latch();
     test_runtime_captures_post_pwm_off_baseline();
     test_holdoff_requires_two_new_blocks_and_applied_feedback();
     test_holdoff_sequence_wrap_zero_is_valid();

@@ -297,8 +297,9 @@ static bool safety_still_clear(const aurora_runtime_t *runtime, uint32_t token)
 
     /* Demo台架门只约束Demo模式；并入总功率门会让Battery模式被未完成的Demo验收卡住。 */
     return (runtime->safety_epoch == token) && (runtime->pending_fault_mask == 0U) &&
-           aurora_protection_is_safe(&runtime->app.protection) && !drv_pwm_break_source_active() &&
-           !drv_pwm_break_latched() && drv_board_power_gate_open() &&
+           aurora_protection_is_safe(&runtime->app.protection) &&
+           !drv_comp_fast_fault_source_active() && !drv_pwm_break_latched() &&
+           drv_board_power_gate_open() &&
            (!demo_mode || drv_board_demo_load_gate_open());
 }
 
@@ -337,8 +338,9 @@ static void runtime_fast_ocp_recovery(aurora_runtime_t *runtime, uint32_t now_ms
         runtime->fast_ocp_recover_since_ms = 0U;
         return;
     }
-    if (drv_pwm_break_source_active())
+    if (drv_comp_fast_fault_source_active())
     {
+        /* COMP0或COMP2任一路仍有效都不得启动30s恢复计时。 */
         runtime->fast_ocp_recover_since_ms = 0U;
         return;
     }

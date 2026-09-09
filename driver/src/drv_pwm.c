@@ -319,17 +319,18 @@ bool drv_pwm_stage_duty(uint16_t duty_q15, uint32_t *sequence)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_arm(void)
 {
-    if (drv_pwm_break_source_active())
+    /*
+     * arm()只负责“验证并放行”，绝不在这里清Break锁存。
+     * COMP2不是ATMR物理Break源，但作为软件快速过流源持续有效时同样禁止重新发波。
+     */
+    if (drv_comp_fast_fault_source_active() || drv_pwm_break_latched())
     {
         return false;
     }
 
-    /* 源已释放时，允许清理历史粘滞位；历史位不能替代实时故障源判定。 */
-    (void)drv_pwm_clear_break_latch();
-
     BSP_PWM_Start();
 
-    if ((drv_pwm_break_source_active() != false) || (drv_pwm_break_latched() != false) ||
+    if (drv_comp_fast_fault_source_active() || drv_pwm_break_latched() ||
         (drv_pwm_output_active() == false))
     {
         BSP_PWM_Stop();

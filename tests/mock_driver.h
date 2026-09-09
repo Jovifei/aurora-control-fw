@@ -8,6 +8,7 @@
 void mock_reset(void);
 void mock_advance_ms(uint32_t ms);
 void mock_set_break(bool active);
+void mock_set_comp2_fault(bool active);
 void mock_apply_uev(void);
 uint16_t mock_duty(void);
 bool mock_pwm_active(void);

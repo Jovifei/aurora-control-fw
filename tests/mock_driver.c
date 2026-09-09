@@ -23,6 +23,7 @@ static uint32_t g_applied_sequence;
 static uint16_t g_duty;
 static bool g_pwm_active;
 static bool g_break_source;
+static bool g_comp2_source;
 static bool g_break_latched;
 static bool g_relay;
 static bool g_link;
@@ -74,6 +75,7 @@ void mock_reset(void)
     g_duty = 0U;
     g_pwm_active = false;
     g_break_source = false;
+    g_comp2_source = false;
     g_break_latched = false;
     g_relay = false;
     g_link = false;
@@ -112,6 +114,17 @@ void mock_set_break(bool active)
         g_break_latched = true;
         g_pwm_active = false;
     }
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : void mock_set_comp2_fault(bool active)
+ * Input       : active - true表示COMP2/PV快速过流源持续有效
+ * Output      : 无
+ * Description : COMP2不直接产生ATMR Break锁存，但会作为软件快速故障源阻止PWM重新ARM和恢复。
+ *---------------------------------------------------------------------------*/
+void mock_set_comp2_fault(bool active)
+{
+    g_comp2_source = active;
 }
 
 /*---------------------------------------------------------------------------*
@@ -450,7 +463,7 @@ bool drv_pwm_stage_duty(uint16_t duty_q15, uint32_t *sequence)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_arm(void)
 {
-    if (g_break_source || g_break_latched) {
+    if (g_break_source || g_comp2_source || g_break_latched) {
         return false;
     }
 
@@ -548,7 +561,27 @@ bool drv_comp_init(void)
  *---------------------------------------------------------------------------*/
 uint32_t drv_comp_fault_mask(void)
 {
-    return g_break_source ? DRV_FAULT_MOS_OCP : 0U;
+    uint32_t mask = 0U;
+    if (g_break_source)
+    {
+        mask |= DRV_FAULT_MOS_OCP;
+    }
+    if (g_comp2_source)
+    {
+        mask |= DRV_FAULT_PV_OCP;
+    }
+    return mask;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_comp_fast_fault_source_active(void)
+ * Input       : 无
+ * Output      : true表示COMP0或COMP2任一路Host快速故障源仍有效
+ * Description : 与目标Driver保持同一语义；COMP2持续故障同样阻止PWM重启和恢复。
+ *---------------------------------------------------------------------------*/
+bool drv_comp_fast_fault_source_active(void)
+{
+    return g_break_source || g_comp2_source;
 }
 
 /*---------------------------------------------------------------------------*
