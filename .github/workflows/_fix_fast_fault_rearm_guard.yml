@@ -1,0 +1,25 @@
+name: temporary fast fault rearm guard fix
+
+on:
+  push:
+    branches:
+      - codex/fix-fast-fault-rearm-guard
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-fast-fault-rearm-guard
+          fetch-depth: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Patch, verify, clean and commit
+        run: python tools/_fix_fast_fault_rearm_guard.py
