@@ -155,8 +155,6 @@ void BSP_ADC_IRQHandler(void)
  *---------------------------------------------------------------------------*/
 bool drv_adc_init(void)
 {
-    uint32_t index;
-
     BSP_ADC_Init();
     return DDL_ADC_IsActiveFlag_RDY(ADC) != 0U;
 }
