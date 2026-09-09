@@ -48,17 +48,6 @@ void BSP_PWM_Init(void)
     DDL_RCC_Lock();
 
     /* GPIO：仅PA15=CH0/GLC；PA14/GHC保持drv_io的GPIO低 */
-    gpio.Pin = DDL_GPIO_PIN_15;
-    gpio.Mode = DDL_GPIO_MODE_ALTERNATE;
-    gpio.Drive = DDL_GPIO_DRIVE_HIGH;
-    gpio.OutputType = DDL_GPIO_OUTPUT_PUSHPULL;
-    gpio.Pull = DDL_GPIO_PULL_NO;
-    gpio.Alternate = DDL_GPIO_AF_3;
-    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_DISABLE);
-    DDL_GPIO_Init(GPIOA, &gpio);
-    DDL_GPIO_SetAF3Pin_10_15(GPIOA, DDL_GPIO_PIN_15, DDL_GPIO_AF3_ATMR_CH0);
-    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_ENABLE);
-
     /* 时基：50kHz载波 */
     tim.Prescaler = 0U;
     tim.CounterMode = DDL_ATMR_COUNTERMODE_UP;
@@ -84,6 +73,7 @@ void BSP_PWM_Init(void)
     DDL_ATMR_BDT_StructInit(&bdt);
     bdt.DeadTime0 = BOARD_PWM_DEADTIME_TICKS;
     bdt.DeadTime1 = BOARD_PWM_DEADTIME_TICKS;
+    bdt.OSSIState = DDL_ATMR_OSSI_ENABLE;
     bdt.BreakState = DDL_ATMR_BREAK_ENABLE;
     bdt.BreakPolarity = DDL_ATMR_BREAK_POLARITY_LOW;
     bdt.AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE;
@@ -99,7 +89,20 @@ void BSP_PWM_Init(void)
     DDL_ATMR_GenerateEvent_UPDATE(ATMR);
     DDL_ATMR_ClearFlag_UPDATE(ATMR);
     DDL_ATMR_DisableIT_UPDATE(ATMR);
-    DDL_ATMR_EnableIT_BRK(ATMR);
+    DDL_ATMR_DisableIT_BRK(ATMR);
+
+    /* 定时器完全配置并装载0 Duty后，最后才把PA15交给ATMR复用，避免初始化毛刺。 */
+    gpio.Mode = DDL_GPIO_MODE_ALTERNATE;
+    gpio.Drive = DDL_GPIO_DRIVE_HIGH;
+    gpio.OutputType = DDL_GPIO_OUTPUT_PUSHPULL;
+    gpio.InputEnable = DDL_GPIO_INPUT_DISABLE;
+    gpio.Pull = DDL_GPIO_PULL_NO;
+    gpio.Alternate = DDL_GPIO_AF_3;
+    gpio.Pin = DDL_GPIO_PIN_15;
+    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_DISABLE);
+    DDL_GPIO_Init(GPIOA, &gpio);
+    DDL_GPIO_SetAF3Pin_10_15(GPIOA, DDL_GPIO_PIN_15, DDL_GPIO_AF3_ATMR_CH0);
+    DDL_GPIO_LockKey(GPIOA, DDL_GPIO_LOCK_ENABLE);
 }
 
 /*---------------------------------------------------------------------------*
@@ -209,7 +212,6 @@ bool drv_pwm_init(void)
     g_applied_sequence = 0U;
     BSP_PWM_Init();
     DDL_ATMR_EnableCounter(ATMR);
-    NVIC_EnableIRQ(ATMR_BRK_UP_TRG_COM_IRQn);
     return true;
 }
 
@@ -262,14 +264,30 @@ bool drv_pwm_prepare_arm_zero(uint32_t *sequence)
     DDL_ATMR_OC_SetCompareCH0(ATMR, 0U);
     g_staged_sequence++;
     DDL_ATMR_ClearFlag_UPDATE(ATMR);
-    /* UPDATE与Break共用向量，仅为首次零占空比装载临时开一次中断。 */
-    DDL_ATMR_EnableIT_UPDATE(ATMR);
+    DDL_ATMR_ClearFlag_CC0(ATMR);
     if (sequence != NULL)
     {
         *sequence = g_staged_sequence;
     }
     drv_irq_restore(irq);
     return true;
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : bool drv_pwm_zero_duty_applied(void)
+ * Input       : 无
+ * Output      : true表示自然UEV已把零占空比装入活动寄存器
+ * Description : 主循环读清式轮询UPDATE标志；不启用共享ATMR UPDATE中断。
+ *---------------------------------------------------------------------------*/
+bool drv_pwm_zero_duty_applied(void)
+{
+    if (DDL_ATMR_IsActiveFlag_UPDATE(ATMR) != 0U)
+    {
+        DDL_ATMR_ClearFlag_UPDATE(ATMR);
+        g_applied_sequence = g_staged_sequence;
+        return true;
+    }
+    return false;
 }
 
 /*---------------------------------------------------------------------------*
@@ -301,14 +319,18 @@ bool drv_pwm_stage_duty(uint16_t duty_q15, uint32_t *sequence)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_arm(void)
 {
-    if (drv_pwm_break_source_active() || drv_pwm_break_latched())
+    if (drv_pwm_break_source_active())
     {
         return false;
     }
 
+    /* 源已释放时，允许清理历史粘滞位；历史位不能替代实时故障源判定。 */
+    (void)drv_pwm_clear_break_latch();
+
     BSP_PWM_Start();
 
-    if (drv_pwm_break_source_active() || drv_pwm_break_latched())
+    if ((drv_pwm_break_source_active() != false) || (drv_pwm_break_latched() != false) ||
+        (drv_pwm_output_active() == false))
     {
         BSP_PWM_Stop();
         return false;
@@ -335,7 +357,8 @@ bool drv_pwm_output_active(void)
  *---------------------------------------------------------------------------*/
 bool drv_pwm_break_source_active(void)
 {
-    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) || (DDL_COMP1_ReadOutputLevel(COMP2) == 0U);
+    /* ATMR硬件Break只接COMP0；COMP2由比较器事件桥接到软件故障，不混入MOE源判据。 */
+    return DDL_COMP0_ReadOutputLevel(COMP0) == 0U;
 }
 
 /*---------------------------------------------------------------------------*
@@ -362,7 +385,6 @@ bool drv_pwm_clear_break_latch(void)
         return false;
     }
     DDL_ATMR_ClearFlag_BRK(ATMR);
-    DDL_ATMR_EnableIT_BRK(ATMR);
     return !drv_pwm_break_latched();
 }
 
@@ -378,17 +400,17 @@ uint32_t drv_pwm_applied_sequence(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : void drv_pwm_update_isr_ack(void)
+ * Name        : uint32_t drv_pwm_is_pulse_complete(void)
  * Input       : 无
- * Output      : 无
- * Description : 确认一次性UPDATE事件，把暂存序号发布为已生效序号并立即关闭UPDATE中断。
+ * Output      : 1表示CC0匹配事件已清除；0表示尚无完整脉冲结束事件
+ * Description : PWM1模式下CC0匹配对应高脉冲下降沿，供G8 Burst停在低电平段，避免截尾脉冲。
  *---------------------------------------------------------------------------*/
-void drv_pwm_update_isr_ack(void)
+uint32_t drv_pwm_is_pulse_complete(void)
 {
-    if (DDL_ATMR_IsActiveFlag_UPDATE(ATMR) != 0U)
+    if (DDL_ATMR_IsActiveFlag_CC0(ATMR) != 0U)
     {
-        DDL_ATMR_ClearFlag_UPDATE(ATMR);
-        g_applied_sequence = g_staged_sequence;
-        DDL_ATMR_DisableIT_UPDATE(ATMR);
+        DDL_ATMR_ClearFlag_CC0(ATMR);
+        return 1U;
     }
+    return 0U;
 }

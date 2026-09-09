@@ -95,7 +95,7 @@ extern "C" {
 #define AURORA_FAULT_AMB_NTC_SHORT                  (1UL << 22)
 /* 故障位：PV_I在PWM开/关状态下与物理行为不一致，提示零点/OPA/极性/采样链异常。 */
 #define AURORA_FAULT_PV_CURRENT_PLAUSIBILITY       (1UL << 23)
-/* 故障位：BST_U ADC进入近满量程，当前26:1分压下不允许据此闭合继电器。 */
+/* 故障位：BST_U ADC进入近满量程，当前30:1分压下不允许据此闭合继电器。 */
 #define AURORA_FAULT_BUS_ADC_SATURATION             (1UL << 24)
 /* 故障位：Demo输出端存在外部电源、无持续负载或探测过载。 */
 #define AURORA_FAULT_DEMO_OUTPUT                   (1UL << 25)

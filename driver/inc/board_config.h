@@ -111,11 +111,10 @@
 #define BOARD_ADC_BAT_U_DIVIDER_NUM                 (15510L)
 #define BOARD_ADC_BAT_U_DIVIDER_DEN                 (510L)
 /*
- * BST_U：125k/5k分压，比例26。3.3V ADC理论满量程仅约85.8V。
- * 对72V高SOC档位存在量程风险：87.2V/93V均会超过ADC参考。软件必须把近满量程标记为不可信，
- * 硬件分压是否调整列为v0.9.0 P0台架/硬件整改项，不能靠软件系数掩盖。
+ * BST_U：150k/5k分压，比例30（R6由125k改焊为150k）。3.3V ADC理论满量程约99.0V。
+ * 近满量程码仍必须标记为不可信，不能把ADC饱和结果用于Relay压差判定。
  */
-#define BOARD_ADC_BUS_U_DIVIDER_NUM                 (26L)
+#define BOARD_ADC_BUS_U_DIVIDER_NUM                 (30L)
 #define BOARD_ADC_BUS_U_DIVIDER_DEN                 (1L)
 
 /* ATMR计数时钟，Hz。 */
@@ -182,7 +181,7 @@
 #define BOARD_UART_TX_BUFFER_SIZE                   (256U)
 
 /* IWDT名义低速时钟，Hz；实板受LSI容差影响。 */
-#define BOARD_WATCHDOG_CLOCK_HZ                     (40000UL)
+#define BOARD_WATCHDOG_CLOCK_HZ                     (32768UL)
 /* IWDT固定预分频值。 */
 #define BOARD_WATCHDOG_PRESCALER                    (64UL)
 /* 毫秒换算秒的比例。 */

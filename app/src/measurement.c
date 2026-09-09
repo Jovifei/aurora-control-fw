@@ -334,7 +334,7 @@ aurora_status_t aurora_measurement_process_block(aurora_measurement_ctx_t *ctx, 
         next.bus_voltage_mv = value;
         if (average[ADC_IDX_BUS_V] >= AURORA_ADC_NEAR_FULL_SCALE_CODE)
         {
-            /* 26:1分压在3.3V参考下约85.8V即到满量程；饱和值只保留诊断，不允许参与Relay压差。 */
+            /* 30:1分压在3.3V参考下约99V到满量程；饱和值只保留诊断，不允许参与Relay压差。 */
             next.diagnostic_mask |= AURORA_MEAS_DIAG_BUS_ADC_SATURATED;
         }
         else

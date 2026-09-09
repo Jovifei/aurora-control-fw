@@ -11,7 +11,7 @@ class V090Contracts(unittest.TestCase):
         self.assertIn("BOARD_ADC_PV_I_VCM_MV                       (1650L)", text)
         self.assertIn("BOARD_ADC_PV_I_ZERO_CODE                    (2048)", text)
         self.assertIn("BOARD_ADC_PV_I_POLARITY                     (1)", text)
-        self.assertIn("85.8V", text)
+        self.assertIn("99.0V", text)
         self.assertIn("BOARD_POWER_OUTPUT_ALLOWED                  (0U)", text)
 
     def test_ntc_direction_and_ratio_contract(self):
@@ -73,6 +73,19 @@ class V090Contracts(unittest.TestCase):
         sat = meas.index("AURORA_MEAS_DIAG_BUS_ADC_SATURATED")
         window = meas[max(0, sat - 500):sat + 500]
         self.assertIn("AURORA_MEAS_VALID_BUS_V", window)
+
+    def test_application_validated_bringup_limits_are_reflected(self):
+        board = (ROOT / "driver/inc/board_config.h").read_text(encoding="utf-8")
+        adc = (ROOT / "driver/src/drv_adc.c").read_text(encoding="utf-8")
+        pwm = (ROOT / "driver/src/drv_pwm.c").read_text(encoding="utf-8")
+
+        self.assertIn("BOARD_ADC_BUS_U_DIVIDER_NUM                 (30L)", board)
+        self.assertIn("BOARD_WATCHDOG_CLOCK_HZ                     (32768UL)", board)
+        self.assertNotIn("DDL_ATMR_EnableIT_UPDATE", pwm)
+        self.assertIn("DDL_ATMR_IsActiveFlag_CC0", pwm)
+        self.assertIn("DDL_ATMR_OSSI_ENABLE", pwm)
+        self.assertNotIn("s_adc_average", adc)
+        self.assertNotIn("publish_block_averages", adc)
 
     def test_no_regression_of_relay_and_power_gate(self):
         power = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")

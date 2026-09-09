@@ -780,7 +780,7 @@ static void test_pwm_arm_race(void)
     CHECK(drv_pwm_prepare_arm_zero(&sequence));
     CHECK(drv_pwm_applied_sequence() < sequence);
     mock_apply_uev();
-    drv_pwm_update_isr_ack();
+    CHECK(drv_pwm_zero_duty_applied());
     CHECK(drv_pwm_applied_sequence() >= sequence);
     CHECK(drv_pwm_arm());
     CHECK(mock_pwm_active());

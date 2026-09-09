@@ -9,35 +9,6 @@
 #include "g32f031_ddl_rcc.h"
 
 static uint16_t g_adc_dma[2][DRV_ADC_BLOCK_WORDS];
-static volatile uint16_t s_adc_raw[DRV_ADC_CHANNEL_COUNT];
-static volatile uint16_t s_adc_average[DRV_ADC_CHANNEL_COUNT];
-static volatile uint32_t s_sequence_count;
-
-/*---------------------------------------------------------------------------*
- * Name        : static void publish_block_averages(uint8_t block_index)
- * Input       : block_index - 已完成的DMA半缓冲
- * Output      : 无
- * Description : 从完整块提取末次原始值和16次均值，供官方GetRaw/GetAverage读取。
- *---------------------------------------------------------------------------*/
-static void publish_block_averages(uint8_t block_index)
-{
-    const uint16_t *block = g_adc_dma[block_index];
-    uint32_t channel;
-    uint32_t scan;
-    uint32_t last = (uint32_t)(DRV_ADC_SCANS_PER_BLOCK - 1U) * DRV_ADC_CHANNEL_COUNT;
-
-    for (channel = 0U; channel < DRV_ADC_CHANNEL_COUNT; ++channel)
-    {
-        uint32_t sum = 0U;
-        s_adc_raw[channel] = block[last + channel];
-        for (scan = 0U; scan < DRV_ADC_SCANS_PER_BLOCK; ++scan)
-        {
-            sum += block[(scan * DRV_ADC_CHANNEL_COUNT) + channel];
-        }
-        s_adc_average[channel] = (uint16_t)(sum / DRV_ADC_SCANS_PER_BLOCK);
-    }
-    s_sequence_count += DRV_ADC_SCANS_PER_BLOCK;
-}
 
 /*---------------------------------------------------------------------------*
  * Name        : void BSP_ADC_Init(void)
@@ -177,39 +148,6 @@ void BSP_ADC_IRQHandler(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : uint16_t BSP_ADC_GetRaw(uint32_t index)
- * Input       : index - 通道索引
- * Output      : 最近一次完整扫描的原始值；越界返回0
- * Description : 主循环读取DMA发布块中的最后一次扫描值。
- *---------------------------------------------------------------------------*/
-uint16_t BSP_ADC_GetRaw(uint32_t index)
-{
-    return (index < DRV_ADC_CHANNEL_COUNT) ? s_adc_raw[index] : 0U;
-}
-
-/*---------------------------------------------------------------------------*
- * Name        : uint16_t BSP_ADC_GetAverage(uint32_t index)
- * Input       : index - 通道索引
- * Output      : 最近一块16次扫描均值；越界返回0
- * Description : 与官方Application同名接口；产品测量仍以DMA块为准。
- *---------------------------------------------------------------------------*/
-uint16_t BSP_ADC_GetAverage(uint32_t index)
-{
-    return (index < DRV_ADC_CHANNEL_COUNT) ? s_adc_average[index] : 0U;
-}
-
-/*---------------------------------------------------------------------------*
- * Name        : uint32_t BSP_ADC_GetSequenceCount(void)
- * Input       : 无
- * Output      : 累计完成的扫描序列次数
- * Description : 每完成一次规则组扫描递增，由DMA块完成次数推算。
- *---------------------------------------------------------------------------*/
-uint32_t BSP_ADC_GetSequenceCount(void)
-{
-    return s_sequence_count;
-}
-
-/*---------------------------------------------------------------------------*
  * Name        : bool drv_adc_init(void)
  * Input       : 无
  * Output      : true表示ADC规则组、DMA和GTMR初始化完成
@@ -219,12 +157,6 @@ bool drv_adc_init(void)
 {
     uint32_t index;
 
-    for (index = 0U; index < DRV_ADC_CHANNEL_COUNT; ++index)
-    {
-        s_adc_raw[index] = 0U;
-        s_adc_average[index] = 0U;
-    }
-    s_sequence_count = 0U;
     BSP_ADC_Init();
     return DDL_ADC_IsActiveFlag_RDY(ADC) != 0U;
 }
@@ -282,13 +214,11 @@ uint8_t drv_adc_dma_irq_ack(void)
     if (DDL_DMA_IsActiveFlag_HT1(DMA) != 0U)
     {
         DDL_DMA_ClearFlag_HT1(DMA);
-        publish_block_averages(0U);
         completed |= DRV_ADC_IRQ_BLOCK0;
     }
     if (DDL_DMA_IsActiveFlag_TC1(DMA) != 0U)
     {
         DDL_DMA_ClearFlag_TC1(DMA);
-        publish_block_averages(1U);
         completed |= DRV_ADC_IRQ_BLOCK1;
     }
     if (DDL_DMA_IsActiveFlag_TE1(DMA) != 0U)

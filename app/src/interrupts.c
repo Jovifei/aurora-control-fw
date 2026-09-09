@@ -119,8 +119,7 @@ void ATMR_BRK_UP_TRG_COM_IRQHandler(void)
         handle_fast_comparator_fault();
     }
 
-    /* Driver内部自行判断UPDATE是否有效；若无UPDATE则为空操作。 */
-    drv_pwm_update_isr_ack();
+    /* G8起首次0-Duty由主循环轮询自然UEV；此共享向量不再承担UPDATE中断。 */
 }
 
 /*---------------------------------------------------------------------------*

@@ -519,14 +519,14 @@ uint32_t drv_pwm_applied_sequence(void)
 }
 
 /*---------------------------------------------------------------------------*
- * Name        : void drv_pwm_update_isr_ack(void)
+ * Name        : bool drv_pwm_zero_duty_applied(void)
  * Input       : 无
- * Output      : 无
- * Description : 模拟一次UPDATE ISR应答，把shadow提交序号发布为已生效序号。
+ * Output      : true表示模拟自然UEV已提交最近一次Duty
+ * Description : Host直接读取模拟提交序号，匹配目标端主循环轮询自然UEV的契约。
  *---------------------------------------------------------------------------*/
-void drv_pwm_update_isr_ack(void)
+bool drv_pwm_zero_duty_applied(void)
 {
-    mock_apply_uev();
+    return (g_staged_sequence != 0U) && (g_applied_sequence >= g_staged_sequence);
 }
 
 /*---------------------------------------------------------------------------*

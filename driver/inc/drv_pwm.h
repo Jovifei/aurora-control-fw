@@ -22,11 +22,12 @@ void drv_pwm_disarm(void);
 bool drv_pwm_prepare_arm_zero(uint32_t *sequence);
 bool drv_pwm_stage_duty(uint16_t duty_q15, uint32_t *sequence);
 bool drv_pwm_arm(void);
+bool drv_pwm_zero_duty_applied(void);
 bool drv_pwm_output_active(void);
 bool drv_pwm_break_source_active(void);
 bool drv_pwm_break_latched(void);
 bool drv_pwm_clear_break_latch(void);
 uint32_t drv_pwm_applied_sequence(void);
-void drv_pwm_update_isr_ack(void);
+uint32_t drv_pwm_is_pulse_complete(void);
 
 #endif

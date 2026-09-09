@@ -417,7 +417,7 @@ static void apply_power_command(aurora_runtime_t *runtime)
 
     if (runtime->pwm_arm_state == AURORA_RUNTIME_PWM_ARM_WAIT_ZERO)
     {
-        if (drv_pwm_applied_sequence() < runtime->pwm_zero_sequence)
+        if (!drv_pwm_zero_duty_applied())
         {
             return;
         }

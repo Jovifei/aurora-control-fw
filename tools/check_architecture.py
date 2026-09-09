@@ -186,8 +186,9 @@ else:
 pwm = (root / "driver/src/drv_pwm.c").read_text(encoding="utf-8", errors="ignore")
 if pwm.count("DDL_ATMR_GenerateEvent_UPDATE") != 1:
     errors.append("PWM软件UPDATE事件必须且只能存在于初始化阶段一次")
-if pwm.count("DDL_ATMR_EnableIT_UPDATE") != 1 or "drv_pwm_prepare_arm_zero" not in pwm:
-    errors.append("首次PWM零CCR握手缺失")
+if pwm.count("DDL_ATMR_EnableIT_UPDATE") != 0 or "drv_pwm_prepare_arm_zero" not in pwm or \
+        "drv_pwm_zero_duty_applied" not in pwm:
+    errors.append("首次PWM零CCR自然UEV轮询握手缺失或误启UPDATE中断")
 if "DDL_ATMR_DisableIT_UPDATE" not in pwm:
     errors.append("PWM UPDATE中断缺少一次性关闭")
 if "AutomaticOutput = DDL_ATMR_AUTOMATICOUTPUT_DISABLE" not in pwm:
