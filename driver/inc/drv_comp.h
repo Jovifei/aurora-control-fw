@@ -20,6 +20,7 @@ uint32_t BSP_COMP2_GetEventCount(void);
 
 bool drv_comp_init(void);
 uint32_t drv_comp_fault_mask(void);
+bool drv_comp_fast_fault_source_active(void);
 void drv_comp_irq_ack(void);
 
 #endif

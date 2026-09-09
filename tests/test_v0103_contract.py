@@ -5,6 +5,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class V0103Contracts(unittest.TestCase):
+    def test_fast_sources_gate_rearm_and_arm_does_not_clear_break(self):
+        main = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
+        pwm = (ROOT / "driver/src/drv_pwm.c").read_text(encoding="utf-8")
+        comp_h = (ROOT / "driver/inc/drv_comp.h").read_text(encoding="utf-8")
+        mock = (ROOT / "tests/mock_driver.c").read_text(encoding="utf-8")
+        self.assertIn("drv_comp_fast_fault_source_active", comp_h)
+        self.assertIn("!drv_comp_fast_fault_source_active()", main)
+        arm = pwm[pwm.index("bool drv_pwm_arm(void)"):pwm.index("bool drv_pwm_output_active(void)")]
+        self.assertIn("drv_comp_fast_fault_source_active()", arm)
+        self.assertIn("drv_pwm_break_latched()", arm)
+        self.assertNotIn("drv_pwm_clear_break_latch", arm)
+        self.assertIn("g_comp2_source", mock)
+        self.assertIn("drv_comp_fast_fault_source_active", mock)
+
     def test_minimal_relay_holdoff_contract(self):
         types = (ROOT / "app/inc/app_types.h").read_text(encoding="utf-8")
         config = (ROOT / "app/inc/app_config.h").read_text(encoding="utf-8")

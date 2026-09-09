@@ -250,6 +250,19 @@ uint32_t drv_comp_fault_mask(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : bool drv_comp_fast_fault_source_active(void)
+ * Input       : 无
+ * Output      : true表示COMP0或COMP2任一路实时快速故障源仍有效
+ * Description : 与ATMR物理Break源分离；COMP0进入硬件Break，COMP2虽只走软件快速故障桥，
+ *               但持续有效时同样必须阻止PWM重新ARM和快速故障恢复。
+ *---------------------------------------------------------------------------*/
+bool drv_comp_fast_fault_source_active(void)
+{
+    return (DDL_COMP0_ReadOutputLevel(COMP0) == 0U) ||
+           (DDL_COMP1_ReadOutputLevel(COMP2) == 0U);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : void drv_comp_irq_ack(void)
  * Input       : 无
  * Output      : 无
