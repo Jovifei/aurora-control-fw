@@ -204,7 +204,7 @@ uint32_t BSP_PWM_IsBraked(void)
  * Name        : bool drv_pwm_init(void)
  * Input       : 无
  * Output      : true表示ATMR、preload和Break初始化成功
- * Description : 调用官方BSP_PWM_Init，再启动计数器并打开Break向量；默认MOE关闭。
+ * Description : 调用官方BSP_PWM_Init并启动计数器；默认MOE关闭，Break中断按需管理。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_init(void)
 {
@@ -254,7 +254,7 @@ void drv_pwm_disarm(void)
  * Name        : bool drv_pwm_prepare_arm_zero(uint32_t *sequence)
  * Input       : sequence - 提交或记录序号输出
  * Output      : true表示零占空比提交已暂存；sequence返回待确认序号
- * Description : 关波后把零占空比写入preload并临时开启一次UPDATE中断，返回待确认的提交序号。
+ * Description : 关波后把零占空比写入preload，等待自然UPDATE确认后返回待确认序号。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_prepare_arm_zero(uint32_t *sequence)
 {
@@ -376,7 +376,7 @@ bool drv_pwm_break_latched(void)
  * Name        : bool drv_pwm_clear_break_latch(void)
  * Input       : 无
  * Output      : true表示锁存已清除，false表示条件不满足或仍有Break
- * Description : 仅在输出关闭且硬件故障源失效时清除Break锁存并恢复Break中断。
+ * Description : 仅在输出关闭且硬件故障源失效时清除Break锁存，不自动恢复Break中断。
  *---------------------------------------------------------------------------*/
 bool drv_pwm_clear_break_latch(void)
 {
