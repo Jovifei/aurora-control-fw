@@ -15,6 +15,7 @@ typedef struct
     uint32_t pv_valid_since_ms;                      /* PV持续>=13V的起点，兼作100ms启动资格与2s零点稳定依据。 */
     uint32_t pv_fast_valid_since_ms;                 /* PV持续>=15V的起点，用于动态1~10s快速启动资格。 */
     uint32_t delta_ok_since_ms;                      /* 压差稳定或Relay应用后的局部计时起点。 */
+    uint32_t precharge_pi_since_ms;                  /* 开路预充PI上次更新时间，10ms节拍。 */
     uint32_t no_sun_since_ms;                        /* 真正无PV持续起点。 */
     uint32_t bat_stability_since_ms;                 /* 10s电池稳定窗口起点。 */
     uint32_t start_success_since_ms;                 /* Ibat_est>=80mA成功启动计时。 */

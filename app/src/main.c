@@ -216,7 +216,7 @@ static uint32_t atomic_exchange_u32(volatile uint32_t *target, uint32_t value)
  * Name        : static bool relay_close_still_safe(const aurora_runtime_t *runtime)
  * Input       : runtime - 应用运行上下文
  * Output      : true表示当前这一刻仍允许物理吸合继电器
- * Description : Battery复核BUS/BAT压差；Demo独立复核外部有源电压和BUS安全，不混用均压条件。
+ * Description : Battery复核PV/BUS/BAT安全边界；Demo独立复核外部有源电压和BUS安全，不混用均压条件。
  *---------------------------------------------------------------------------*/
 static bool relay_close_still_safe(const aurora_runtime_t *runtime)
 {
@@ -249,7 +249,19 @@ static bool relay_close_still_safe(const aurora_runtime_t *runtime)
         {
             delta_mv = -delta_mv;
         }
-        return delta_mv <= AURORA_RELAY_CLOSE_DELTA_MV;
+        if (delta_mv > (int64_t)AURORA_RELAY_CLOSE_DELTA_MV)
+        {
+            return false;
+        }
+
+        /* 合闸瞬间PV仍高于电池，Boost续流二极管可能形成直灌路径，拒绝吸合。 */
+        if (((sample->valid_mask & AURORA_MEAS_VALID_PV_V) != 0U) &&
+            (((int64_t)sample->pv_voltage_mv - (int64_t)sample->battery_voltage_mv) >
+             (int64_t)AURORA_PV_OVER_BAT_DELTA_MV))
+        {
+            return false;
+        }
+        return true;
     }
 
     return (sample->battery_voltage_mv >= 0) &&

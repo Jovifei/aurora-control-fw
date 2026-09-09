@@ -124,8 +124,8 @@
 #define AURORA_BATTERY_DETECT_MIN_MV                (10000L)
 
 /* ---------------- 继电器预充：硬性安全顺序 ---------------- */
-/* BST_U必须先由Boost充到与BAT_U压差<=1.5V，并连续稳定1s，才允许进入关波放能。 */
-#define AURORA_RELAY_CLOSE_DELTA_MV                 (1500L)
+/* BST_U必须先由Boost充到与BAT_U压差<=3.0V，并连续稳定1s，才允许进入关波放能。 */
+#define AURORA_RELAY_CLOSE_DELTA_MV                 (3000L)
 #define AURORA_RELAY_DELTA_HOLD_MS                  (1000U)
 /* 关PWM后沿用现有20ms故障放能窗口，并至少跨两个新的完整DMA发布代次。 */
 #define AURORA_RELAY_PWM_OFF_DECAY_MS               (20U)
@@ -135,9 +135,9 @@
 #define AURORA_RELAY_HOLDOFF_TIMEOUT_MS             (500U)
 /* Runtime未在100ms内落实Relay GPIO，按闭合验证失败处理。 */
 #define AURORA_RELAY_APPLY_TIMEOUT_MS               (100U)
-/* 吸合后机械稳定100ms，再复核压差不得超过2.5V。 */
+/* 吸合后机械稳定100ms，再复核压差不得超过3.5V。 */
 #define AURORA_RELAY_SETTLE_MS                      (100U)
-#define AURORA_RELAY_VERIFY_DELTA_MV                (2500L)
+#define AURORA_RELAY_VERIFY_DELTA_MV                (3500L)
 /* 继电器闭合、PWM保持关闭，再观察BAT_U完整10s，max-min<=2V才进入RUN。 */
 #define AURORA_BAT_STABILITY_WINDOW_MS              (10000U)
 #define AURORA_BAT_STABILITY_MAX_SPAN_MV            (2000L)
@@ -145,9 +145,11 @@
 #define AURORA_PRECHARGE_TIMEOUT_MS                 (30000U)
 /* BST_U相对BAT_U向上过冲超过该值，立即停止预充并锁存BUS过压。 */
 #define AURORA_BUS_RELATIVE_OVERSHOOT_MV            (2500L)
-/* 绝对母线保护以当前目标加裕量为主，并受现有26:1量程的保守软件上限约束。 */
+/* 绝对母线保护以当前目标加裕量为主，并受30:1量程的95V软件上限约束。 */
 #define AURORA_BUS_TARGET_OV_MARGIN_MV              (3000U)
-#define AURORA_BUS_ABSOLUTE_MAX_MV                  (84000U)
+#define AURORA_BUS_ABSOLUTE_MAX_MV                  (95000U)
+/* 单端Boost二极管在Relay闭合前仍可能直灌电池，PV高于BAT超过此值即拒绝闭合。 */
+#define AURORA_PV_OVER_BAT_DELTA_MV                 (3000L)
 /* 启动失败的有限重试次数；弱光不计入硬件失败。 */
 #define AURORA_PRECHARGE_RETRY_MAX                  (3U)
 #define AURORA_RELAY_VERIFY_RETRY_MAX               (2U)
@@ -236,6 +238,14 @@
 #define AURORA_DUTY_STEP_Q15                        (256U)
 #define AURORA_PWM_FREQUENCY_HZ                     (50000U)
 #define AURORA_PRECHARGE_DUTY_LIMIT_DIVISOR         (2U)
+/* Application真电池调试验证的开路预充保险丝：200‰上限、1.5V目标间隙、10ms PI步进。 */
+#define AURORA_PRECHARGE_DUTY_MAX_Q15               (6554U)
+#define AURORA_PRECHARGE_TARGET_GAP_MV              (1500L)
+#define AURORA_PRECHARGE_PI_PERIOD_MS              (10U)
+#define AURORA_PRECHARGE_KP_DIV                     (16000L)
+#define AURORA_PRECHARGE_KI_DIV                     (240000L)
+#define AURORA_PRECHARGE_INTEGRAL_LIMIT             (400000L)
+#define AURORA_PRECHARGE_DUTY_STEP_Q15              (33U)
 #define AURORA_POWER_PI_INTEGRAL_DIVISOR            (128LL)
 #define AURORA_POWER_PI_INTEGRAL_LIMIT_Q15          (4096LL)
 #define AURORA_POWER_PI_KP_NUMERATOR                (64LL)

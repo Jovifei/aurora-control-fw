@@ -87,6 +87,19 @@ class V090Contracts(unittest.TestCase):
         self.assertNotIn("s_adc_average", adc)
         self.assertNotIn("publish_block_averages", adc)
 
+    def test_application_validated_relay_and_precharge_limits_are_reflected(self):
+        cfg = (ROOT / "app/inc/app_config.h").read_text(encoding="utf-8")
+        power = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")
+        runtime = (ROOT / "app/src/main.c").read_text(encoding="utf-8")
+
+        self.assertIn("AURORA_RELAY_CLOSE_DELTA_MV                 (3000L)", cfg)
+        self.assertIn("AURORA_RELAY_VERIFY_DELTA_MV                (3500L)", cfg)
+        self.assertIn("AURORA_BUS_ABSOLUTE_MAX_MV                  (95000U)", cfg)
+        self.assertIn("AURORA_PRECHARGE_DUTY_MAX_Q15", cfg)
+        self.assertIn("AURORA_PRECHARGE_TARGET_GAP_MV", cfg)
+        self.assertIn("(int64_t)sample->pv_voltage_mv - (int64_t)sample->battery_voltage_mv", power)
+        self.assertIn("AURORA_PV_OVER_BAT_DELTA_MV", runtime)
+
     def test_no_regression_of_relay_and_power_gate(self):
         power = (ROOT / "app/src/power_stage.c").read_text(encoding="utf-8")
         runtime = (ROOT / "app/src/main.c").read_text(encoding="utf-8")

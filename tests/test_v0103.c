@@ -520,6 +520,96 @@ static void test_storage_tracks_physical_active_page_not_sequence_parity(void)
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static void test_application_validated_adc_and_relay_windows(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 锁定Application实测后的BST_U 30:1换算以及电池Relay 3.0/3.5V压差窗口。
+ *---------------------------------------------------------------------------*/
+static void test_application_validated_adc_and_relay_windows(void)
+{
+    const uint16_t duty_min = AURORA_DUTY_MIN_Q15;
+    const uint16_t duty_max = AURORA_PRECHARGE_DUTY_MAX_Q15;
+    drv_board_adc_calibration_t calibration;
+    aurora_power_stage_ctx_t ctx;
+    aurora_measurement_t sample;
+    aurora_mppt_output_t mppt = {0};
+    aurora_charge_output_t charger = {0};
+    aurora_power_command_t command;
+
+    CHECK(drv_board_get_adc_calibration(3U, &calibration));
+    CHECK(calibration.gain_num == 99000L);
+    CHECK(calibration.gain_den == 4095L);
+
+    charger.voltage_target_mv = 50000U;
+    aurora_power_stage_init(&ctx, 0U);
+    ctx.state = AURORA_POWER_PRECHARGE;
+    ctx.state_since_ms = 0U;
+    ctx.precharge_pi_since_ms = 0U;
+    sample = valid_sample(2U, 10U);
+    sample.bus_voltage_mv = 0L;
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         false, AURORA_MODE_BATTERY, 48000U, 30000U, 10U);
+    CHECK(command.pwm_enable);
+    CHECK(ctx.duty_q15 == (uint16_t)(duty_min + AURORA_PRECHARGE_DUTY_STEP_Q15));
+    for (uint32_t now_ms = 20U; now_ms <= 3000U; now_ms += AURORA_PRECHARGE_PI_PERIOD_MS)
+    {
+        sample.timestamp_ms = now_ms;
+        (void)aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                          false, AURORA_MODE_BATTERY, 48000U, 30000U, now_ms);
+    }
+    CHECK(ctx.duty_q15 <= duty_max);
+
+    aurora_power_stage_init(&ctx, 0U);
+    ctx.state = AURORA_POWER_RELAY_HOLD_OFF;
+    ctx.state_since_ms = 1000U;
+    ctx.relay_holdoff_sequence = 1U;
+    ctx.relay_holdoff_sequence_valid = true;
+    sample = valid_sample(3U, 1021U);
+    sample.bus_voltage_mv = sample.battery_voltage_mv - 2800L;
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         false, AURORA_MODE_BATTERY, 48000U, 30000U, 1021U);
+    CHECK(command.state == AURORA_POWER_RELAY_SETTLE);
+    CHECK(command.relay_enable);
+
+    ctx.state = AURORA_POWER_RELAY_SETTLE;
+    ctx.state_since_ms = 0U;
+    ctx.delta_ok_since_ms = 1U;
+    sample.bus_voltage_mv = sample.battery_voltage_mv - 3200L;
+    sample.timestamp_ms = 101U;
+    command = aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
+                                         true, AURORA_MODE_BATTERY, 48000U, 30000U, 101U);
+    CHECK(command.state == AURORA_POWER_BAT_STABILITY);
+    CHECK(command.relay_enable);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static void test_relay_physical_recheck_rejects_pv_over_bat(void)
+ * Input       : 无
+ * Output      : 无
+ * Description : 验证Runtime写Relay GPIO前仍拒绝PV高于BAT超过3V的直灌风险。
+ *---------------------------------------------------------------------------*/
+static void test_relay_physical_recheck_rejects_pv_over_bat(void)
+{
+    aurora_runtime_t runtime;
+
+    mock_reset();
+    CHECK(aurora_runtime_init(&runtime));
+    runtime.app.storage.settings.operating_mode = AURORA_MODE_BATTERY;
+    runtime.app.sample = valid_sample(1U, 0U);
+    runtime.app.sample.bus_voltage_mv = runtime.app.sample.battery_voltage_mv;
+    runtime.app.sample.pv_voltage_mv = runtime.app.sample.battery_voltage_mv +
+                                       AURORA_PV_OVER_BAT_DELTA_MV + 1L;
+    runtime.app.power_command.state = AURORA_POWER_RELAY_SETTLE;
+    runtime.app.power_command.relay_enable = true;
+    runtime.app.power_command.pwm_enable = false;
+    runtime.relay_applied = false;
+
+    aurora_runtime_poll(&runtime);
+    CHECK(!mock_relay());
+    CHECK(!runtime.relay_applied);
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : int main(void)
  * Input       : 无
  * Output      : 0表示全部v0.10.3二次审阅行为回归通过
@@ -541,6 +631,8 @@ int main(void)
     test_storage_writes_only_in_stopped_states();
     test_storage_failed_write_preserves_last_good_and_bounds_retry();
     test_storage_tracks_physical_active_page_not_sequence_parity();
+    test_application_validated_adc_and_relay_windows();
+    test_relay_physical_recheck_rejects_pv_over_bat();
     printf("Aurora v0.10.3 reviewed closeout tests: %u assertions passed.\n", g_assertions);
     return 0;
 }

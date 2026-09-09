@@ -54,6 +54,7 @@ static void enter_state(aurora_power_stage_ctx_t *ctx, aurora_power_state_t stat
     ctx->state = state;
     ctx->state_since_ms = now_ms;
     ctx->delta_ok_since_ms = 0U;
+    ctx->precharge_pi_since_ms = (state == AURORA_POWER_PRECHARGE) ? now_ms : 0U;
     ctx->demo_probe_since_ms = 0U;
     ctx->demo_no_load_since_ms = 0U;
 
@@ -260,6 +261,83 @@ static uint16_t power_to_duty(aurora_power_stage_ctx_t *ctx, const aurora_measur
 }
 
 /*---------------------------------------------------------------------------*
+ * Name        : static uint16_t precharge_duty_step(
+ *               aurora_power_stage_ctx_t *ctx,
+ *               const aurora_measurement_t *sample,
+ *               uint32_t now_ms)
+ * Input       : ctx - 功率级上下文；sample - PV/BAT/BST_U测量；now_ms - 当前毫秒
+ * Output      : 开路预充下一拍Q15占空比
+ * Description : 按Application真电池调试结果执行10ms PI预充：目标为BAT_U-1.5V，
+ *               占空比限制在20‰~200‰（2%~20%），每次最多变化1‰（约33Q15），积分带限幅和反积分。
+ *---------------------------------------------------------------------------*/
+static uint16_t precharge_duty_step(aurora_power_stage_ctx_t *ctx,
+                                    const aurora_measurement_t *sample,
+                                    uint32_t now_ms)
+{
+    const int64_t duty_min = (int64_t)AURORA_DUTY_MIN_Q15;
+    const int64_t duty_max = (int64_t)AURORA_PRECHARGE_DUTY_MAX_Q15;
+    const int64_t step_max = (int64_t)AURORA_PRECHARGE_DUTY_STEP_Q15;
+    int64_t error_mv;
+    int64_t step_q15;
+    int64_t next_q15;
+
+    if (ctx->duty_q15 < (uint16_t)duty_min)
+    {
+        ctx->duty_q15 = (uint16_t)duty_min;
+    }
+    if (elapsed_ms(now_ms, ctx->precharge_pi_since_ms) < AURORA_PRECHARGE_PI_PERIOD_MS)
+    {
+        return ctx->duty_q15;
+    }
+
+    error_mv = (int64_t)sample->battery_voltage_mv -
+               (int64_t)AURORA_PRECHARGE_TARGET_GAP_MV -
+               (int64_t)sample->bus_voltage_mv;
+    ctx->power_integral += error_mv;
+    if (ctx->power_integral > (int64_t)AURORA_PRECHARGE_INTEGRAL_LIMIT)
+    {
+        ctx->power_integral = (int64_t)AURORA_PRECHARGE_INTEGRAL_LIMIT;
+    }
+    else if (ctx->power_integral < -(int64_t)AURORA_PRECHARGE_INTEGRAL_LIMIT)
+    {
+        ctx->power_integral = -(int64_t)AURORA_PRECHARGE_INTEGRAL_LIMIT;
+    }
+
+    step_q15 = (error_mv / (int64_t)AURORA_PRECHARGE_KP_DIV) +
+               (ctx->power_integral / (int64_t)AURORA_PRECHARGE_KI_DIV);
+    if (step_q15 > step_max)
+    {
+        step_q15 = step_max;
+    }
+    else if (step_q15 < -step_max)
+    {
+        step_q15 = -step_max;
+    }
+
+    next_q15 = (int64_t)ctx->duty_q15 + step_q15;
+    if (next_q15 > duty_max)
+    {
+        next_q15 = duty_max;
+        if (error_mv > 0)
+        {
+            ctx->power_integral -= error_mv;
+        }
+    }
+    else if (next_q15 < duty_min)
+    {
+        next_q15 = duty_min;
+        if (error_mv < 0)
+        {
+            ctx->power_integral -= error_mv;
+        }
+    }
+
+    ctx->precharge_pi_since_ms = now_ms;
+    ctx->duty_q15 = (uint16_t)next_q15;
+    return ctx->duty_q15;
+}
+
+/*---------------------------------------------------------------------------*
  * Name        : static uint32_t bus_absolute_limit_mv(
  *               aurora_operating_mode_t operating_mode,
  *               const aurora_measurement_t *sample,
@@ -268,7 +346,7 @@ static uint16_t power_to_duty(aurora_power_stage_ctx_t *ctx, const aurora_measur
  * Input       : operating_mode - Battery/Demo；sample - 最新BAT_U；charger - Battery目标；
  *               demo_target_voltage_mv - Demo目标
  * Output      : 当前模式可见的保守BST_U绝对上限，mV
- * Description : 软件目标加裕量后仍受现有26:1分压约84V保守上限限制；不能用软件掩盖硬件量程问题。
+ * Description : 软件目标加裕量后仍受30:1分压约99V量程和95V保守上限限制；不能用软件掩盖硬件量程问题。
  *---------------------------------------------------------------------------*/
 static uint32_t bus_absolute_limit_mv(aurora_operating_mode_t operating_mode,
                                       const aurora_measurement_t *sample,
@@ -303,6 +381,25 @@ static bool bus_measurement_invalid(const aurora_measurement_t *sample)
 {
     return ((sample->valid_mask & AURORA_MEAS_VALID_BUS_V) == 0U) ||
            ((sample->diagnostic_mask & AURORA_MEAS_DIAG_BUS_ADC_SATURATED) != 0U);
+}
+
+/*---------------------------------------------------------------------------*
+ * Name        : static bool pv_over_battery(const aurora_measurement_t *sample)
+ * Input       : sample - 最新PV/BAT测量快照
+ * Output      : true表示PV、BAT均有效且PV_U高于BAT_U超过直灌阈值
+ * Description : Relay未闭合前防止Boost续流二极管把偏高PV直接灌入电池；
+ *               Relay已闭合后同样作为锁存保护条件。
+ *---------------------------------------------------------------------------*/
+static bool pv_over_battery(const aurora_measurement_t *sample)
+{
+    const uint32_t required = AURORA_MEAS_VALID_PV_V | AURORA_MEAS_VALID_BAT_V;
+
+    if ((sample == NULL) || ((sample->valid_mask & required) != required))
+    {
+        return false;
+    }
+    return ((int64_t)sample->pv_voltage_mv - (int64_t)sample->battery_voltage_mv) >
+           (int64_t)AURORA_PV_OVER_BAT_DELTA_MV;
 }
 
 /*---------------------------------------------------------------------------*
@@ -536,6 +633,8 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
             ctx->precharge_pv_min_mv = sample->pv_voltage_mv;
             ctx->precharge_bus_start_mv = sample->bus_voltage_mv;
             ctx->precharge_bus_max_mv = sample->bus_voltage_mv;
+            ctx->duty_q15 = AURORA_DUTY_MIN_Q15;
+            ctx->power_integral = 0LL;
             enter_state(ctx, AURORA_POWER_PRECHARGE, now_ms);
         }
         break;
@@ -558,6 +657,11 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
             break;
         }
         if (bus_overvoltage(sample, absolute_bus_limit_mv, true))
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_OVERSHOOT, now_ms);
+            break;
+        }
+        if (pv_over_battery(sample))
         {
             register_start_failure(ctx, AURORA_START_FAIL_BUS_OVERSHOOT, now_ms);
             break;
@@ -596,10 +700,7 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
             ctx->delta_ok_since_ms = 0U;
         }
 
-        requested_power_mw = AURORA_PRECHARGE_POWER_MW;
-        ctx->duty_q15 =
-            power_to_duty(ctx, sample, requested_power_mw,
-                          (uint16_t)(AURORA_DUTY_MAX_Q15 / AURORA_PRECHARGE_DUTY_LIMIT_DIVISOR));
+        ctx->duty_q15 = precharge_duty_step(ctx, sample, now_ms);
         command.pwm_enable = true;
         break;
 
@@ -673,6 +774,11 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
             }
             break;
         }
+        if (pv_over_battery(sample))
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_OVERSHOOT, now_ms);
+            break;
+        }
         if (ctx->delta_ok_since_ms == 0U)
         {
             ctx->delta_ok_since_ms = now_ms;
@@ -681,7 +787,7 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         {
             if (relay_delta_mv <= AURORA_RELAY_VERIFY_DELTA_MV)
             {
-                /* 2.5V闭合后复核证明预充和Relay阶段均成功，本会话失败计数在此清零。 */
+                /* 3.5V闭合后复核证明预充和Relay阶段均成功，本会话失败计数在此清零。 */
                 ctx->precharge_failure_count = 0U;
                 ctx->relay_failure_count = 0U;
                 ctx->bat_stability_since_ms = now_ms;
@@ -702,6 +808,11 @@ aurora_power_stage_step_ex(aurora_power_stage_ctx_t *ctx, const aurora_measureme
         if (!relay_applied)
         {
             register_start_failure(ctx, AURORA_START_FAIL_RELAY_CLOSE_VERIFY, now_ms);
+            break;
+        }
+        if (pv_over_battery(sample))
+        {
+            register_start_failure(ctx, AURORA_START_FAIL_BUS_OVERSHOOT, now_ms);
             break;
         }
         if (sample->battery_voltage_mv < ctx->bat_stability_min_mv)
