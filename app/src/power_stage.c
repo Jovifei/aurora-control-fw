@@ -278,6 +278,7 @@ static uint16_t precharge_duty_step(aurora_power_stage_ctx_t *ctx,
     const int64_t duty_max = (int64_t)AURORA_PRECHARGE_DUTY_MAX_Q15;
     const int64_t step_max = (int64_t)AURORA_PRECHARGE_DUTY_STEP_Q15;
     int64_t error_mv;
+    int64_t step_permille;
     int64_t step_q15;
     int64_t next_q15;
 
@@ -303,8 +304,10 @@ static uint16_t precharge_duty_step(aurora_power_stage_ctx_t *ctx,
         ctx->power_integral = -(int64_t)AURORA_PRECHARGE_INTEGRAL_LIMIT;
     }
 
-    step_q15 = (error_mv / (int64_t)AURORA_PRECHARGE_KP_DIV) +
-               (ctx->power_integral / (int64_t)AURORA_PRECHARGE_KI_DIV);
+    step_permille = (error_mv / (int64_t)AURORA_PRECHARGE_KP_DIV) +
+                    (ctx->power_integral / (int64_t)AURORA_PRECHARGE_KI_DIV);
+    /* Application PI输出单位为千分比，目标Duty状态为Q15，这里只做一次单位换算。 */
+    step_q15 = (step_permille * (int64_t)AURORA_DUTY_Q15_ONE) / 1000LL;
     if (step_q15 > step_max)
     {
         step_q15 = step_max;

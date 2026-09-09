@@ -557,7 +557,7 @@ static void test_application_validated_adc_and_relay_windows(void)
         (void)aurora_power_stage_step_ex(&ctx, &sample, &mppt, &charger, true, true, false,
                                           false, AURORA_MODE_BATTERY, 48000U, 30000U, now_ms);
     }
-    CHECK(ctx.duty_q15 <= duty_max);
+    CHECK(ctx.duty_q15 == duty_max);
 
     aurora_power_stage_init(&ctx, 0U);
     ctx.state = AURORA_POWER_RELAY_HOLD_OFF;
